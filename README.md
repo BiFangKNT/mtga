@@ -106,7 +106,7 @@ python trae_proxy.py
 5.  **模型 ID**：填写你在 Python 脚本中 `CUSTOM_MODEL_ID` 定义的值 (例如: `my-custom-local-model`)。
 6.  **API 密钥**：
     *   如果你的目标 API 需要 API 密钥，并且 Trae 会将其通过 `Authorization: Bearer <key>` 传递，那么这里填写的密钥会被 Python 代理转发。
-    *   文章提到 Trae 配置 DeepSeek 时，API 密钥与 `remove_reasoning_content` 配置相关。我们的 Python 代理不处理这个逻辑，它只是简单地转发 Authorization 头部。你可以尝试填写你的目标 API 所需的密钥，或者一个任意的 `sk-xxxx` 格式的密钥。
+    *   Trae 配置 DeepSeek 时，API 密钥与 `remove_reasoning_content` 配置相关。我们的 Python 代理不处理这个逻辑，它只是简单地转发 Authorization 头部。你可以尝试填写你的目标 API 所需的密钥，或者一个任意的 `sk-xxxx` 格式的密钥。
 
 7.  点击“添加模型”。
 8.  回到 AI 聊天框，右下角选择你刚刚添加的自定义模型。
