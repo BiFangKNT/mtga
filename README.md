@@ -33,7 +33,7 @@ cd "mtga/ca"
 
 执行 `./genca.sh` 时，它会问你 "Do you want to generate ca cert and key? [yes/no]"，输入 `y` 并按回车。之后会要求填写一些信息：
 *   `Country Name (2 letter code) []`: 填 `CN` (或其他国家代码)
-*   其他字段（如 State, Locality, Organization, Common Name for CA）可以按需填写或留空，建议填`X`。Common Name 可以填 `MyLocalCA` 之类的。
+*   其他字段（如 State, Locality, Organization, Common Name for CA）可以按需填写或留空，建议填`X`。Common Name 可以填 `MyLocalCA` 之类的。邮箱可以留空。
 
 ```bash
 # 2. 生成 api.deepseek.com 的服务器证书 (api.deepseek.com.crt 和 api.deepseek.com.key)
