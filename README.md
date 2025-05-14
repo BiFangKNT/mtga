@@ -12,6 +12,13 @@
   <p>MTGA 即 Make T Great Again !</p>
  </details>
 
+### 第 0 步：环境准备
+
+- 系统为 windows 10 以上
+- 拥有管理员权限
+- 安装 python 环境，推荐 python 3.10 以上
+- 安装 git
+
 ### 第 1 步：生成自签名证书
 
 打开 Git Bash:
