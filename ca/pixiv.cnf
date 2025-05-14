@@ -1,0 +1,11 @@
+[ alt_names ]
+DNS.1 = *.pixiv.net
+DNS.2 = pixiv.net
+DNS.3 = *.pixiv.org
+DNS.4 = pixiv.org
+DNS.5 = *.pximg.net
+DNS.6 = pximg.net
+DNS.7 = *.ads-pixiv.net
+DNS.8 = ads-pixiv.net
+DNS.9 = *.secure.pixiv.net
+DNS.10 = secure.pixiv.net

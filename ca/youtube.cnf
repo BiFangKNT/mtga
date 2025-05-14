@@ -1,0 +1,13 @@
+[ alt_names ]
+DNS.1 = *.youtube.com
+DNS.2 = youtube.com
+DNS.3 = *.ytimg.com
+DNS.4 = ytimg.com
+DNS.5 = *.ggpht.com
+DNS.6 = ggpht.com
+DNS.7 = *.googlevideo.com
+DNS.8 = googlevideo.com
+DNS.11 = *.googleapis.com
+DNS.12 = googleapis.com
+DNS.13 = *.googlesyndication.com
+DNS.14 = googlesyndication.com

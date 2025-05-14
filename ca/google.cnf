@@ -1,0 +1,5 @@
+[ alt_names ]
+DNS.1 = *.google.com
+DNS.2 = google.com
+DNS.3 = *.google.com.hk
+DNS.4 = google.com.hk
