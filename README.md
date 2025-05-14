@@ -82,7 +82,7 @@ cd "mtga/ca"
     ```
 2.  **配置脚本**:
     *   打开 `trae_proxy.py` 文件。
-    *   **修改 `TARGET_API_BASE_URL`**: 将其替换为你实际要连接的那个“逆向站”的 OpenAI 格式 API 的基础 URL (例如: `"https://your-api.example.com/v1"`)。
+    *   **修改 `TARGET_API_BASE_URL`**: 将其替换为你实际要连接的那个站点的 OpenAI 格式 API 的基础 URL (例如: `"https://your-api.example.com/v1"`)。
     *   **确认证书路径**: 脚本默认会从 `mtga\ca` 读取 `api.deepseek.com.crt` 和 `api.deepseek.com.key`。如果你的证书不在此路径，请修改 `CERT_FILE` 和 `KEY_FILE` 的值，或者将这两个文件复制到脚本指定的 `CERT_DIR`。
 
 **运行代理服务器：**
