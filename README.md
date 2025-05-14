@@ -97,8 +97,6 @@ python trae_proxy.py
 
 ### 第 5 步：配置 Trae IDE
 
-参考文章中的 Trae 配置部分：
-
 1.  打开并登录 Trae IDE。
 2.  在 AI 对话框中，点击右下角的模型图标，选择末尾的“添加模型”。
 3.  **服务商**：选择 `DeepSeek`。
