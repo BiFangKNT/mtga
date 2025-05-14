@@ -114,12 +114,12 @@ python trae_proxy.py
 现在，当你通过 Trae 与这个自定义模型交互时，请求应该会经过你的本地 Python 代理，并被转发到你配置的 `TARGET_API_BASE_URL`。
 
 **故障排除提示：**
-*   **端口冲突**：如果 443 端口已被占用 (例如被 IIS、Skype 或其他服务占用)，Python 脚本会启动失败。你需要停止占用该端口的服务，或者修改 Python 脚本和 Nginx (如果使用) 监听其他端口 (但这会更复杂，因为 Trae 可能硬编码访问 `https://api.deepseek.com` 即 443 端口)。
+*   **端口冲突**：如果 443 端口已被占用 (例如被 IIS、Skype 或其他服务占用)，Python 脚本会启动失败。你需要停止占用该端口的服务，或者修改 Python 脚本和 Nginx (如果使用) 监听其他端口 (但这会更复杂，因为 Trae 硬编码访问 `https://api.deepseek.com` 的 443 端口)。
 *   **防火墙**：确保 Windows 防火墙允许 Python 监听 443 端口的入站连接 (尽管是本地连接 `127.0.0.1`，通常不需要特别配置防火墙，但值得检查)。
 *   **证书问题**：如果 Trae 报错 SSL/TLS 相关错误，请仔细检查 CA 证书是否已正确安装到“受信任的根证书颁发机构”，以及 Python 代理是否正确加载了 `api.deepseek.com.crt` 和 `.key`。
 *   **代理日志**：Python 脚本会打印一些日志，可以帮助你诊断问题。
 
-这个方案比文章中直接使用 vproxy + nginx 的方式更集成一些，将 TLS 终止和代理逻辑都放在了一个 Python 脚本中，可能更适合快速在 Windows 上进行原型验证。
+这个方案比直接使用 vproxy + nginx 的方式更集成一些，将 TLS 终止和代理逻辑都放在了一个 Python 脚本中，更适合快速在 Windows 上进行原型验证。
 
 ## 引用
 
