@@ -52,6 +52,8 @@ cd "mtga/ca"
 
 ### 第 3 步：修改 Hosts 文件
 
+**⚠️警告：执行这一步之后，你将无法访问原来的 deepseek 的api。网页使用不影响。**
+
 你需要用管理员权限修改 Hosts 文件，将 `api.deepseek.com` 指向你的本地机器。
 
 1.  Hosts 文件路径: `C:\Windows\System32\drivers\etc\hosts`
