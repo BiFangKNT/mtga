@@ -1,1 +1,7 @@
 .vscode
+ca/api.deepseek.com.crt
+ca/api.deepseek.com.csr
+ca/api.deepseek.com.key
+ca/ca.crt
+ca/ca.key
+ca/ca.srl
