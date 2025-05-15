@@ -1,4 +1,8 @@
 # MTGA
+<picture>
+    <img alt="MTGA" src="https://github.com/user-attachments/assets/a7d63651-2425-47b6-85b2-a97a6047db86">
+
+</picture>
 
 ## 简介
 
