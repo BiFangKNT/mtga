@@ -16,12 +16,9 @@ import sys
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 import ctypes
-import tempfile
 import shutil
-import webbrowser
-import importlib.util
 import io
 import contextlib
 from pathlib import Path

@@ -1,15 +1,16 @@
+# 核心依赖
 flask
-flask_cors
+requests
+
+# 工具库
 werkzeug
 jinja2
 itsdangerous
 click
-requests
 urllib3
 charset_normalizer
 idna
 certifi
-pyinstaller 
-pillow
-psutil
-PyQt5
+
+# 可选依赖（打包和高级功能）
+pyinstaller  # 仅在需要打包为可执行文件时使用
