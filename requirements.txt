@@ -1,0 +1,15 @@
+flask
+flask_cors
+werkzeug
+jinja2
+itsdangerous
+click
+requests
+urllib3
+charset_normalizer
+idna
+certifi
+pyinstaller 
+pillow
+psutil
+PyQt5

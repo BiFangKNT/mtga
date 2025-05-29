@@ -5,3 +5,14 @@ ca/api.deepseek.com.key
 ca/ca.crt
 ca/ca.key
 ca/ca.srl
+*.bak
+MTGA.Gui
+__pycache__
+build
+dist
+*copy*
+ca/api.deepseek.com.cnf
+ca/api.deepseek.com.subj
+temp_proxy.py
+hosts.backup
+mtga_config.json
