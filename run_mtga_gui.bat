@@ -14,16 +14,50 @@ set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 :: 设置Python虚拟环境路径
 set "VENV_DIR=%SCRIPT_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
 :: 设置OpenSSL路径
 set "OPENSSL_DIR=%SCRIPT_DIR%\openssl"
 
 :: 检查虚拟环境是否存在
 if not exist "%VENV_PYTHON%" (
-    echo 错误: Python虚拟环境不存在: %VENV_PYTHON%
-    echo 请确保已正确安装虚拟环境。
-    pause
-    exit /b 1
+    echo 虚拟环境不存在，开始创建...
+    
+    :: 检查uv是否已安装
+    where uv >nul 2>nul
+    if %ERRORLEVEL% neq 0 (
+        echo 正在安装uv...
+        pip install uv
+        if %ERRORLEVEL% neq 0 (
+            echo 安装uv失败，请手动安装：pip install uv
+            pause
+            exit /b 1
+        )
+    )
+    
+    :: 创建虚拟环境
+    echo 正在创建虚拟环境...
+    uv venv
+    if %ERRORLEVEL% neq 0 (
+        echo 创建虚拟环境失败
+        pause
+        exit /b 1
+    )
+    
+    :: 激活虚拟环境
+    echo 正在激活虚拟环境...
+    call "%VENV_ACTIVATE%"
+    
+    :: 安装依赖
+    echo 正在安装依赖...
+    uv pip install -r "%SCRIPT_DIR%\requirements.txt"
+    if %ERRORLEVEL% neq 0 (
+        echo 安装依赖失败
+        pause
+        exit /b 1
+    )
+    
+    echo 虚拟环境和依赖安装完成！
 )
 
 :: 检查OpenSSL是否存在
