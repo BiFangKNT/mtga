@@ -11,6 +11,51 @@ color 0A
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
+:: 检查是否是重启后的进程
+if "%~1"=="/RESTARTED" goto PYTHON_INSTALLED
+
+:: 检查Python是否已安装
+where python >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo Python未安装，开始自动安装Python 3.13...
+    
+    :: 检查安装包是否存在
+    set "PYTHON_INSTALLER=%SCRIPT_DIR%\python-3.13.3-amd64.exe"
+    if not exist "!PYTHON_INSTALLER!" (
+        echo 错误: Python安装包不存在: !PYTHON_INSTALLER!
+        echo 请下载Python 3.13安装包到程序目录。
+        pause
+        exit /b 1
+    )
+    
+    :: 静默安装Python
+    echo 正在静默安装Python 3.13，请稍候...
+    "!PYTHON_INSTALLER!" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+    if %ERRORLEVEL% neq 0 (
+        echo Python安装失败，错误代码: %ERRORLEVEL%
+        pause
+        exit /b 1
+    )
+    
+    echo Python 3.13已安装成功，正在重启批处理文件以加载新的环境变量...
+    
+    :: 创建一个临时重启脚本
+    set "RESTART_SCRIPT=%TEMP%\restart_mtga.bat"
+    echo @echo off > "!RESTART_SCRIPT!"
+    echo timeout /t 1 >> "!RESTART_SCRIPT!"
+    echo start "" "%~f0" /RESTARTED >> "!RESTART_SCRIPT!"
+    echo exit >> "!RESTART_SCRIPT!"
+    
+    :: 启动重启脚本并退出当前脚本
+    start "" "!RESTART_SCRIPT!"
+    exit /b 0
+)
+
+:PYTHON_INSTALLED
+:: 检查Python版本
+for /f "tokens=2" %%a in ('python -c "import sys; print(sys.version.split()[0])"') do set "PYTHON_VERSION=%%a"
+echo 检测到Python版本: !PYTHON_VERSION!
+
 :: 设置Python虚拟环境路径
 set "VENV_DIR=%SCRIPT_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
