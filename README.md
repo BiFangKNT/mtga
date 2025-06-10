@@ -155,6 +155,14 @@ python trae_proxy.py
 
 ---
 
+## 😎 保持更新
+
+点击仓库右上角 Star 和 Watch 按钮，获取最新动态。
+
+![star gif](https://github.com/user-attachments/assets/6aa3ae41-1a78-40e9-b2b2-6392cbb75b0b)
+
+---
+
 ## 引用
 
 `ca`目录引用自`wkgcass/vproxy`仓库，感谢大佬！
