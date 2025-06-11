@@ -27,6 +27,7 @@
   * [第 3 步：修改 Hosts 文件](#第-3-步修改-hosts-文件)
   * [第 4 步：运行本地代理服务器 (Python)](#第-4-步运行本地代理服务器-python)
   * [第 5 步：配置 Trae IDE](#第-5-步配置-trae-ide)
+ * [😎 保持更新](#-保持更新)
 
 ---
 
@@ -152,6 +153,14 @@ python trae_proxy.py
 *   **代理日志**：Python 脚本会打印一些日志，可以帮助你诊断问题。
 
 这个方案比直接使用 vproxy + nginx 的方式更集成一些，将 TLS 终止和代理逻辑都放在了一个 Python 脚本中，更适合快速在 Windows 上进行原型验证。
+
+---
+
+## 😎 保持更新
+
+点击仓库右上角 Star 和 Watch 按钮，获取最新动态。
+
+![star gif](https://github.com/user-attachments/assets/6aa3ae41-1a78-40e9-b2b2-6392cbb75b0b)
 
 ---
 
