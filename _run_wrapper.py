@@ -4,7 +4,7 @@ import os
 import sys
 
 def get_script_dir():
-    """获取包含可执行文件或脚本的目录。"""
+    """获取包含可执行件或脚本的目录。"""
     if getattr(sys, 'frozen', False):
         # 如果应用程序是作为打包/冻结的可执行文件运行
         return os.path.dirname(sys.executable)
