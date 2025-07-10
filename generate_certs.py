@@ -128,27 +128,27 @@ keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 subjectAltName = @alt_names
 """
 
-    # 创建 api.deepseek.com.cnf
-    api_deepseek_cnf = """
+    # 创建 api.openai.com.cnf
+    api_openai_cnf = """
 [ v3_req ]
 basicConstraints = CA:FALSE
 keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = api.deepseek.com
+DNS.1 = api.openai.com
 """
 
-    # 创建 api.deepseek.com.subj
-    api_deepseek_subj = "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=api.deepseek.com"
+    # 创建 api.openai.com.subj
+    api_openai_subj = "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=api.openai.com"
 
     # 定义要创建的文件及其内容
     files_to_create = {
         os.path.join(ca_dir, "openssl.cnf"): openssl_cnf,
         os.path.join(ca_dir, "v3_ca.cnf"): v3_ca_cnf,
         os.path.join(ca_dir, "v3_req.cnf"): v3_req_cnf,
-        os.path.join(ca_dir, "api.deepseek.com.cnf"): api_deepseek_cnf,
-        os.path.join(ca_dir, "api.deepseek.com.subj"): api_deepseek_subj
+        os.path.join(ca_dir, "api.openai.com.cnf"): api_openai_cnf,
+        os.path.join(ca_dir, "api.openai.com.subj"): api_openai_subj
     }
 
     # 创建文件（如果不存在）
@@ -228,7 +228,7 @@ def generate_ca_cert():
     
     return ca_key_path, ca_crt_path
 
-def generate_server_cert(ca_key_path, ca_crt_path, domain="api.deepseek.com"):
+def generate_server_cert(ca_key_path, ca_crt_path, domain="api.openai.com"):
     """生成服务器证书"""
     info(f"开始为 {domain} 生成服务器证书...")
     
@@ -328,7 +328,7 @@ def main():
     """主函数"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='一键生成CA证书和服务器证书')
-    parser.add_argument('--domain', default='api.deepseek.com', help='服务器证书的域名 (默认: api.deepseek.com)')
+    parser.add_argument('--domain', default='api.openai.com', help='服务器证书的域名 (默认: api.openai.com)')
     args = parser.parse_args()
     
     print("\n" + "="*60)
@@ -358,7 +358,7 @@ def main():
     print(f"服务器私钥: {server_key_path} (请妥善保管，勿泄露)")
     print("\n后续步骤:")
     print("1. 将CA证书 (ca.crt) 导入到Windows的受信任的根证书颁发机构存储中")
-    print("2. 修改hosts文件，将api.deepseek.com指向127.0.0.1")
+    print("2. 修改hosts文件，将api.openai.com指向127.0.0.1")
     print("3. 配置并运行trae_proxy.py")
     print("="*60 + "\n")
 

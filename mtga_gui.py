@@ -39,7 +39,7 @@ VENV_PYTHON = os.path.join(VENV_DIR, "Scripts", "python.exe")
 
 # 其他脚本路径
 
-DOMAIN = "api.deepseek.com"
+DOMAIN = "api.openai.com"
 # DOMAIN = "generativelanguage.googleapis.com"
 
 GENERATE_CERTS_PY = os.path.join(SCRIPT_DIR, "generate_certs.py")

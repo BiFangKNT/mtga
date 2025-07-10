@@ -36,8 +36,8 @@ SCRIPT_PARENT_DIR = os.path.dirname(SCRIPT_FILE_PATH)
 # 定义 ca 目录的路径，使其相对于脚本文件位置 (假设 ca 目录与脚本在同一目录下)
 CERT_DIR = os.path.join(SCRIPT_PARENT_DIR, "ca")
 
-CERT_FILE = os.path.join(CERT_DIR, 'api.deepseek.com.crt')
-KEY_FILE = os.path.join(CERT_DIR, 'api.deepseek.com.key')
+CERT_FILE = os.path.join(CERT_DIR, 'api.openai.com.crt')
+KEY_FILE = os.path.join(CERT_DIR, 'api.openai.com.key')
 
 STREAM_MODE = None # None为不修改，'true'为开启流式，'false'为关闭流式
 # --- 用户配置 END ---
@@ -68,7 +68,7 @@ def get_models():
             {
                 "id": CUSTOM_MODEL_ID, # 使用 CUSTOM_MODEL_ID 变量
                 "object": "model",
-                "owned_by": "deepseek", # 模型所有者，确保这个字段存在
+                "owned_by": "openai", # 模型所有者，确保这个字段存在
             }
         ]
     }
@@ -324,7 +324,7 @@ if __name__ == '__main__':
     ssl_context.load_cert_chain(CERT_FILE, KEY_FILE)
 
     print(f"启动代理服务器，监听 https://0.0.0.0:443")
-    print(f"确保你的 hosts 文件已将 api.deepseek.com 指向 127.0.0.1")
+    print(f"确保你的 hosts 文件已将 api.openai.com 指向 127.0.0.1")
     print(f"目标 LLM API 地址: {TARGET_API_BASE_URL}")
     print(f"为 Trae 配置的模型 ID: {CUSTOM_MODEL_ID}")
     print(f"实际使用的目标模型 ID: {TARGET_MODEL_ID}")
