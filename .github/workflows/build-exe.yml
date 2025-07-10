@@ -30,9 +30,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: 查看打包配置（调试用）
+      - name: 确认 spec 文件存在（调试用）
         run: |
-          type run_mtga_gui_wrapped.spec  # 输出 spec 文件内容，确认输出目录
+          dir run_mtga_gui_wrapped.spec
         shell: cmd
 
       - name: 构建可执行程序
@@ -42,7 +42,7 @@ jobs:
 
       - name: 查看打包结果（调试用）
         run: |
-          dir /s /b dist\*.exe  # 列出 dist 目录下所有 exe 文件
+          dir /s /b dist\*.exe
         shell: cmd
 
       - name: 上传构建产物
@@ -50,6 +50,7 @@ jobs:
         with:
           name: mtga-exe
           path: |
-            dist/**/*.exe  # 匹配 dist 目录下所有 exe 文件（包括子目录）
-            dist/**/*.dll  # 打包可能需要的依赖库
-            dist/**/*.pyd  # Python 扩展模块
+            dist/**/*.exe
+            dist/**/*.dll
+            dist/**/*.pyd
+            dist/**/*.ico
