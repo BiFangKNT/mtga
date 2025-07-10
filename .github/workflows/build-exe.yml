@@ -2,9 +2,9 @@ name: 构建 MTGA 可执行程序
 
 on:
   push:
-    branches: [ gui ]  # 监听 gui 分支的推送
-    paths:  # 仅当以下路径文件变动时触发
-      - '**.py'
+    branches: [ gui ]
+    paths:
+      - '**.yml'
       - 'requirements.txt'
       - 'pyproject.toml'
       - 'run_mtga_gui_wrapped.spec'
@@ -13,7 +13,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest  # 使用 Windows 环境构建
+    runs-on: windows-latest
 
     steps:
       - name: 拉取代码仓库
@@ -22,23 +22,34 @@ jobs:
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'  # 匹配项目推荐的 Python 版本
+          python-version: '3.10'
 
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller  # 用于打包 .exe
+          pip install pyinstaller
+
+      - name: 查看打包配置（调试用）
+        run: |
+          type run_mtga_gui_wrapped.spec  # 输出 spec 文件内容，确认输出目录
+        shell: cmd
 
       - name: 构建可执行程序
         run: |
-          pyinstaller run_mtga_gui_wrapped.spec  # 使用 spec 文件打包
-        working-directory: .  # 项目根目录
+          pyinstaller run_mtga_gui_wrapped.spec
+        working-directory: .
+
+      - name: 查看打包结果（调试用）
+        run: |
+          dir /s /b dist\*.exe  # 列出 dist 目录下所有 exe 文件
+        shell: cmd
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: mtga-exe
           path: |
-            dist/run_mtga_gui_wrapped.exe  # 打包后的可执行文件
-            dist/  # 包含依赖的输出目录
+            dist/**/*.exe  # 匹配 dist 目录下所有 exe 文件（包括子目录）
+            dist/**/*.dll  # 打包可能需要的依赖库
+            dist/**/*.pyd  # Python 扩展模块
