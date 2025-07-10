@@ -54,7 +54,7 @@ STREAM_MODE = None # None为不修改，'true'为开启流式，'false'为关闭
 # 设置日志记录
 logging.basicConfig(level=logging.INFO)
 
-@app.route('/models', methods=['GET'])
+@app.route('/v1/models', methods=['GET'])
 def get_models():
     """
     处理到 /models 的 GET 请求，返回 Trae IDE 期望的模型列表格式。
@@ -75,7 +75,7 @@ def get_models():
     app.logger.info(f"Responding to /models with: {model_data}")
     return jsonify(model_data)
 
-@app.route('/chat/completions', methods=['POST'])
+@app.route('/v1/chat/completions', methods=['POST'])
 def chat_completions():
     """
     处理到 /chat/completions 的 POST 请求。
