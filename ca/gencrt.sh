@@ -13,13 +13,13 @@ error_exit() {
 
 # --- 脚本主要逻辑开始 ---
 
-# 从命令行第一个参数获取证书名称前缀 (例如 api.deepseek.com)
+# 从命令行第一个参数获取证书名称前缀 (例如 api.openai.com)
 NAME="$1"
 TEMP_CONF_FILE="" # 初始化临时配置文件变量，以防trap在未设置时出错
 
 # 检查 NAME 参数是否已提供
 if [ -z "$NAME" ]; then
-    error_exit "必须提供 NAME 参数 (例如 api.deepseek.com)。用法: $0 <domain_name_prefix>"
+    error_exit "必须提供 NAME 参数 (例如 api.openai.com)。用法: $0 <domain_name_prefix>"
 fi
 
 # 定义所需配置文件的名称
