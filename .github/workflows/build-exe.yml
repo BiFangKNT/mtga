@@ -30,17 +30,21 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: 确认 spec 文件存在（调试用）
+      - name: 修复程序输入问题（关键步骤）
         run: |
-          dir run_mtga_gui_wrapped.spec
-        shell: cmd
+          # 替换 _run_wrapper.py 中的 input() 为非交互式方式（示例逻辑）
+          # 若程序需要用户输入，可改为从配置文件或命令行参数读取
+          (Get-Content "_run_wrapper.py") -replace 'input\(\)', '"auto-confirm"' | Set-Content "_run_wrapper.py"
+        shell: pwsh
 
-      - name: 构建可执行程序
+      - name: 构建可执行程序（启用控制台以便调试）
         run: |
+          # 修改 spec 文件，临时启用控制台输出（解决 stdin 丢失问题）
+          (Get-Content "run_mtga_gui_wrapped.spec") -replace 'console=False', 'console=True' | Set-Content "run_mtga_gui_wrapped.spec"
           pyinstaller run_mtga_gui_wrapped.spec
-        working-directory: .
+        shell: pwsh
 
-      - name: 查看打包结果（调试用）
+      - name: 查看打包结果
         run: |
           dir /s /b dist\*.exe
         shell: cmd
