@@ -1,60 +1,54 @@
-name: 构建 MTGA 可执行程序
+name: 构建 MTGA GUI 版本
 
 on:
   push:
     branches: [ gui ]
     paths:
-      - '**.yml'
-      - 'requirements.txt'
-      - 'pyproject.toml'
-      - 'run_mtga_gui_wrapped.spec'
+      - 'mtga_gui.py'          # GUI 主程序
+      - 'requirements.txt'    # 依赖配置
+      - 'run_mtga_gui.spec'   # GUI 打包配置
+      - '**.yml'               # 其他 Python 模块
   pull_request:
     branches: [ gui ]
 
 jobs:
-  build:
-    runs-on: windows-latest
+  build-gui:
+    runs-on: windows-latest  # GUI 需在 Windows 环境运行
 
     steps:
-      - name: 拉取代码仓库
+      - name: 拉取代码
         uses: actions/checkout@v4
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.10'  # 项目依赖 Python 3.10
 
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller  # 用于打包 GUI 程序
 
-      - name: 修复程序输入问题（关键步骤）
+      - name: 确认 GUI 打包配置存在
         run: |
-          # 替换 _run_wrapper.py 中的 input() 为非交互式方式（示例逻辑）
-          # 若程序需要用户输入，可改为从配置文件或命令行参数读取
-          (Get-Content "_run_wrapper.py") -replace 'input\(\)', '"auto-confirm"' | Set-Content "_run_wrapper.py"
-        shell: pwsh
-
-      - name: 构建可执行程序（启用控制台以便调试）
-        run: |
-          # 修改 spec 文件，临时启用控制台输出（解决 stdin 丢失问题）
-          (Get-Content "run_mtga_gui_wrapped.spec") -replace 'console=False', 'console=True' | Set-Content "run_mtga_gui_wrapped.spec"
-          pyinstaller run_mtga_gui_wrapped.spec
-        shell: pwsh
-
-      - name: 查看打包结果
-        run: |
-          dir /s /b dist\*.exe
+          dir run_mtga_gui.spec  # 检查 spec 文件是否存在
         shell: cmd
 
-      - name: 上传构建产物
+      - name: 构建 GUI 可执行程序
+        run: |
+          pyinstaller run_mtga_gui.spec  # 使用 GUI 专用 spec 文件
+        working-directory: .
+
+      - name: 验证构建结果
+        run: |
+          dir /s /b dist\mtga_gui.exe  # 确认 GUI 程序生成
+        shell: cmd
+
+      - name: 上传 GUI 产物
         uses: actions/upload-artifact@v4
         with:
-          name: mtga-exe
+          name: mtga-gui-exe
           path: |
-            dist/**/*.exe
-            dist/**/*.dll
-            dist/**/*.pyd
-            dist/**/*.ico
+            dist/mtga_gui.exe       # GUI 主程序
+            dist/*                  # 包含依赖的所有文件（如图标、资源）
