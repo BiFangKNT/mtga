@@ -135,6 +135,31 @@ def _ensure_windows_hosts_writable(hosts_file, log_func=print):
         log_func(f"⚠️ 调整 hosts 文件权限时出错: {e}")
 
 
+def _log_windows_hosts_context(hosts_file, log_func):
+    """记录写入前的上下文信息，便于诊断权限/属性问题。"""
+    is_admin = _is_windows_admin()
+    writable = os.access(hosts_file, os.W_OK)
+    attrs = None
+    attr_names = []
+    try:
+        attrs = os.stat(hosts_file).st_file_attributes
+        flag_map = {
+            stat.FILE_ATTRIBUTE_READONLY: "READONLY",
+            stat.FILE_ATTRIBUTE_HIDDEN: "HIDDEN",
+            stat.FILE_ATTRIBUTE_SYSTEM: "SYSTEM",
+            stat.FILE_ATTRIBUTE_ARCHIVE: "ARCHIVE",
+        }
+        for flag, name in flag_map.items():
+            if attrs & flag:
+                attr_names.append(name)
+    except OSError as e:
+        log_func(f"⚠️ 读取 hosts 文件属性失败: {e}")
+    log_func(
+        f"ℹ️ 写入前检查: is_admin={is_admin}, os.access(W_OK)={writable}, "
+        f"attrs={attrs}, flags={','.join(attr_names) if attr_names else 'none'}"
+    )
+
+
 def get_hosts_file_path():
     """获取 hosts 文件路径"""
     if os.name == "nt":  # Windows
@@ -251,6 +276,8 @@ def write_hosts_file_with_permission(hosts_file, content, encoding, log_func=pri
     else:
         # Windows 和其他系统：直接写入
         try:
+            if os.name == "nt":
+                _log_windows_hosts_context(hosts_file, log_func)
             _ensure_windows_hosts_writable(hosts_file, log_func=log_func)
             with open(hosts_file, "w", encoding=encoding) as f:
                 f.write(content)
