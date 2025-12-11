@@ -3,8 +3,10 @@ hosts 文件管理模块
 处理 hosts 文件的备份、修改、还原等操作
 """
 
+import ctypes
 import os
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -107,6 +109,30 @@ def _remove_hosts_block_from_content(content, domain, ip_list):
     content, legacy_removed = _remove_legacy_hosts_entries(content, domain)
     removed_entries += legacy_removed
     return content, removed_entries
+
+
+def _is_windows_admin():
+    """检测当前进程是否以管理员身份运行（仅 Windows 使用）。"""
+    if os.name != "nt":
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _ensure_windows_hosts_writable(hosts_file, log_func=print):
+    """
+    尝试清理 Windows hosts 文件的只读属性，避免因文件被锁导致写入失败。
+    """
+    if os.name != "nt":
+        return
+    try:
+        os.chmod(hosts_file, stat.S_IWRITE)
+    except PermissionError as e:
+        log_func(f"⚠️ 无法移除 hosts 文件只读属性: {e}")
+    except OSError as e:
+        log_func(f"⚠️ 调整 hosts 文件权限时出错: {e}")
 
 
 def get_hosts_file_path():
@@ -225,11 +251,24 @@ def write_hosts_file_with_permission(hosts_file, content, encoding, log_func=pri
     else:
         # Windows 和其他系统：直接写入
         try:
+            _ensure_windows_hosts_writable(hosts_file, log_func=log_func)
             with open(hosts_file, "w", encoding=encoding) as f:
                 f.write(content)
             return True
-        except PermissionError:
-            log_func("❌ 权限不足，请以管理员身份运行")
+        except PermissionError as e:
+            if os.name == "nt":
+                is_admin = _is_windows_admin()
+                winerror = getattr(e, "winerror", None)
+                log_func(
+                    f"❌ 权限不足，请以管理员身份运行 "
+                    f"(is_admin={is_admin}, winerror={winerror})"
+                )
+                log_func("⚠️ 如果已是管理员，可能是安全软件或只读属性锁定了 hosts，请解除后重试")
+            else:
+                log_func("❌ 权限不足，请以管理员身份运行或使用 sudo")
+            return False
+        except OSError as e:
+            log_func(f"❌ 写入 hosts 文件失败: {e}")
             return False
 
 
