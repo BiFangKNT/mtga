@@ -30,7 +30,9 @@ except ImportError:
     # 作为脚本运行时，没有包上下文，补充模块搜索路径
     import sys
 
-    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    project_root = Path(__file__).resolve().parents[2]
+    if str(project_root) not in sys.path:
+        sys.path.append(str(project_root))
     from modules.runtime.resource_manager import is_packaged
 
 JsonDict = dict[str, Any]
