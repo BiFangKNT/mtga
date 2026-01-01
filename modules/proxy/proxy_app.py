@@ -407,11 +407,11 @@ class ProxyApp:
 
             response_json = response_from_target.json()
             
-            # 替换响应中的模型名为映射ID
-            original_model = response_json.get("model", "N/A")
+            # 替换响应中的模型名为映射ID，确保客户端接收到它请求的模型名
+            original_response_model = response_json.get("model", "N/A")
             if "model" in response_json:
                 response_json["model"] = self.custom_model_id
-                log(f"  ✓ 响应模型名替换: {original_model} → {self.custom_model_id}")
+                log(f"  ✓ 响应模型名替换: {original_response_model} → {self.custom_model_id}")
             log("-"*60)
 
             if client_requested_stream and self.stream_mode == "false":

@@ -42,8 +42,8 @@ def ensure_global_config_ready(
     mtga_auth_key = (mtga_auth_key or "").strip()
 
     missing_fields: list[str] = []
-    if not mtga_auth_key:
-        missing_fields.append("MTGA鉴权Key")
+    # if not mtga_auth_key:
+    #     missing_fields.append("MTGA鉴权Key")
 
     return GlobalConfigCheckResult(ok=not missing_fields, missing_fields=missing_fields)
 

@@ -36,7 +36,7 @@ def load_global_config(*, resource_manager: ResourceManager, log_func=print) -> 
 
 
 def _resolve_custom_model_id(*, global_config: dict, raw_config: dict) -> str:
-    # 优先使用配置组的映射模型ID，全局配置的mapped_model_id已废弃
+    # 优先使用配置组的映射模型ID
     group_mapped_model_id = (raw_config.get("mapped_model_id") or "").strip()
     if group_mapped_model_id:
         return group_mapped_model_id
@@ -101,7 +101,7 @@ def build_proxy_config(
         debug_mode=bool(raw_config.get("debug_mode", False)),
         disable_ssl_strict_mode=bool(raw_config.get("disable_ssl_strict_mode", False)),
         api_key=(raw_config.get("api_key") or ""),
-        mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
+        mtga_auth_key=str(global_config.get("mtga_auth_key") or "").strip(),
     )
 
 

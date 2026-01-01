@@ -145,8 +145,7 @@ class ProxyTransport:
             "id": payload.get("id") or self._new_request_id(),
             "object": "chat.completion.chunk",
             "created": int(payload.get("created") or time.time()),
-            # 优先使用传入的模型名称（Mapped ID），以实现对上游模型名的遮蔽
-            "model": model_name or payload.get("model"),
+            "model": payload.get("model") or model_name,
             "choices": [
                 {
                     "index": choice0.get("index", 0),

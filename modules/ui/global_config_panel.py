@@ -28,9 +28,10 @@ def build_global_config_panel(deps: GlobalConfigPanelDeps) -> ttk.LabelFrame:
     mtga_auth_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 10))  # 右侧留出间距
     deps.tooltip(
         mtga_auth_entry,
-        "必填：MTGA鉴权Key\n"
-        "对应 Trae 端填写的 API 密钥，自定义，\n与实际 API Key 是互相独立的概念。\n"
-        "作为 MTGA 代理服务的全局密钥。\n"
+        "选填：MTGA鉴权Key\n"
+        "对应 Trae / IDE 端填写的 API 密钥。\n"
+        "如果不填写，则不对请求进行鉴权（允许任意 Key）。\n"
+        "如果填写，则只允许携带该 Key 的请求通过。\n"
         "示例：111",
         wraplength=360,
     )
@@ -42,9 +43,9 @@ def build_global_config_panel(deps: GlobalConfigPanelDeps) -> ttk.LabelFrame:
     def save_global_config_values() -> bool:
         mtga_auth_key = mtga_auth_var.get().strip()
 
-        if not mtga_auth_key:
-            deps.log("错误: MTGA鉴权Key是必填项")
-            return False
+        # if not mtga_auth_key:
+        #     deps.log("错误: MTGA鉴权Key是必填项")
+        #     return False
 
         config_groups, current_config_index = deps.config_store.load_config_groups()
 
