@@ -20,20 +20,6 @@ def build_global_config_panel(deps: GlobalConfigPanelDeps) -> ttk.LabelFrame:
     global_config_frame = ttk.LabelFrame(deps.parent, text="全局配置")
     global_config_frame.pack(fill=tk.X, padx=5, pady=5)
 
-    mapped_model_frame = ttk.Frame(global_config_frame)
-    mapped_model_frame.pack(fill=tk.X, padx=5, pady=2)
-    ttk.Label(mapped_model_frame, text="映射模型ID", width=12).pack(side=tk.LEFT)
-    mapped_model_var = tk.StringVar()
-    mapped_model_entry = ttk.Entry(mapped_model_frame, textvariable=mapped_model_var, width=25)
-    mapped_model_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-    deps.tooltip(
-        mapped_model_entry,
-        "必填：映射模型ID\n"
-        "对应 Trae 端填写的模型名，自定义，\n与实际模型ID是互相独立的概念。\n"
-        "示例：gpt-5",
-        wraplength=360,
-    )
-
     mtga_auth_frame = ttk.Frame(global_config_frame)
     mtga_auth_frame.pack(fill=tk.X, padx=5, pady=2)
     ttk.Label(mtga_auth_frame, text="MTGA鉴权Key", width=12).pack(side=tk.LEFT)
@@ -50,16 +36,14 @@ def build_global_config_panel(deps: GlobalConfigPanelDeps) -> ttk.LabelFrame:
     )
 
     def load_global_config_values() -> None:
-        mapped_model_id, mtga_auth_key = deps.config_store.load_global_config()
-        mapped_model_var.set(mapped_model_id)
+        _, mtga_auth_key = deps.config_store.load_global_config()
         mtga_auth_var.set(mtga_auth_key)
 
     def save_global_config_values() -> bool:
-        mapped_model_id = mapped_model_var.get().strip()
         mtga_auth_key = mtga_auth_var.get().strip()
 
-        if not mapped_model_id or not mtga_auth_key:
-            deps.log("错误: 映射模型ID和MTGA鉴权Key都是必填项")
+        if not mtga_auth_key:
+            deps.log("错误: MTGA鉴权Key是必填项")
             return False
 
         config_groups, current_config_index = deps.config_store.load_config_groups()
@@ -67,7 +51,7 @@ def build_global_config_panel(deps: GlobalConfigPanelDeps) -> ttk.LabelFrame:
         if deps.config_store.save_config_groups(
             config_groups,
             current_config_index,
-            mapped_model_id,
+            "",  # 映射模型ID不再在全局配置中
             mtga_auth_key,
         ):
             deps.log("全局配置已保存")

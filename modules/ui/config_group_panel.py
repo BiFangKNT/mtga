@@ -83,7 +83,7 @@ class ConfigGroupPanel:
         tree_frame = ttk.Frame(config_list_frame)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        columns = ("序号", "API URL", "实际模型ID", "API Key")
+        columns = ("序号", "API URL", "实际模型ID", "映射模型ID", "API Key")
         self._config_tree = ttk.Treeview(
             tree_frame, columns=columns, show="headings", height=6
         )
@@ -104,12 +104,14 @@ class ConfigGroupPanel:
         self._config_tree.heading("序号", text="序号")
         self._config_tree.heading("API URL", text="API URL")
         self._config_tree.heading("实际模型ID", text="实际模型ID")
+        self._config_tree.heading("映射模型ID", text="映射模型ID")
         self._config_tree.heading("API Key", text="API Key")
 
         self._config_tree.column("序号", width=30, anchor=tk.CENTER)
-        self._config_tree.column("API URL", width=200)
+        self._config_tree.column("API URL", width=150)
         self._config_tree.column("实际模型ID", width=120)
-        self._config_tree.column("API Key", width=120)
+        self._config_tree.column("映射模型ID", width=120)
+        self._config_tree.column("API Key", width=100)
 
         self._config_tree.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
@@ -164,24 +166,34 @@ class ConfigGroupPanel:
             self._config_tree.delete(item)
 
         for i, group in enumerate(self._config_groups):
+            # API Key 显示（部分隐藏）
             if "target_model_id" in group:
-                fourth_col = group.get("target_model_id", "") or "(无)"
+                fifth_col = group.get("target_model_id", "") or "(无)"
             else:
                 api_key = group.get("api_key", "")
                 if api_key:
                     if len(api_key) > self._deps.api_key_visible_chars:
                         mask = "*" * (len(api_key) - self._deps.api_key_visible_chars)
                         suffix = api_key[-self._deps.api_key_visible_chars :]
-                        fourth_col = f"{mask}{suffix}"
+                        fifth_col = f"{mask}{suffix}"
                     else:
-                        fourth_col = "***"
+                        fifth_col = "***"
                 else:
-                    fourth_col = "(无)"
+                    fifth_col = "(无)"
+            
+            # 映射模型ID（默认与实际ID相同）
+            mapped_model_id = group.get("mapped_model_id", "") or group.get("model_id", "") or "(无)"
 
             self._config_tree.insert(
                 "",
                 "end",
-                values=(i + 1, group.get("api_url", ""), group.get("model_id", ""), fourth_col),
+                values=(
+                    i + 1,
+                    group.get("api_url", ""),
+                    group.get("model_id", ""),
+                    mapped_model_id,
+                    fifth_col
+                ),
             )
 
         if self._config_groups and 0 <= self._current_config_index < len(self._config_groups):
@@ -217,6 +229,7 @@ class ConfigGroupPanel:
             name = name_var.get().strip()
             api_url = api_url_var.get().strip()
             model_id = model_id_var.get().strip()
+            mapped_model_id = mapped_model_id_var.get().strip()
             api_key = api_key_var.get().strip()
             middle_route_value = ""
             if middle_route_enabled_var.get() and not placeholder_active:
@@ -230,6 +243,7 @@ class ConfigGroupPanel:
                 "name": name,
                 "api_url": api_url,
                 "model_id": model_id,
+                "mapped_model_id": mapped_model_id if mapped_model_id else model_id,  # 默认与实际ID相同
                 "api_key": api_key,
             }
             if middle_route_value:
@@ -252,6 +266,7 @@ class ConfigGroupPanel:
         name_value = initial_group.get("name", "") if initial_group else ""
         api_url_value = initial_group.get("api_url", "") if initial_group else ""
         model_id_value = initial_group.get("model_id", "") if initial_group else ""
+        mapped_model_id_value = initial_group.get("mapped_model_id", model_id_value) if initial_group else ""  # 默认值为实际模型ID
         api_key_value = initial_group.get("api_key", "") if initial_group else ""
 
         ttk.Label(main_frame, text="配置组名称 (可选):").grid(row=0, column=0, sticky=tk.W, pady=5)
@@ -348,6 +363,17 @@ class ConfigGroupPanel:
                 return 'break'  # 阻止默认行为
             # 如果列表已有数据，允许正常展开
         
+        # 实际模型ID变化时，自动同步到映射ID（如果映射ID为空或与旧实际ID相同）
+        def on_model_id_change(*args):
+            current_model_id = model_id_var.get().strip()
+            current_mapped_id = mapped_model_id_var.get().strip()
+            
+            # 如果映射ID为空，或者映射ID等于之前的实际ID，则自动同步
+            if not current_mapped_id or current_mapped_id == model_id_value:
+                mapped_model_id_var.set(current_model_id)
+        
+        model_id_var.trace_add('write', on_model_id_change)
+        
         model_id_combobox.bind('<Button-1>', on_combobox_click)
         model_id_combobox.bind('<<ComboboxSelected>>', lambda e: None)  # 占位符
         
@@ -355,6 +381,17 @@ class ConfigGroupPanel:
         self._deps.tooltip(
             model_id_combobox,
             "点击下拉箭头自动从API获取可用模型列表\n也可以直接手动输入模型ID",
+            wraplength=250,
+        )
+
+        # 映射模型ID行（客户端使用的模型名）
+        ttk.Label(main_frame, text="映射模型ID:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        mapped_model_id_var = tk.StringVar(value=mapped_model_id_value)
+        mapped_model_id_entry = ttk.Entry(main_frame, textvariable=mapped_model_id_var, width=35)
+        mapped_model_id_entry.grid(row=5, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        self._deps.tooltip(
+            mapped_model_id_entry,
+            "映射模型ID（客户端使用的模型名）\n默认与实际模型ID相同\n示例：gpt-4o-mini",
             wraplength=250,
         )
 
