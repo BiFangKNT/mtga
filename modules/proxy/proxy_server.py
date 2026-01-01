@@ -15,7 +15,7 @@ class ProxyServer:
     """代理服务器类，负责装配领域逻辑与运行时。"""
 
     def __init__(self, config=None, log_func=print, *, thread_manager: ThreadManager):
-        self.config = config or {}
+        self.config = config or []
         self.log_func = log_func
         self.resource_manager = ResourceManager()
         self.thread_manager = thread_manager
@@ -36,13 +36,23 @@ class ProxyServer:
         if not self.app_layer.valid:
             return False
 
+        multi_config = self.app_layer.multi_proxy_config
+        if not multi_config:
+            self.log_func("错误: 代理配置未初始化")
+            return False
+        default_config = multi_config.default_config
+        target_api_base_url = default_config.target_api_base_url if default_config else "Multi-Config"
+        custom_model_id = default_config.custom_model_id if default_config else "Dynamic"
+        target_model_id = default_config.target_model_id if default_config else "Dynamic"
+        stream_mode = default_config.stream_mode if default_config else None
+
         result = self.runtime.start(
             host=host,
             port=port,
-            target_api_base_url=self.app_layer.target_api_base_url,
-            custom_model_id=self.app_layer.custom_model_id,
-            target_model_id=self.app_layer.target_model_id,
-            stream_mode=self.app_layer.stream_mode,
+            target_api_base_url=target_api_base_url,
+            custom_model_id=custom_model_id,
+            target_model_id=target_model_id,
+            stream_mode=stream_mode,
         )
         return result.ok
 

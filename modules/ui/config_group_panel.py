@@ -239,6 +239,30 @@ class ConfigGroupPanel:
                 self._deps.log("错误: API URL、实际模型ID和API Key都是必填项")
                 return
 
+            # 校验映射ID唯一性 (Mapped Model ID Uniqueness Check)
+            # 默认为实际ID
+            check_mapped_id = mapped_model_id if mapped_model_id else model_id
+            
+            # 遍历检查是否有重复
+            for idx, group in enumerate(self._config_groups):
+                # 如果是修改现有组（initial_group不为空），跳过自身
+                # 注意：这里需要一种可靠的方式排除自身。
+                # 由于 self._config_groups 可能包含当前正在编辑的组（如果是修改模式），
+                # 或者不包含（如果是新增模式）。
+                
+                # 简单策略：如果是修改模式，跳过当前选中索引。
+                # 但 _open_config_group_window 是通用的，没有直接传递 index。
+                # 我们可以依赖 initial_group 引用比较，或者传递 index。
+                
+                # 更稳妥的方式：如果是修改，我们知道 initial_group。
+                if initial_group is not None and group is initial_group:
+                    continue
+                
+                existing_mapped_id = group.get("mapped_model_id") or group.get("model_id")
+                if existing_mapped_id == check_mapped_id:
+                    self._deps.log(f"错误: 映射模型ID '{check_mapped_id}' 已被其他配置组使用，请使用唯一的映射ID。")
+                    return
+
             payload = {
                 "name": name,
                 "api_url": api_url,

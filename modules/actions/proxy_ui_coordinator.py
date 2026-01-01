@@ -45,9 +45,9 @@ class ProxyUiCoordinator:
     def get_current_config(self) -> dict[str, Any]:
         return self._deps.config_store.get_current_config()
 
-    def build_proxy_config(self) -> dict[str, Any] | None:
+    def build_proxy_config(self) -> list[dict[str, Any]] | None:
         config = proxy_orchestration.build_proxy_config(
-            get_current_config=self._deps.config_store.get_current_config,
+            get_all_configs=self._deps.config_store.load_config_groups,
             debug_mode=self._deps.runtime_options.debug_mode_var.get(),
             disable_ssl_strict_mode=self._deps.runtime_options.disable_ssl_strict_var.get(),
             stream_mode=(
@@ -63,7 +63,7 @@ class ProxyUiCoordinator:
 
     def restart_proxy(
         self,
-        config: dict[str, Any],
+        config: list[dict[str, Any]],
         *,
         success_message: str = "✅ 代理服务器启动成功",
         hosts_modified: bool = False,
@@ -92,7 +92,7 @@ class ProxyUiCoordinator:
 
     def start_proxy_instance(
         self,
-        config: dict[str, Any],
+        config: list[dict[str, Any]],
         success_message: str = "✅ 代理服务器启动成功",
         *,
         hosts_modified: bool = False,

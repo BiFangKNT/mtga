@@ -50,29 +50,37 @@ def ensure_global_config_ready(
 
 def build_proxy_config(
     *,
-    get_current_config: Callable[[], dict[str, Any]],
+    get_all_configs: Callable[[], tuple[list[dict[str, Any]], int]],
     debug_mode: bool,
     disable_ssl_strict_mode: bool,
     stream_mode: str | None,
-) -> dict[str, Any] | None:
-    current_config = get_current_config()
-    if not current_config:
+) -> list[dict[str, Any]] | None:
+    config_groups, _ = get_all_configs()
+    if not config_groups:
         return None
-    config = current_config.copy()
-    config["debug_mode"] = debug_mode
-    config["disable_ssl_strict_mode"] = disable_ssl_strict_mode
-    config["stream_mode"] = stream_mode
-    return config
+    
+    # Enrich all configs with runtime options
+    enriched_configs = []
+    for config in config_groups:
+        cfg = config.copy()
+        cfg["debug_mode"] = debug_mode
+        cfg["disable_ssl_strict_mode"] = disable_ssl_strict_mode
+        cfg["stream_mode"] = stream_mode
+        enriched_configs.append(cfg)
+        
+    return enriched_configs
 
 
 def restart_proxy_result(
     *,
-    config: dict[str, Any],
+    config: list[dict[str, Any]],
     deps: RestartProxyDeps,
     success_message: str = "✅ 代理服务器启动成功",
     hosts_modified: bool = False,
 ) -> OperationResult:
-    stream_mode_value = config.get("stream_mode")
+    # Use global settings from the first config (they are enriched to all anyway)
+    stream_mode_value = config[0].get("stream_mode") if config else None
+    
     if stream_mode_value is not None:
         deps.log(f"启用强制流模式: {stream_mode_value}")
     deps.stop_proxy_instance(reason="restart")
@@ -91,7 +99,7 @@ def restart_proxy_result(
 
 def restart_proxy(
     *,
-    config: dict[str, Any],
+    config: list[dict[str, Any]],
     deps: RestartProxyDeps,
     success_message: str = "✅ 代理服务器启动成功",
     hosts_modified: bool = False,
@@ -150,7 +158,7 @@ def stop_proxy_instance(
 
 def start_proxy_instance_result(
     *,
-    config: dict[str, Any],
+    config: list[dict[str, Any]],
     deps: StartProxyDeps,
     success_message: str = "✅ 代理服务器启动成功",
     hosts_modified: bool = False,
@@ -184,7 +192,7 @@ def start_proxy_instance_result(
 
 def start_proxy_instance(
     *,
-    config: dict[str, Any],
+    config: list[dict[str, Any]],
     deps: StartProxyDeps,
     success_message: str = "✅ 代理服务器启动成功",
     hosts_modified: bool = False,

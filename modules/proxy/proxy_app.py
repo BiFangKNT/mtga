@@ -9,8 +9,14 @@ import uuid
 import requests
 from flask import Flask, Response, jsonify, request
 
+
 from modules.proxy.proxy_auth import ProxyAuth
-from modules.proxy.proxy_config import DEFAULT_MIDDLE_ROUTE, ProxyConfig, build_proxy_config
+from modules.proxy.proxy_config import (
+    DEFAULT_MIDDLE_ROUTE,
+    MultiProxyConfig,
+    SingleProxyConfig,
+    build_proxy_config,
+)
 from modules.proxy.proxy_transport import ProxyTransport
 from modules.runtime.resource_manager import ResourceManager
 
@@ -19,48 +25,41 @@ class ProxyApp:
     """代理服务的领域逻辑：配置解析 + Flask 路由 + 上游转发。"""
 
     def __init__(self, config=None, log_func=print, *, resource_manager: ResourceManager):
-        self.config = config or {}
+        self.config = config or [] # Config is now a list of dicts
         self.log_func = log_func
         self.resource_manager = resource_manager
         self.app: Flask | None = None
         self.valid = True
-        self.proxy_config: ProxyConfig | None = None
+        self.multi_proxy_config: MultiProxyConfig | None = None
         self.auth: ProxyAuth | None = None
         self.transport: ProxyTransport | None = None
         self.http_client: requests.Session | None = None
-        self.target_api_base_url = ""
-        self.middle_route = ""
-        self.inbound_route = DEFAULT_MIDDLE_ROUTE
-        self.custom_model_id = ""
-        self.target_model_id = ""
-        self.stream_mode = None
-        self.debug_mode = False
-        self.disable_ssl_strict_mode = False
-
-        proxy_config = build_proxy_config(
+        
+        # Initial config build
+        multi_config = build_proxy_config(
             self.config,
             resource_manager=self.resource_manager,
             log_func=self.log_func,
         )
-        if not proxy_config:
+        if not multi_config:
             self.valid = False
             return
 
-        self.proxy_config = proxy_config
-        self.target_api_base_url = proxy_config.target_api_base_url
-        self.middle_route = proxy_config.middle_route
-        self.custom_model_id = proxy_config.custom_model_id
-        self.target_model_id = proxy_config.target_model_id
-        self.stream_mode = proxy_config.stream_mode  # None, 'true', 'false'
-        self.debug_mode = proxy_config.debug_mode
-        self.disable_ssl_strict_mode = proxy_config.disable_ssl_strict_mode
-        self.auth = ProxyAuth(proxy_config.mtga_auth_key)
+        self.multi_proxy_config = multi_config
+        self.auth = ProxyAuth(multi_config.mtga_auth_key)
+        
+        # Use default config for initial transport setup (SSL settings)
+        # Assuming SSL strict mode preference is similar across configs or taking the default one
+        default_cfg = multi_config.default_config
         self.transport = ProxyTransport(
             resource_manager=self.resource_manager,
-            disable_ssl_strict_mode=self.disable_ssl_strict_mode,
+            disable_ssl_strict_mode=default_cfg.disable_ssl_strict_mode if default_cfg else False,
             log_func=self.log_func,
         )
         self.http_client = self.transport.session
+        
+        # Determine inbound route base from default config (assuming all use same middle route prefix convention)
+        self.inbound_route = default_cfg.middle_route if default_cfg else DEFAULT_MIDDLE_ROUTE
 
         self._create_app()
 
@@ -81,9 +80,21 @@ class ProxyApp:
 
     def _log_request(self, request_id: str, message: str):
         self.log_func(f"{self._timestamp_ms()} [{request_id}] {message}")
-
-    def _get_mapped_model_id(self):
-        return self.custom_model_id
+    
+    def _get_config_for_model(self, model_json_name: str | None) -> SingleProxyConfig:
+        """根据请求的模型名查找对应的配置组，如果找不到则返回默认配置"""
+        if not self.multi_proxy_config or not self.multi_proxy_config.default_config:
+             # Should not happen if valid is True
+             raise RuntimeError("Proxy config not initialized")
+        
+        if not model_json_name:
+            return self.multi_proxy_config.default_config
+            
+        # Try to find matching mapped model ID
+        if model_json_name in self.multi_proxy_config.route_map:
+            return self.multi_proxy_config.route_map[model_json_name]
+            
+        return self.multi_proxy_config.default_config
 
     def _build_route(self, base_route: str, suffix: str) -> str:
         middle_route = base_route or ""
@@ -95,10 +106,12 @@ class ProxyApp:
 
     def _create_app(self):
         self.app = Flask(__name__)
-
-        if self.debug_mode:
-            logging.getLogger().setLevel(logging.INFO)
-            self.app.logger.setLevel(logging.INFO)
+        
+        # Set logger level based on default config (can be improved to be dynamic)
+        if self.multi_proxy_config and self.multi_proxy_config.default_config:
+             if self.multi_proxy_config.default_config.debug_mode:
+                logging.getLogger().setLevel(logging.INFO)
+                self.app.logger.setLevel(logging.INFO)
 
         models_route = self._build_route(self.inbound_route, "models")
         chat_route = self._build_route(self.inbound_route, "chat/completions")
@@ -128,37 +141,24 @@ class ProxyApp:
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
             ), 401
 
-        mapped_model_id = self._get_mapped_model_id()
-
-        model_data = {
-            "object": "list",
-            "data": [
-                {
-                    "id": mapped_model_id,
+        # 返回所有配置组的映射ID列表
+        model_list = []
+        if self.multi_proxy_config:
+            for mapped_id in self.multi_proxy_config.route_map.keys():
+                model_list.append({
+                    "id": mapped_id,
                     "object": "model",
                     "owned_by": "openai",
                     "created": int(time.time()),
-                    "permission": [
-                        {
-                            "id": f"modelperm-{mapped_model_id}",
-                            "object": "model_permission",
-                            "created": int(time.time()),
-                            "allow_create_engine": False,
-                            "allow_sampling": True,
-                            "allow_logprobs": True,
-                            "allow_search_indices": False,
-                            "allow_view": True,
-                            "allow_fine_tuning": False,
-                            "organization": "*",
-                            "group": None,
-                            "is_blocking": False,
-                        }
-                    ],
-                }
-            ],
+                    "permission": [],
+                })
+        
+        model_data = {
+            "object": "list",
+            "data": model_list,
         }
 
-        self.log_func(f"返回映射模型: {mapped_model_id}")
+        self.log_func(f"返回可用映射模型列表: {[m['id'] for m in model_list]}")
         return jsonify(model_data)
 
     def _chat_completions(self):  # noqa: PLR0911, PLR0912, PLR0915
@@ -174,11 +174,17 @@ class ProxyApp:
         auth = self.auth
         transport = self.transport
         http_client = self.http_client
-        if not (auth and transport and http_client):
+        if not (auth and transport and http_client and self.multi_proxy_config):
             log("代理服务未就绪")
             return jsonify({"error": "Proxy not ready"}), 500
 
-        if self.debug_mode:
+        # ... (Debug logging omitted for brevity, keeping existing logic if needed but simplified here) ...
+        # Simplified debug logging setup
+        # Note: In a full refactor we would ensure debug mode is checked from the resolved config
+        # For now, using default config's debug mode for initial request logging
+        initial_debug_mode = self.multi_proxy_config.default_config.debug_mode if self.multi_proxy_config.default_config else False
+        
+        if initial_debug_mode:
             headers_str = "\\n".join(f"{k}: {v}" for k, v in request.headers.items())
             log_message = (
                 f"--- 请求头 (调试模式) ---\\n{headers_str}\\n"
@@ -215,13 +221,22 @@ class ProxyApp:
         log("-"*60)
         log("📋 原始请求信息:")
         client_requested_stream = request_data.get("stream", False)
-        if "model" in request_data:
-            log(f"  • 客户端请求模型: {request_data['model']}")
+        requested_model = request_data.get("model")
+        if requested_model:
+            log(f"  • 客户端请求模型: {requested_model}")
         log(f"  • 客户端请求流模式: {client_requested_stream}")
         if "messages" in request_data:
             msg_count = len(request_data.get("messages", []))
             log(f"  • 消息数量: {msg_count}")
         log("-"*60)
+        
+        # === 动态路由决策 ===
+        active_config = self._get_config_for_model(requested_model)
+        log(f"🔀 路由决策: 使用配置 [{active_config.custom_model_id}] -> 目标API: {active_config.target_api_base_url}")
+        
+        target_model_id = active_config.target_model_id
+        custom_model_id = active_config.custom_model_id
+        # ===================
 
         # 模型替换
         log("="*60)
@@ -229,14 +244,14 @@ class ProxyApp:
         log("="*60)
         if "model" in request_data:
             original_model = request_data["model"]
-            log(f"  ✓ 模型名替换: {original_model} → {self.target_model_id}")
-            request_data["model"] = self.target_model_id
+            log(f"  ✓ 模型名替换: {original_model} → {target_model_id}")
+            request_data["model"] = target_model_id
         else:
-            log(f"  ✓ 添加模型名: {self.target_model_id}")
-            request_data["model"] = self.target_model_id
+            log(f"  ✓ 添加模型名: {target_model_id}")
+            request_data["model"] = target_model_id
 
-        if self.stream_mode is not None:
-            stream_value = self.stream_mode == "true"
+        if active_config.stream_mode is not None:
+            stream_value = active_config.stream_mode == "true"
             if "stream" in request_data:
                 original_stream_value = request_data["stream"]
                 log(f"  ✓ 流模式替换: {original_stream_value} → {stream_value}")
@@ -252,9 +267,7 @@ class ProxyApp:
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
             ), 401
 
-        target_api_key = ""
-        if self.proxy_config:
-            target_api_key = self.proxy_config.api_key
+        target_api_key = active_config.api_key
         forward_headers = auth.build_forward_headers(
             auth_header,
             target_api_key,
@@ -263,12 +276,12 @@ class ProxyApp:
 
         try:
             target_url = (
-                f"{self.target_api_base_url.rstrip('/')}"
-                f"{self._build_route(self.middle_route, 'chat/completions')}"
+                f"{active_config.target_api_base_url.rstrip('/')}"
+                f"{self._build_route(active_config.middle_route, 'chat/completions')}"
             )
             log("-"*60)
             log("="*60)
-            log("📤 [3/4] 转发请求到上游API")
+            log(f"📤 [3/4] 转发请求到上游API (Config: {custom_model_id})")
             log("="*60)
             log(f"  • 目标URL: {target_url}")
             log(f"  • 实际模型: {request_data.get('model')}")
@@ -291,7 +304,10 @@ class ProxyApp:
             log(f"  • 响应状态码: {response_from_target.status_code}")
             log(f"  • 响应类型: {response_from_target.headers.get('content-type', 'N/A')}")
             
-            if self.debug_mode:
+            # 使用 active_config 的调试模式设置
+            current_debug_mode = active_config.debug_mode
+
+            if current_debug_mode:
                 log(f"  • [调试] Content-Type: {response_from_target.headers.get('content-type')}")
 
             if is_stream:
@@ -301,7 +317,7 @@ class ProxyApp:
                 log_file = None
                 log_file_stack = None
                 log_path = None
-                if self.debug_mode:
+                if current_debug_mode:
                     try:
                         log_path = transport.prepare_sse_log_path()
                         log_file_stack = contextlib.ExitStack()
@@ -331,7 +347,7 @@ class ProxyApp:
                                 continue
                             data_str = "\n".join(data_lines)
 
-                            if self.debug_mode:
+                            if current_debug_mode:
                                 log(
                                     f"UP<< evt#{event_index} src_chunk#{upstream_chunk_index} "
                                     f"bytes={len(raw_event)} | {data_str.strip()}"
@@ -356,7 +372,7 @@ class ProxyApp:
                             normalized_bytes, finish_reason = transport.normalize_openai_event(
                                 data_str,
                                 event_index,
-                                model_name=self.custom_model_id,
+                                model_name=custom_model_id, # Use dynamic custom model ID
                                 log=log,
                             )
                             if finish_reason:
@@ -376,7 +392,7 @@ class ProxyApp:
                             tail_bytes = b"data: [DONE]\n\n"
                             with contextlib.suppress(Exception):
                                 yield tail_bytes
-                            if self.debug_mode:
+                            if current_debug_mode:
                                 extra = (
                                     f"，finish_reason={finish_reason_seen}"
                                     if finish_reason_seen
@@ -391,13 +407,13 @@ class ProxyApp:
                             log(f"SSE 记录完成: {log_path}")
                         with contextlib.suppress(Exception):
                             response_from_target.close()
-                        if self.debug_mode:
+                        if current_debug_mode:
                             log(f"UP 流结束，累计 {event_index} 个事件")
 
                 downstream_content_type = response_from_target.headers.get(
                     "content-type", "text/event-stream"
                 )
-                if self.debug_mode:
+                if current_debug_mode:
                     log(f"下游响应 Content-Type: {downstream_content_type}")
 
                 return Response(
@@ -410,11 +426,11 @@ class ProxyApp:
             # 替换响应中的模型名为映射ID，确保客户端接收到它请求的模型名
             original_response_model = response_json.get("model", "N/A")
             if "model" in response_json:
-                response_json["model"] = self.custom_model_id
-                log(f"  ✓ 响应模型名替换: {original_response_model} → {self.custom_model_id}")
+                response_json["model"] = custom_model_id
+                log(f"  ✓ 响应模型名替换: {original_response_model} → {custom_model_id}")
             log("-"*60)
 
-            if client_requested_stream and self.stream_mode == "false":
+            if client_requested_stream and active_config.stream_mode == "false":
                 log("  ✓ 将非流式响应转换为流式格式")
 
                 def simulate_stream():
@@ -433,7 +449,7 @@ class ProxyApp:
                         yield f"data: {json.dumps({'error': 'No content in response'})}\\n\\n"
                         return
 
-                    model = response_json.get("model", self.custom_model_id)
+                    model = response_json.get("model", custom_model_id)
                     id_value = response_json.get("id", "")
                     created = response_json.get("created", 0)
 
@@ -466,7 +482,7 @@ class ProxyApp:
 
                 return Response(simulate_stream(), content_type="text/event-stream")
 
-            if self.debug_mode:
+            if current_debug_mode:
                 response_str = json.dumps(response_json, indent=2, ensure_ascii=False)
                 log(
                     f"--- 完整响应体 (调试模式) ---\\n{response_str}\\n"
@@ -496,3 +512,4 @@ class ProxyApp:
 
 
 __all__ = ["ProxyApp"]
+
