@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from tkinter import messagebox, ttk
 from typing import Any
 
+import requests
+
 from modules.proxy.proxy_config import DEFAULT_MIDDLE_ROUTE, normalize_middle_route
 from modules.services.config_service import ConfigStore
 
@@ -240,7 +242,7 @@ class ConfigGroupPanel:
 
         window = tk.Toplevel(self._deps.window)
         window.title(title)
-        window.geometry("450x330")
+        window.geometry("450x360")  # 增加高度以容纳获取模型按钮
         window.resizable(False, False)
         window.transient(self._deps.window)
 
@@ -262,6 +264,11 @@ class ConfigGroupPanel:
         api_url_entry = ttk.Entry(main_frame, textvariable=api_url_var, width=35)
         api_url_entry.grid(row=1, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
 
+        ttk.Label(main_frame, text="* API Key:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        api_key_var = tk.StringVar(value=api_key_value)
+        api_key_entry = ttk.Entry(main_frame, textvariable=api_key_var, width=35, show="*")
+        api_key_entry.grid(row=2, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+
         middle_route_value = initial_group.get("middle_route", "").strip() if initial_group else ""
         middle_route_enabled_var = tk.BooleanVar(value=bool(middle_route_value))
         middle_route_var = tk.StringVar(value=middle_route_value)
@@ -276,20 +283,80 @@ class ConfigGroupPanel:
             text="修改中间路由",
             variable=middle_route_enabled_var,
         )
-        middle_route_toggle.grid(row=2, column=0, sticky=tk.W, pady=5)
+        middle_route_toggle.grid(row=3, column=0, sticky=tk.W, pady=5)
 
         middle_route_entry = ttk.Entry(main_frame, textvariable=middle_route_var, width=35)
-        middle_route_entry.grid(row=2, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        middle_route_entry.grid(row=3, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
 
-        ttk.Label(main_frame, text="* 实际模型ID:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        # 实际模型ID行（支持智能下拉选择）
+        ttk.Label(main_frame, text="* 实际模型ID:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        
+        # 模型ID容器（包含下拉框和刷新按钮）
+        model_id_container = ttk.Frame(main_frame)
+        model_id_container.grid(row=4, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        
+        # 模型ID变量
         model_id_var = tk.StringVar(value=model_id_value)
-        model_id_entry = ttk.Entry(main_frame, textvariable=model_id_var, width=35)
-        model_id_entry.grid(row=3, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
-
-        ttk.Label(main_frame, text="* API Key:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        api_key_var = tk.StringVar(value=api_key_value)
-        api_key_entry = ttk.Entry(main_frame, textvariable=api_key_var, width=35, show="*")
-        api_key_entry.grid(row=4, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        
+        # 创建智能下拉框（可输入 + 可选择）
+        model_id_combobox = ttk.Combobox(
+            model_id_container,
+            textvariable=model_id_var,
+            width=28  # 减小宽度为刷新按钮留空间
+        )
+        model_id_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # 设置初始值
+        if model_id_value:
+            model_id_combobox.set(model_id_value)
+        
+        # 刷新按钮
+        refresh_btn = ttk.Button(
+            model_id_container,
+            text="🔄",
+            width=3,
+            command=lambda: self._fetch_models_list(
+                api_url_var.get().strip(),
+                api_key_var.get().strip(),
+                model_id_var,
+                model_id_combobox,
+                window,
+                force_refresh=True  # 强制刷新
+            )
+        )
+        refresh_btn.pack(side=tk.LEFT, padx=(5, 0))
+        self._deps.tooltip(
+            refresh_btn,
+            "刷新模型列表\n从API获取最新可用模型",
+            wraplength=150,
+        )
+        
+        # 绑定下拉框打开事件，自动获取模型列表
+        def on_combobox_click(event):
+            # 只在列表为空时才显示加载弹窗并获取
+            if not model_id_combobox['values']:
+                # 阻止默认的下拉行为
+                model_id_combobox.selection_clear()
+                # 触发异步获取（显示加载弹窗）
+                self._fetch_models_list(
+                    api_url_var.get().strip(),
+                    api_key_var.get().strip(),
+                    model_id_var,
+                    model_id_combobox,
+                    window
+                )
+                return 'break'  # 阻止默认行为
+            # 如果列表已有数据，允许正常展开
+        
+        model_id_combobox.bind('<Button-1>', on_combobox_click)
+        model_id_combobox.bind('<<ComboboxSelected>>', lambda e: None)  # 占位符
+        
+        # 添加提示文本
+        self._deps.tooltip(
+            model_id_combobox,
+            "点击下拉箭头自动从API获取可用模型列表\n也可以直接手动输入模型ID",
+            wraplength=250,
+        )
 
         def set_middle_route_placeholder() -> None:
             nonlocal placeholder_active
@@ -348,10 +415,10 @@ class ConfigGroupPanel:
             font=self._deps.get_preferred_font(size=8),
             foreground="gray",
         )
-        info_label.grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=5)
+        info_label.grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=5)
 
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=7, column=0, columnspan=2, pady=20)
+        button_frame.grid(row=8, column=0, columnspan=2, pady=20)
 
         ttk.Button(button_frame, text="保存", command=handle_save).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="取消", command=window.destroy).pack(
@@ -507,6 +574,166 @@ class ConfigGroupPanel:
                 self._config_tree.focus(children[selected_index + 1])
         else:
             self._deps.log("保存配置组失败")
+
+    def _fetch_models_list(
+        self,
+        api_url: str,
+        api_key: str,
+        model_id_var: tk.StringVar,
+        model_id_combobox: ttk.Combobox,
+        parent_window: tk.Toplevel,
+        force_refresh: bool = False,
+    ) -> None:
+        """从API获取模型列表并更新下拉框选项
+        
+        Args:
+            force_refresh: 是否强制刷新（清空现有列表）
+        """
+        if not api_url or not api_key:
+            self._deps.log("⚠️ 请先填写 API URL 和 API Key 后再获取模型列表")
+            return
+        
+        # 如果是强制刷新，先清空列表
+        if force_refresh:
+            model_id_combobox['values'] = []
+            self._deps.log("🔄 正在刷新模型列表...")
+
+        # 构建完整的模型列表URL
+        api_url = api_url.rstrip('/')
+        if not api_url.startswith('http://') and not api_url.startswith('https://'):
+            api_url = f'https://{api_url}'
+        
+        models_url = f"{api_url}/v1/models"
+        
+        self._deps.log(f"🔄 正在从 {models_url} 获取模型列表...")
+        
+        # 创建加载弹窗
+        loading_dialog = tk.Toplevel(parent_window)
+        loading_dialog.title("加载中")
+        loading_dialog.geometry("300x100")
+        loading_dialog.resizable(False, False)
+        loading_dialog.transient(parent_window)
+        loading_dialog.grab_set()
+        
+        # 居中显示
+        self._deps.center_window(loading_dialog)
+        
+        # 添加加载提示
+        loading_frame = ttk.Frame(loading_dialog, padding=20)
+        loading_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(
+            loading_frame,
+            text="🔄 正在获取模型列表...",
+            font=self._deps.get_preferred_font(size=11)
+        ).pack(pady=(10, 5))
+        
+        ttk.Label(
+            loading_frame,
+            text="请稍候",
+            font=self._deps.get_preferred_font(size=9),
+            foreground="gray"
+        ).pack()
+        
+        def fetch_in_thread():
+            try:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = requests.get(
+                    models_url,
+                    headers=headers,
+                    timeout=10,
+                    verify=False  # 跳过SSL验证，与代理服务器行为一致
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                models_data = data.get('data', [])
+                
+                if not models_data:
+                    self._deps.log("⚠️ API 返回的模型列表为空（可手动输入模型ID）")
+                    return
+                
+                # 提取模型ID列表
+                model_ids = [model.get('id', '') for model in models_data if model.get('id')]
+                
+                if not model_ids:
+                    self._deps.log("⚠️ 未找到有效的模型ID（可手动输入模型ID）")
+                    return
+                
+                self._deps.log(f"✅ 成功获取 {len(model_ids)} 个模型")
+                
+                # 在主线程中关闭加载弹窗并更新下拉框
+                parent_window.after(0, lambda: self._close_loading_and_update(
+                    loading_dialog,
+                    model_id_combobox,
+                    model_id_var,
+                    model_ids
+                ))
+                
+            except requests.exceptions.Timeout:
+                self._deps.log("⚠️ 获取模型列表超时，请检查网络连接（可手动输入模型ID）")
+                parent_window.after(0, lambda: loading_dialog.destroy())
+            except requests.exceptions.RequestException as e:
+                error_msg = f"⚠️ 获取模型列表失败: {str(e)}（可手动输入模型ID）"
+                self._deps.log(error_msg)
+                parent_window.after(0, lambda: loading_dialog.destroy())
+            except Exception as e:
+                error_msg = f"⚠️ 发生未知错误: {str(e)}（可手动输入模型ID）"
+                self._deps.log(error_msg)
+                parent_window.after(0, lambda: loading_dialog.destroy())
+        
+        # 在后台线程中执行请求
+        self._deps.thread_manager.run(
+            "fetch_models",
+            fetch_in_thread,
+            allow_parallel=True
+        )
+
+    def _update_combobox_values(
+        self,
+        combobox: ttk.Combobox,
+        model_id_var: tk.StringVar,
+        model_ids: list[str],
+    ) -> None:
+        """更新下拉框的可选值列表"""
+        # 保存当前值
+        current_value = model_id_var.get()
+        
+        # 更新下拉框选项
+        combobox['values'] = model_ids
+        
+        # 如果当前值在列表中，保持选中；否则选择第一个
+        if current_value and current_value in model_ids:
+            combobox.set(current_value)
+        elif model_ids:
+            combobox.current(0)  # 选择第一个
+        
+        # 延迟50ms后展开下拉列表，确保数据已加载
+        combobox.after(50, lambda: combobox.event_generate('<Down>'))
+        
+        self._deps.log(f"✅ 已加载 {len(model_ids)} 个可选模型，您也可以直接输入")
+
+
+    def _close_loading_and_update(
+        self,
+        loading_dialog: tk.Toplevel,
+        combobox: ttk.Combobox,
+        model_id_var: tk.StringVar,
+        model_ids: list[str],
+    ) -> None:
+        """关闭加载弹窗并更新下拉框"""
+        try:
+            # 关闭加载弹窗
+            loading_dialog.destroy()
+        except Exception:
+            pass  # 弹窗可能已关闭
+        
+        # 更新下拉框
+        self._update_combobox_values(combobox, model_id_var, model_ids)
 
 
 def build_config_group_panel(deps: ConfigGroupPanelDeps) -> ConfigGroupPanel:
