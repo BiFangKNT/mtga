@@ -38,12 +38,10 @@ def ensure_global_config_ready(
     load_global_config: Callable[[], tuple[str, str]],
 ) -> GlobalConfigCheckResult:
     mapped_model_id, mtga_auth_key = load_global_config()
-    mapped_model_id = (mapped_model_id or "").strip()
+    # 映射模型ID已移至各配置组，全局配置不再检查
     mtga_auth_key = (mtga_auth_key or "").strip()
 
     missing_fields: list[str] = []
-    if not mapped_model_id:
-        missing_fields.append("映射模型ID")
     if not mtga_auth_key:
         missing_fields.append("MTGA鉴权Key")
 

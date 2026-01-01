@@ -36,9 +36,18 @@ def load_global_config(*, resource_manager: ResourceManager, log_func=print) -> 
 
 
 def _resolve_custom_model_id(*, global_config: dict, raw_config: dict) -> str:
-    global_mapped_model_id = (global_config.get("mapped_model_id") or "").strip()
-    legacy_group_mapped_model_id = (raw_config.get("mapped_model_id") or "").strip()
-    return global_mapped_model_id or legacy_group_mapped_model_id or "CUSTOM_MODEL_ID"
+    # 优先使用配置组的映射模型ID，全局配置的mapped_model_id已废弃
+    group_mapped_model_id = (raw_config.get("mapped_model_id") or "").strip()
+    if group_mapped_model_id:
+        return group_mapped_model_id
+    
+    # 如果配置组没有设置，则使用实际模型ID作为默认值
+    actual_model_id = (raw_config.get("model_id") or "").strip()
+    if actual_model_id:
+        return actual_model_id
+    
+    # 最后的默认值
+    return "CUSTOM_MODEL_ID"
 
 
 def _resolve_target_model_id(*, raw_config: dict, custom_model_id: str) -> str:

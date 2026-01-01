@@ -167,7 +167,9 @@ class ProxyApp:
         def log(message: str):
             self._log_request(request_id, message)
 
-        log(f"收到聊天补全请求 {self._build_route(self.inbound_route, 'chat/completions')}")
+        log("="*60)
+        log(f"📥 [1/4] 接收客户端请求: {self._build_route(self.inbound_route, 'chat/completions')}")
+        log("="*60)
 
         auth = self.auth
         transport = self.transport
@@ -209,25 +211,38 @@ class ProxyApp:
                 }
             ), 400
 
+        # 显示原始请求信息
+        log("-"*60)
+        log("📋 原始请求信息:")
         client_requested_stream = request_data.get("stream", False)
-        log(f"客户端请求的流模式: {client_requested_stream}")
+        if "model" in request_data:
+            log(f"  • 客户端请求模型: {request_data['model']}")
+        log(f"  • 客户端请求流模式: {client_requested_stream}")
+        if "messages" in request_data:
+            msg_count = len(request_data.get("messages", []))
+            log(f"  • 消息数量: {msg_count}")
+        log("-"*60)
 
+        # 模型替换
+        log("="*60)
+        log("🔄 [2/4] 劫持并替换请求参数")
+        log("="*60)
         if "model" in request_data:
             original_model = request_data["model"]
-            log(f"替换模型名: {original_model} -> {self.target_model_id}")
+            log(f"  ✓ 模型名替换: {original_model} → {self.target_model_id}")
             request_data["model"] = self.target_model_id
         else:
-            log(f"请求中没有 model 字段，添加 model: {self.target_model_id}")
+            log(f"  ✓ 添加模型名: {self.target_model_id}")
             request_data["model"] = self.target_model_id
 
         if self.stream_mode is not None:
             stream_value = self.stream_mode == "true"
             if "stream" in request_data:
                 original_stream_value = request_data["stream"]
-                log(f"强制修改流模式: {original_stream_value} -> {stream_value}")
+                log(f"  ✓ 流模式替换: {original_stream_value} → {stream_value}")
                 request_data["stream"] = stream_value
             else:
-                log(f"请求中没有 stream 参数，设置为 {stream_value}")
+                log(f"  ✓ 设置流模式: {stream_value}")
                 request_data["stream"] = stream_value
 
         auth_header = request.headers.get("Authorization")
@@ -251,10 +266,15 @@ class ProxyApp:
                 f"{self.target_api_base_url.rstrip('/')}"
                 f"{self._build_route(self.middle_route, 'chat/completions')}"
             )
-            log(f"转发请求到: {target_url}")
-
+            log("-"*60)
+            log("="*60)
+            log("📤 [3/4] 转发请求到上游API")
+            log("="*60)
+            log(f"  • 目标URL: {target_url}")
+            log(f"  • 实际模型: {request_data.get('model')}")
             is_stream = request_data.get("stream", False)
-            log(f"流模式: {is_stream}")
+            log(f"  • 流模式: {is_stream}")
+            log("-"*60)
 
             response_from_target = http_client.post(
                 target_url,
@@ -264,12 +284,19 @@ class ProxyApp:
                 timeout=300,
             )
             response_from_target.raise_for_status()
+            
+            log("="*60)
+            log("📨 [4/4] 接收上游响应并返回客户端")
+            log("="*60)
+            log(f"  • 响应状态码: {response_from_target.status_code}")
+            log(f"  • 响应类型: {response_from_target.headers.get('content-type', 'N/A')}")
+            
             if self.debug_mode:
-                log(f"上游响应状态码: {response_from_target.status_code}")
-                log(f"上游 Content-Type: {response_from_target.headers.get('content-type')}")
+                log(f"  • [调试] Content-Type: {response_from_target.headers.get('content-type')}")
 
             if is_stream:
-                log("返回流式响应")
+                log("  ✓ 返回流式响应")
+                log("-"*60)
 
                 log_file = None
                 log_file_stack = None
@@ -329,7 +356,7 @@ class ProxyApp:
                             normalized_bytes, finish_reason = transport.normalize_openai_event(
                                 data_str,
                                 event_index,
-                                model_name=self.target_model_id,
+                                model_name=self.custom_model_id,
                                 log=log,
                             )
                             if finish_reason:
@@ -379,9 +406,16 @@ class ProxyApp:
                 )
 
             response_json = response_from_target.json()
+            
+            # 替换响应中的模型名为映射ID
+            original_model = response_json.get("model", "N/A")
+            if "model" in response_json:
+                response_json["model"] = self.custom_model_id
+                log(f"  ✓ 响应模型名替换: {original_model} → {self.custom_model_id}")
+            log("-"*60)
 
             if client_requested_stream and self.stream_mode == "false":
-                log("将非流式响应转换为流式格式返回给客户端")
+                log("  ✓ 将非流式响应转换为流式格式")
 
                 def simulate_stream():
                     choices = response_json.get("choices", [])
@@ -399,7 +433,7 @@ class ProxyApp:
                         yield f"data: {json.dumps({'error': 'No content in response'})}\\n\\n"
                         return
 
-                    model = response_json.get("model", "")
+                    model = response_json.get("model", self.custom_model_id)
                     id_value = response_json.get("id", "")
                     created = response_json.get("created", 0)
 
@@ -439,7 +473,10 @@ class ProxyApp:
                     "--------------------------------------"
                 )
             else:
-                log("返回非流式 JSON 响应")
+                log("  ✓ 返回非流式 JSON 响应")
+            log("="*60)
+            log("✅ 请求处理完成")
+            log("="*60)
             return jsonify(response_json), response_from_target.status_code
 
         except requests.exceptions.HTTPError as e:
