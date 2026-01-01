@@ -23,8 +23,8 @@ def setup_main_window(
     get_icon_file: Callable[[str], str] | None = None,
 ) -> WindowSetupResult:
     window.title("MTGA GUI")
-    window.geometry("1250x750")
-    window.resizable(True, True)
+    window.geometry("1250x680")  # 减小高度，让布局更紧凑
+    window.resizable(False, False)  # 固定窗口大小，不允许调整
 
     if sys.platform == "darwin":
         try:

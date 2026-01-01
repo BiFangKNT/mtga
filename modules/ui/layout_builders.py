@@ -69,7 +69,9 @@ def build_main_layout(
     left_frame = ttk.Frame(main_paned)
     main_paned.add(left_frame, weight=1)
 
-    left_frame.grid_rowconfigure(0, weight=1)
+    # 配置行权重：row 0 为配置内容（可伸缩），row 1 为底部按钮（固定）
+    left_frame.grid_rowconfigure(0, weight=1)  # 配置内容区域可伸缩
+    left_frame.grid_rowconfigure(1, weight=0)  # 底部按钮不伸缩
     left_frame.grid_columnconfigure(0, weight=1)
     left_content = ttk.Frame(left_frame, padding=5)  # 添加内边距
     left_content.grid(row=0, column=0, sticky="nsew")

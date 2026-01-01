@@ -408,10 +408,9 @@ class AboutTabDeps:
     app_display_name: str
     app_version: str
     get_preferred_font: Callable[..., tkfont.Font]
-    on_check_updates: Callable[[], None]
 
 
-def build_about_tab(deps: AboutTabDeps) -> tuple[ttk.Frame, ttk.Button]:
+def build_about_tab(deps: AboutTabDeps) -> ttk.Frame:
     style = ttk.Style()
     style.configure("About.TFrame", background="#f0f0f0")
     style.configure(
@@ -436,8 +435,7 @@ def build_about_tab(deps: AboutTabDeps) -> tuple[ttk.Frame, ttk.Button]:
     )
     version_label.pack(anchor="w", fill=tk.X, padx=8, pady=(8, 4))
 
-    check_updates_button = ttk.Button(about_tab, text="检查更新", command=deps.on_check_updates)
-    check_updates_button.pack(anchor="w", padx=8, pady=(0, 8))
+    # 移除检查更新按钮
 
     about_footer = ttk.Label(
         about_tab,
@@ -448,7 +446,7 @@ def build_about_tab(deps: AboutTabDeps) -> tuple[ttk.Frame, ttk.Button]:
     )
     about_footer.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(0, 8))
 
-    return about_tab, check_updates_button
+    return about_tab
 
 
 @dataclass(frozen=True)
@@ -469,10 +467,9 @@ class MainTabsDeps:
     app_display_name: str
     app_version: str
     get_preferred_font: Callable[..., tkfont.Font]
-    on_check_updates: Callable[[], None]
 
 
-def build_main_tabs(deps: MainTabsDeps) -> tuple[ttk.Notebook, ttk.Button]:
+def build_main_tabs(deps: MainTabsDeps) -> ttk.Notebook:
     notebook = ttk.Notebook(deps.parent)
     notebook.pack(fill=tk.BOTH, expand=True, pady=0)
     if sys.platform == "darwin":
@@ -548,14 +545,6 @@ def build_main_tabs(deps: MainTabsDeps) -> tuple[ttk.Notebook, ttk.Button]:
             )
         )
 
-    _, check_updates_button = build_about_tab(
-        AboutTabDeps(
-            notebook=notebook,
-            app_display_name=deps.app_display_name,
-            app_version=deps.app_version,
-            get_preferred_font=deps.get_preferred_font,
-            on_check_updates=deps.on_check_updates,
-        )
-    )
+    # 移除"关于"标签页
 
-    return notebook, check_updates_button
+    return notebook

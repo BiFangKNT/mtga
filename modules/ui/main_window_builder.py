@@ -11,8 +11,6 @@ from modules.actions import (
     hosts_actions,
     model_tests,
     shutdown_actions,
-    update_actions,
-    update_bootstrap,
 )
 from modules.services.config_service import ConfigStore
 from modules.ui import (
@@ -137,10 +135,8 @@ def build_main_window(deps: MainWindowDeps) -> tk.Tk | None:  # noqa: PLR0915
     proxy_ui = proxy_context_result.proxy_ui
     proxy_runner = proxy_context_result.proxy_runner
 
-    update_controller = update_actions.UpdateCheckController(
-        state=update_actions.UpdateCheckState()
-    )
-    _, check_updates_button = tab_builders.build_main_tabs(
+    # 移除更新检查功能
+    tab_builders.build_main_tabs(
         tab_builders.MainTabsDeps(
             parent=left_content,
             window=window,
@@ -158,27 +154,7 @@ def build_main_window(deps: MainWindowDeps) -> tk.Tk | None:  # noqa: PLR0915
             app_display_name=deps.app_metadata.display_name,
             app_version=deps.app_version,
             get_preferred_font=get_preferred_font,
-            on_check_updates=update_controller.trigger,
         )
-    )
-
-    update_bootstrap.configure_update_controller(
-        update_controller,
-        update_bootstrap.UpdateBootstrapDeps(
-            window=window,
-            log=log,
-            thread_manager=deps.thread_manager,
-            check_button=check_updates_button,
-            app_display_name=deps.app_metadata.display_name,
-            app_version=deps.app_version,
-            repo=deps.app_metadata.github_repo,
-            default_font=default_font,
-            update_service=deps.update_service,
-            update_dialog=deps.update_dialog,
-            messagebox=deps.messagebox,
-            create_tkinterweb_html_widget=deps.create_tkinterweb_html_widget,
-            program_resource_dir=deps.program_resource_dir,
-        ),
     )
 
     footer_actions.build_footer_actions(
@@ -202,6 +178,6 @@ def build_main_window(deps: MainWindowDeps) -> tk.Tk | None:  # noqa: PLR0915
 
     log("MTGA GUI 已启动")
     log("请选择操作或直接使用一键启动...")
-    window.after(200, update_controller.trigger)
+    # 移除启动时自动检查更新
 
     return window
