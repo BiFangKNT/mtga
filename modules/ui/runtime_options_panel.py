@@ -22,12 +22,14 @@ class RuntimeOptionsPanelDeps:
 
 
 def build_runtime_options_panel(deps: RuntimeOptionsPanelDeps) -> RuntimeOptions:
-    debug_ssl_frame = ttk.Frame(deps.parent)
-    debug_ssl_frame.pack(fill=tk.X, padx=5, pady=2)
+    # ========== 运行时选项（所有选项在同一行）==========
+    options_frame = ttk.Frame(deps.parent)
+    options_frame.pack(fill=tk.X, padx=5, pady=2)
+    
     debug_mode_var = tk.BooleanVar(value=False)
 
     debug_mode_check = ttk.Checkbutton(
-        debug_ssl_frame,
+        options_frame,
         text="开启调试模式",
         variable=debug_mode_var,
         command=deps.on_debug_mode_toggle,
@@ -41,31 +43,31 @@ def build_runtime_options_panel(deps: RuntimeOptionsPanelDeps) -> RuntimeOptions
         "（默认不做第 2 项检查，仅在调试模式下启用）",
         wraplength=500,
     )
+    
     disable_ssl_strict_var = tk.BooleanVar(value=False)
     disable_ssl_strict_check = ttk.Checkbutton(
-        debug_ssl_frame,
+        options_frame,
         text="关闭SSL严格模式",
         variable=disable_ssl_strict_var,
     )
     disable_ssl_strict_check.pack(side=tk.LEFT, padx=(20, 0))
 
-    stream_mode_frame = ttk.Frame(deps.parent)
-    stream_mode_frame.pack(fill=tk.X, padx=5, pady=2)
+    # 强制流模式（与其他选项在同一行）
     stream_mode_var = tk.BooleanVar(value=False)
-    stream_mode_combo = ttk.Combobox(
-        stream_mode_frame, values=["true", "false"], state="disabled", width=10
-    )
-
     stream_mode_check = ttk.Checkbutton(
-        stream_mode_frame,
+        options_frame,
         text="强制流模式:",
         variable=stream_mode_var,
         command=lambda: stream_mode_combo.config(
             state="readonly" if stream_mode_var.get() else "disabled"
         ),
     )
-    stream_mode_check.pack(side=tk.LEFT)
-    stream_mode_combo.pack(side=tk.LEFT, padx=(10, 0))
+    stream_mode_check.pack(side=tk.LEFT, padx=(20, 0))
+    
+    stream_mode_combo = ttk.Combobox(
+        options_frame, values=["true", "false"], state="disabled", width=10
+    )
+    stream_mode_combo.pack(side=tk.LEFT, padx=(5, 0))
     stream_mode_combo.set("true")
 
     return RuntimeOptions(

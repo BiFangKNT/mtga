@@ -25,38 +25,69 @@ def build_main_layout(
     *,
     get_preferred_font: Callable[..., Any] | None = None,
 ) -> WindowLayout:
-    main_frame = ttk.Frame(window, padding=10)
+    main_frame = ttk.Frame(window, padding=15)  # 增加内边距
     main_frame.pack(fill=tk.BOTH, expand=True)
 
+    # ========== 标题区域 ==========
+    title_frame = ttk.Frame(main_frame)
+    title_frame.pack(fill=tk.X, pady=(0, 15))  # 增加底部间距
+    
     title_font = (
-        get_preferred_font(size=16, weight="bold")
+        get_preferred_font(size=18, weight="bold")  # 增加字体大小
         if get_preferred_font is not None
-        else ("TkDefaultFont", 16, "bold")
+        else ("TkDefaultFont", 18, "bold")
     )
     title_label = ttk.Label(
-        main_frame,
-        text="MTGA - 代理服务器管理工具",
+        title_frame,
+        text="🚀 MTGA - 代理服务器管理工具",  # 添加图标
         font=title_font,
     )
-    title_label.pack(pady=10)
+    title_label.pack(side=tk.LEFT)
+    
+    # 版本信息（可选）
+    version_font = (
+        get_preferred_font(size=9)
+        if get_preferred_font is not None
+        else ("TkDefaultFont", 9)
+    )
+    version_label = ttk.Label(
+        title_frame,
+        text="v1.2.0",
+        font=version_font,
+        foreground="gray",
+    )
+    version_label.pack(side=tk.LEFT, padx=(10, 0))
+
+    # 分隔线
+    separator = ttk.Separator(main_frame, orient=tk.HORIZONTAL)
+    separator.pack(fill=tk.X, pady=(0, 15))
 
     main_paned = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
-    main_paned.pack(fill=tk.BOTH, expand=True, pady=5)
+    main_paned.pack(fill=tk.BOTH, expand=True)
 
-    left_frame = ttk.Frame(main_paned, width=1)
+    # ========== 左侧面板（配置区域）==========
+    left_frame = ttk.Frame(main_paned)
     main_paned.add(left_frame, weight=1)
 
     left_frame.grid_rowconfigure(0, weight=1)
     left_frame.grid_columnconfigure(0, weight=1)
-    left_content = ttk.Frame(left_frame)
+    left_content = ttk.Frame(left_frame, padding=5)  # 添加内边距
     left_content.grid(row=0, column=0, sticky="nsew")
 
-    right_frame = ttk.Frame(main_paned, width=1)
+    # ========== 右侧面板（日志区域）==========
+    right_frame = ttk.Frame(main_paned)
     main_paned.add(right_frame, weight=1)
 
-    log_frame = ttk.LabelFrame(right_frame, text="日志")
+    log_frame = ttk.LabelFrame(right_frame, text="📜 日志输出", padding=5)  # 添加图标和内边距
     log_frame.pack(fill=tk.BOTH, expand=True)
-    log_text = scrolledtext.ScrolledText(log_frame, height=10, width=1)
+    
+    log_text = scrolledtext.ScrolledText(
+        log_frame,
+        height=10,
+        width=1,
+        wrap=tk.WORD,  # 按单词换行
+        font=("Consolas", 9) if get_preferred_font is None else get_preferred_font(size=9),  # 使用等宽字体
+    )
     log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
     log = build_text_logger(log_text)
 

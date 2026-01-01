@@ -256,11 +256,11 @@ class ConfigGroupPanel:
 
         window = tk.Toplevel(self._deps.window)
         window.title(title)
-        window.geometry("450x360")  # 增加高度以容纳获取模型按钮
+        window.geometry("520x520")  # 增加窗口宽度和高度，更加宽敞
         window.resizable(False, False)
         window.transient(self._deps.window)
 
-        main_frame = ttk.Frame(window, padding=10)
+        main_frame = ttk.Frame(window, padding=15)  # 增加内边距
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         name_value = initial_group.get("name", "") if initial_group else ""
@@ -269,20 +269,32 @@ class ConfigGroupPanel:
         mapped_model_id_value = initial_group.get("mapped_model_id", model_id_value) if initial_group else ""  # 默认值为实际模型ID
         api_key_value = initial_group.get("api_key", "") if initial_group else ""
 
-        ttk.Label(main_frame, text="配置组名称 (可选):").grid(row=0, column=0, sticky=tk.W, pady=5)
+        # ========== 基础配置区域 ==========
+        basic_frame = ttk.LabelFrame(main_frame, text="基础配置", padding=10)
+        basic_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 配置组名称
+        ttk.Label(basic_frame, text="配置组名称:", width=15, anchor=tk.E).grid(row=0, column=0, sticky=tk.E, pady=8, padx=(0, 10))
         name_var = tk.StringVar(value=name_value)
-        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=35)
-        name_entry.grid(row=0, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        name_entry = ttk.Entry(basic_frame, textvariable=name_var, width=40)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky=tk.EW, pady=8)
+        
+        optional_label = ttk.Label(basic_frame, text="(可选)", font=self._deps.get_preferred_font(size=8), foreground="gray")
+        optional_label.grid(row=0, column=3, sticky=tk.W, padx=(5, 0))
 
-        ttk.Label(main_frame, text="* API URL:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        # API URL
+        ttk.Label(basic_frame, text="* API URL:", width=15, anchor=tk.E).grid(row=1, column=0, sticky=tk.E, pady=8, padx=(0, 10))
         api_url_var = tk.StringVar(value=api_url_value)
-        api_url_entry = ttk.Entry(main_frame, textvariable=api_url_var, width=35)
-        api_url_entry.grid(row=1, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        api_url_entry = ttk.Entry(basic_frame, textvariable=api_url_var, width=40)
+        api_url_entry.grid(row=1, column=1, columnspan=3, sticky=tk.EW, pady=8)
 
-        ttk.Label(main_frame, text="* API Key:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        # API Key
+        ttk.Label(basic_frame, text="* API Key:", width=15, anchor=tk.E).grid(row=2, column=0, sticky=tk.E, pady=8, padx=(0, 10))
         api_key_var = tk.StringVar(value=api_key_value)
-        api_key_entry = ttk.Entry(main_frame, textvariable=api_key_var, width=35, show="*")
-        api_key_entry.grid(row=2, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        api_key_entry = ttk.Entry(basic_frame, textvariable=api_key_var, width=40, show="*")
+        api_key_entry.grid(row=2, column=1, columnspan=3, sticky=tk.EW, pady=8)
+        
+        basic_frame.columnconfigure(1, weight=1)
 
         middle_route_value = initial_group.get("middle_route", "").strip() if initial_group else ""
         middle_route_enabled_var = tk.BooleanVar(value=bool(middle_route_value))
@@ -293,22 +305,16 @@ class ConfigGroupPanel:
         placeholder_style = "ConfigGroupPlaceholder.TEntry"
         ttk.Style().configure(placeholder_style, foreground="gray")
 
-        middle_route_toggle = ttk.Checkbutton(
-            main_frame,
-            text="修改中间路由",
-            variable=middle_route_enabled_var,
-        )
-        middle_route_toggle.grid(row=3, column=0, sticky=tk.W, pady=5)
-
-        middle_route_entry = ttk.Entry(main_frame, textvariable=middle_route_var, width=35)
-        middle_route_entry.grid(row=3, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        # ========== 模型配置区域 ==========
+        model_frame = ttk.LabelFrame(main_frame, text="模型配置", padding=10)
+        model_frame.pack(fill=tk.X, pady=(0, 10))
 
         # 实际模型ID行（支持智能下拉选择）
-        ttk.Label(main_frame, text="* 实际模型ID:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Label(model_frame, text="* 实际模型ID:", width=15, anchor=tk.E).grid(row=0, column=0, sticky=tk.E, pady=8, padx=(0, 10))
         
         # 模型ID容器（包含下拉框和刷新按钮）
-        model_id_container = ttk.Frame(main_frame)
-        model_id_container.grid(row=4, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        model_id_container = ttk.Frame(model_frame)
+        model_id_container.grid(row=0, column=1, columnspan=3, sticky=tk.EW, pady=8)
         
         # 模型ID变量
         model_id_var = tk.StringVar(value=model_id_value)
@@ -317,9 +323,9 @@ class ConfigGroupPanel:
         model_id_combobox = ttk.Combobox(
             model_id_container,
             textvariable=model_id_var,
-            width=28  # 减小宽度为刷新按钮留空间
+            width=30  # 减小宽度，为刷新按钮留出空间
         )
-        model_id_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        model_id_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
         # 设置初始值
         if model_id_value:
@@ -328,8 +334,8 @@ class ConfigGroupPanel:
         # 刷新按钮
         refresh_btn = ttk.Button(
             model_id_container,
-            text="🔄",
-            width=3,
+            text="🔄 刷新",
+            width=10,  # 增加宽度以完整显示文字
             command=lambda: self._fetch_models_list(
                 api_url_var.get().strip(),
                 api_key_var.get().strip(),
@@ -339,7 +345,7 @@ class ConfigGroupPanel:
                 force_refresh=True  # 强制刷新
             )
         )
-        refresh_btn.pack(side=tk.LEFT, padx=(5, 0))
+        refresh_btn.pack(side=tk.LEFT, padx=(10, 0))  # 增加左侧间距
         self._deps.tooltip(
             refresh_btn,
             "刷新模型列表\n从API获取最新可用模型",
@@ -385,15 +391,33 @@ class ConfigGroupPanel:
         )
 
         # 映射模型ID行（客户端使用的模型名）
-        ttk.Label(main_frame, text="映射模型ID:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Label(model_frame, text="映射模型ID:", width=15, anchor=tk.E).grid(row=1, column=0, sticky=tk.E, pady=8, padx=(0, 10))
         mapped_model_id_var = tk.StringVar(value=mapped_model_id_value)
-        mapped_model_id_entry = ttk.Entry(main_frame, textvariable=mapped_model_id_var, width=35)
-        mapped_model_id_entry.grid(row=5, column=1, sticky=tk.EW, padx=(10, 0), pady=5)
+        mapped_model_id_entry = ttk.Entry(model_frame, textvariable=mapped_model_id_var, width=40)
+        mapped_model_id_entry.grid(row=1, column=1, columnspan=3, sticky=tk.EW, pady=8)
         self._deps.tooltip(
             mapped_model_id_entry,
             "映射模型ID（客户端使用的模型名）\n默认与实际模型ID相同\n示例：gpt-4o-mini",
             wraplength=250,
         )
+        
+        model_frame.columnconfigure(1, weight=1)
+
+        # ========== 高级配置区域 ==========
+        advanced_frame = ttk.LabelFrame(main_frame, text="高级配置", padding=10)
+        advanced_frame.pack(fill=tk.X, pady=(0, 10))
+
+        middle_route_toggle = ttk.Checkbutton(
+            advanced_frame,
+            text="修改中间路由",
+            variable=middle_route_enabled_var,
+        )
+        middle_route_toggle.grid(row=0, column=0, sticky=tk.W, pady=8, padx=(0, 10))
+
+        middle_route_entry = ttk.Entry(advanced_frame, textvariable=middle_route_var, width=40)
+        middle_route_entry.grid(row=0, column=1, columnspan=3, sticky=tk.EW, pady=8)
+        
+        advanced_frame.columnconfigure(1, weight=1)
 
         def set_middle_route_placeholder() -> None:
             nonlocal placeholder_active
@@ -446,23 +470,23 @@ class ConfigGroupPanel:
         middle_route_entry.bind("<KeyRelease>", on_middle_route_key_release)
         apply_middle_route_state()
 
+        # ========== 底部区域 ==========
+        bottom_frame = ttk.Frame(main_frame)
+        bottom_frame.pack(fill=tk.X, pady=(10, 0))
+        
         info_label = ttk.Label(
-            main_frame,
+            bottom_frame,
             text="* 为必填项",
             font=self._deps.get_preferred_font(size=8),
             foreground="gray",
         )
-        info_label.grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=5)
+        info_label.pack(side=tk.LEFT)
 
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=8, column=0, columnspan=2, pady=20)
+        button_frame = ttk.Frame(bottom_frame)
+        button_frame.pack(side=tk.RIGHT)
 
-        ttk.Button(button_frame, text="保存", command=handle_save).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="取消", command=window.destroy).pack(
-            side=tk.LEFT, padx=5
-        )
-
-        main_frame.columnconfigure(1, weight=1)
+        ttk.Button(button_frame, text="保存", command=handle_save, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="取消", command=window.destroy, width=10).pack(side=tk.LEFT)
         self._deps.center_window(window)
         window.grab_set()
         name_entry.focus()
