@@ -168,11 +168,7 @@ def start_proxy_instance_result(
         deps.log("正在修改hosts文件...")
         modify_result = deps.modify_hosts_file(log_func=deps.log)
         if not modify_result.ok:
-            deps.log("❌ 修改hosts文件失败，代理服务器未启动")
-            return OperationResult.failure(
-                modify_result.message or "修改hosts文件失败",
-                code=modify_result.code,
-            )
+            deps.log("⚠️ 修改hosts文件失败，将继续尝试启动代理服务器")
     deps.log("开始启动代理服务器...")
     instance = ProxyServer(config, log_func=deps.log, thread_manager=deps.thread_manager)
     deps.set_proxy_instance(instance)
