@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mtga-gui"
-version = "1.7.0"
+version = "1.7.1"
 description = "基于本地代理的方式，绕过 IDE 的固定模型服务商限制"
 readme = "README.md"
 requires-python = ">=3.13"
