@@ -497,7 +497,7 @@ def build_main_tabs(deps: MainTabsDeps) -> tuple[ttk.Notebook, ttk.Button]:
                 if takefocus in (True, "1", 1, "true"):
                     focus_target = child
                     break
-                if isinstance(child, (ttk.Button, tk.Button)):
+                if isinstance(child, ttk.Button | tk.Button):
                     focus_target = child
                     break
 
