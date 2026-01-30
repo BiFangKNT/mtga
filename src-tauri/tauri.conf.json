@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "mtga-tauri",
-  "version": "2.0.0-beta.6",
+  "version": "2.0.0-beta.7",
   "identifier": "com.mtga.tauri",
   "build": {
     "frontendDist": "../dist",
