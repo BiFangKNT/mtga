@@ -5,6 +5,7 @@ from typing import Any
 
 import requests
 
+from modules.network.outbound_proxy import create_outbound_session
 from modules.proxy.proxy_config import normalize_middle_route
 
 HTTP_OK = 200
@@ -102,6 +103,72 @@ def _parse_model_ids(
     return model_ids
 
 
+def _prepare_chat_test_request(
+    config_group: dict[str, Any],
+    log_func: Callable[[str], None],
+) -> tuple[str, dict[str, str], dict[str, Any], str] | None:
+    api_url = config_group.get("api_url", "").rstrip("/")
+    model_id = config_group.get("model_id", "")
+    api_key = config_group.get("api_key", "")
+
+    if not api_url or not model_id:
+        log_func("测活失败: API URL或模型ID为空")
+        return None
+
+    route_path = _build_middle_route_path(
+        config_group.get("middle_route", ""),
+        "chat/completions",
+    )
+    test_url = f"{api_url}{route_path}"
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    test_data = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": "1"}],
+        "max_tokens": 1,
+        "temperature": 0,
+    }
+
+    return test_url, headers, test_data, model_id
+
+
+def _log_chat_completion_response(
+    response: requests.Response,
+    model_id: str,
+    log_func: Callable[[str], None],
+) -> None:
+    if response.status_code == HTTP_OK:
+        log_func(f"✅ 模型测活成功: {model_id}")
+        try:
+            completion_info = response.json()
+            if "choices" in completion_info and completion_info["choices"]:
+                content = (
+                    completion_info["choices"][0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                preview = content[:CONTENT_PREVIEW_LEN]
+                suffix = "..." if len(content) > CONTENT_PREVIEW_LEN else ""
+                log_func(f"   响应内容: {preview}{suffix}")
+            if "usage" in completion_info:
+                usage = completion_info["usage"]
+                log_func(f"   消耗tokens: {usage.get('total_tokens', '未知')}")
+        except Exception:
+            log_func("   (响应成功，但无法解析详细信息)")
+        return
+
+    log_func(f"❌ 模型测活失败: HTTP {response.status_code}")
+    try:
+        error_info = response.text[:200]
+        log_func(f"   错误信息: {error_info}")
+    except Exception:
+        log_func("   (无法获取错误详情)")
+
+
 def _fetch_model_payload(
     config_group: dict[str, Any],
     log_func: Callable[[str], None],
@@ -126,8 +193,9 @@ def _fetch_model_payload(
     log_func(f"正在获取模型列表: {test_url}")
 
     suffix = f": {model_id}" if model_id else ""
+    session = create_outbound_session()
     try:
-        response = requests.get(test_url, headers=headers, timeout=10)
+        response = session.get(test_url, headers=headers, timeout=10)
     except requests.exceptions.Timeout:
         log_func(f"❌ 模型列表获取超时{suffix}")
         return None
@@ -137,6 +205,8 @@ def _fetch_model_payload(
     except Exception as exc:
         log_func(f"❌ 模型列表获取意外错误{suffix}: {str(exc)}")
         return None
+    finally:
+        session.close()
 
     if response.status_code != HTTP_OK:
         _log_response_error(response, log_func)
@@ -198,66 +268,28 @@ def test_chat_completion(
     """测试聊天补全连接（POST /v1/chat/completions）。"""
 
     def run_test():
-        model_id = "未知模型"
         try:
-            api_url = config_group.get("api_url", "").rstrip("/")
-            model_id = config_group.get("model_id", "")
-            api_key = config_group.get("api_key", "")
-
-            if not api_url or not model_id:
-                log_func("测活失败: API URL或模型ID为空")
+            request_info = _prepare_chat_test_request(config_group, log_func)
+            if not request_info:
                 return
-
-            route_path = _build_middle_route_path(
-                config_group.get("middle_route", ""),
-                "chat/completions",
-            )
-            test_url = f"{api_url}{route_path}"
-
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-
-            test_data = {
-                "model": model_id,
-                "messages": [{"role": "user", "content": "1"}],
-                "max_tokens": 1,
-                "temperature": 0,
-            }
-
+            test_url, headers, test_data, model_id = request_info
             log_func(f"正在测活模型: {model_id} (会消耗少量tokens)")
 
-            response = requests.post(test_url, json=test_data, headers=headers, timeout=30)
+            session = create_outbound_session()
+            try:
+                response = session.post(
+                    test_url,
+                    json=test_data,
+                    headers=headers,
+                    timeout=30,
+                )
+            finally:
+                session.close()
 
-            if response.status_code == HTTP_OK:
-                log_func(f"✅ 模型测活成功: {model_id}")
-                try:
-                    completion_info = response.json()
-                    if "choices" in completion_info and completion_info["choices"]:
-                        content = (
-                            completion_info["choices"][0]
-                            .get("message", {})
-                            .get("content", "")
-                            .strip()
-                        )
-                        preview = content[:CONTENT_PREVIEW_LEN]
-                        suffix = "..." if len(content) > CONTENT_PREVIEW_LEN else ""
-                        log_func(f"   响应内容: {preview}{suffix}")
-                    if "usage" in completion_info:
-                        usage = completion_info["usage"]
-                        log_func(f"   消耗tokens: {usage.get('total_tokens', '未知')}")
-                except Exception:
-                    log_func("   (响应成功，但无法解析详细信息)")
-            else:
-                log_func(f"❌ 模型测活失败: HTTP {response.status_code}")
-                try:
-                    error_info = response.text[:200]
-                    log_func(f"   错误信息: {error_info}")
-                except Exception:
-                    log_func("   (无法获取错误详情)")
+            _log_chat_completion_response(response, model_id, log_func)
 
         except requests.exceptions.Timeout:
-            log_func(f"❌ 模型测活超时: {model_id}")
+            log_func("❌ 模型测活超时")
         except requests.exceptions.RequestException as exc:
             log_func(f"❌ 模型测活网络错误: {str(exc)}")
         except Exception as exc:

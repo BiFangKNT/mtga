@@ -26,6 +26,15 @@ class HtmlFontOptions:
 
 
 @dataclass(slots=True)
+class RenderContext:
+    repo: str
+    timeout: int = 10
+    user_agent: str | None = None
+    font: HtmlFontOptions | None = None
+    session: requests.Session | None = None
+
+
+@dataclass(slots=True)
 class ReleaseInfo:
     """GitHub 最新发行版的核心信息。"""
 
@@ -37,10 +46,7 @@ class ReleaseInfo:
 def render_markdown_via_github_api(
     markdown_text: str | None,
     *,
-    repo: str,
-    timeout: int = 10,
-    user_agent: str | None = None,
-    font: HtmlFontOptions | None = None,
+    context: RenderContext,
 ) -> str:
     """调用 GitHub /markdown API 渲染 Markdown 为 HTML。
 
@@ -56,9 +62,9 @@ def render_markdown_via_github_api(
     # )
     safe_source = markdown_text or ""
 
-    font_family = font.family if font else None
-    font_size = font.size if font else None
-    font_weight = font.weight if font else None
+    font_family = context.font.family if context.font else None
+    font_size = context.font.size if context.font else None
+    font_weight = context.font.weight if context.font else None
 
     escaped_family = (font_family or "").replace('"', r"\"").strip()
     font_stack = (
@@ -84,14 +90,15 @@ def render_markdown_via_github_api(
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
     }
-    if user_agent:
-        headers["User-Agent"] = user_agent
+    if context.user_agent:
+        headers["User-Agent"] = context.user_agent
 
+    client = context.session or requests
     try:
-        response = requests.post(
+        response = client.post(
             "https://api.github.com/markdown",
-            json={"text": safe_source, "mode": "gfm", "context": repo},
-            timeout=timeout,
+            json={"text": safe_source, "mode": "gfm", "context": context.repo},
+            timeout=context.timeout,
             headers=headers,
         )
         if response.status_code == requests.codes.ok:  # type: ignore[attr-defined]
@@ -288,6 +295,7 @@ def fetch_latest_release(
     timeout: int = 10,
     user_agent: str | None = None,
     font: HtmlFontOptions | None = None,
+    session: requests.Session | None = None,
 ) -> ReleaseInfo:
     """从 GitHub API 获取 latest 发行版信息。"""
     if not repo:
@@ -297,7 +305,8 @@ def fetch_latest_release(
     if user_agent:
         headers["User-Agent"] = user_agent
 
-    response = requests.get(api_url, timeout=timeout, headers=headers)
+    client = session or requests
+    response = client.get(api_url, timeout=timeout, headers=headers)
     if response.status_code != requests.codes.ok:  # type: ignore[attr-defined]
         raise RuntimeError(f"GitHub 返回 {response.status_code}")
 
@@ -307,10 +316,13 @@ def fetch_latest_release(
     )
     release_notes = render_markdown_via_github_api(
         data.get("body") or "",
-        repo=repo,
-        timeout=timeout,
-        user_agent=user_agent,
-        font=font,
+        context=RenderContext(
+            repo=repo,
+            timeout=timeout,
+            user_agent=user_agent,
+            font=font,
+            session=session,
+        ),
     )
     release_url = data.get("html_url") or ""
     return ReleaseInfo(

@@ -11,6 +11,7 @@ from collections.abc import Generator
 import requests
 from requests.adapters import HTTPAdapter
 
+from modules.network.outbound_proxy import apply_outbound_proxy
 from modules.runtime.resource_manager import ResourceManager, is_packaged
 
 
@@ -64,6 +65,7 @@ class ProxyTransport:
                 self._log("关闭 SSL 严格模式: 使用自定义 HTTPS 上下文")
             except Exception as exc:  # noqa: BLE001
                 self._log(f"配置非严格 SSL 上下文失败，继续使用默认设置: {exc}")
+        apply_outbound_proxy(session)
         return session
 
     def prepare_sse_log_path(self) -> str:

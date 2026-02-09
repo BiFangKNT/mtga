@@ -10,6 +10,7 @@ export default withNuxt(
       ".nuxt",
       ".output",
       "dist",
+      "archive",
       "src-tauri",
       "python-src",
       "pnpm-lock.yaml",

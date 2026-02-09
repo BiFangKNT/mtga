@@ -19,6 +19,8 @@ type RuntimeOptions = {
   streamMode: "true" | "false"
 }
 
+type OutboundProxyType = "http" | "https" | "socks4" | "socks5"
+
 const DEFAULT_APP_INFO: AppInfo = {
   display_name: "MTGA",
   version: "v0.0.0",
@@ -36,10 +38,26 @@ const DEFAULT_RUNTIME_OPTIONS: RuntimeOptions = {
   streamMode: "true",
 }
 
+const OUTBOUND_PROXY_TYPES: OutboundProxyType[] = ["http", "https", "socks4", "socks5"]
+
 const FRONTEND_LOG_LIMIT = 2000
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const coerceBoolean = (value: unknown) => {
+  if (typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "number") {
+    return value !== 0
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    return ["1", "true", "yes", "on"].includes(normalized)
+  }
+  return false
+}
 
 const isMainTabKey = (value: unknown): value is MainTabKey =>
   value === "cert" || value === "hosts" || value === "proxy"
@@ -98,6 +116,25 @@ const coerceText = (value: unknown) => {
   return ""
 }
 
+const normalizeProxyType = (value: unknown): OutboundProxyType => {
+  const normalized = coerceText(value).trim().toLowerCase()
+  if (normalized === "http") return "http"
+  if (normalized === "https") return "https"
+  if (normalized === "socks4") return "socks4"
+  if (normalized === "socks5") return "socks5"
+  return "http"
+}
+
+const normalizeProxyPort = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value)
+  }
+  if (typeof value === "string") {
+    return value
+  }
+  return ""
+}
+
 const normalizeModelList = (value: unknown) => {
   if (!Array.isArray(value)) {
     return []
@@ -126,6 +163,12 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0)
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "")
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "")
+  const outboundProxyEnabled = useState<boolean>("mtga-outbound-proxy-enabled", () => false)
+  const outboundProxyType = useState<OutboundProxyType>("mtga-outbound-proxy-type", () => "http")
+  const outboundProxyHost = useState<string>("mtga-outbound-proxy-host", () => "")
+  const outboundProxyPort = useState<string>("mtga-outbound-proxy-port", () => "")
+  const outboundProxyUsername = useState<string>("mtga-outbound-proxy-username", () => "")
+  const outboundProxyPassword = useState<string>("mtga-outbound-proxy-password", () => "")
   const runtimeOptions = useState<RuntimeOptions>(
     "mtga-runtime-options",
     () => ({ ...DEFAULT_RUNTIME_OPTIONS })
@@ -412,6 +455,12 @@ export const useMtgaStore = () => {
     )
     mappedModelId.value = coerceText(result.mapped_model_id)
     mtgaAuthKey.value = coerceText(result.mtga_auth_key)
+    outboundProxyEnabled.value = coerceBoolean(result.outbound_proxy_enabled)
+    outboundProxyType.value = normalizeProxyType(result.outbound_proxy_type)
+    outboundProxyHost.value = coerceText(result.outbound_proxy_host)
+    outboundProxyPort.value = normalizeProxyPort(result.outbound_proxy_port)
+    outboundProxyUsername.value = coerceText(result.outbound_proxy_username)
+    outboundProxyPassword.value = coerceText(result.outbound_proxy_password)
     return true
   }
 
@@ -421,11 +470,19 @@ export const useMtgaStore = () => {
       configGroups.value.length
     )
     currentConfigIndex.value = clampedIndex
+    const parsedProxyPort = Number.parseInt(outboundProxyPort.value, 10)
+    const proxyPortValue = Number.isFinite(parsedProxyPort) ? parsedProxyPort : 0
     const payload: ConfigPayload = {
       config_groups: configGroups.value,
       current_config_index: clampedIndex,
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      outbound_proxy_enabled: outboundProxyEnabled.value,
+      outbound_proxy_type: outboundProxyType.value,
+      outbound_proxy_host: coerceText(outboundProxyHost.value),
+      outbound_proxy_port: proxyPortValue,
+      outbound_proxy_username: coerceText(outboundProxyUsername.value),
+      outbound_proxy_password: coerceText(outboundProxyPassword.value),
     }
     const ok = await api.saveConfig(payload)
     return Boolean(ok)
@@ -692,6 +749,13 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    outboundProxyEnabled,
+    outboundProxyType,
+    outboundProxyHost,
+    outboundProxyPort,
+    outboundProxyUsername,
+    outboundProxyPassword,
+    outboundProxyTypes: OUTBOUND_PROXY_TYPES,
     runtimeOptions,
     logs,
     logCursor,

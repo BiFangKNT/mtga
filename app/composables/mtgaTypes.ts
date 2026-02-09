@@ -13,6 +13,12 @@ export type ConfigPayload = {
   current_config_index: number
   mapped_model_id: string
   mtga_auth_key: string
+  outbound_proxy_enabled: boolean
+  outbound_proxy_type: "http" | "https" | "socks4" | "socks5"
+  outbound_proxy_host: string
+  outbound_proxy_port: number
+  outbound_proxy_username: string
+  outbound_proxy_password: string
 }
 
 export type AppInfo = {

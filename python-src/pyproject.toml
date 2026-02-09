@@ -9,6 +9,7 @@ dependencies = [
     "pytauri-wheel==0.8.*",
     "flask",
     "requests",
+    "PySocks",
     "platformdirs>=4.3.0",
     "PyYAML",
 ]

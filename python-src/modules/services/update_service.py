@@ -5,6 +5,7 @@ from typing import Literal
 
 import requests
 
+from modules.network.outbound_proxy import create_outbound_session
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.update import update_checker
@@ -51,12 +52,17 @@ def check_for_updates(
         )
 
     try:
-        release_info = update_checker.fetch_latest_release(
-            repo,
-            timeout=timeout,
-            user_agent=user_agent,
-            font=font_options,
-        )
+        session = create_outbound_session()
+        try:
+            release_info = update_checker.fetch_latest_release(
+                repo,
+                timeout=timeout,
+                user_agent=user_agent,
+                font=font_options,
+                session=session,
+            )
+        finally:
+            session.close()
     except requests.RequestException as exc:
         return UpdateCheckResult(
             status="network_error",
