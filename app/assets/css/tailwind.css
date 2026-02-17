@@ -14,14 +14,9 @@
    这里的变量会自动映射为 Tailwind 的实用类（如 bg-primary, text-mtga-accent）。
 */
 @theme {
-  /* 
-     在 Tailwind CSS 4 中定义主题颜色。
-     直接使用颜色值，确保 Tailwind 的实用类（如 bg-primary）能正确生成。
-  */
   --color-primary: #f0bb32;
   --color-primary-content: #1e293b;
 
-  /* 品牌色变量定义，供 Tailwind 实用类使用（如 text-mtga-accent） */
   --color-mtga-bg: #f7f8fb;
   --color-mtga-surface: #ffffff;
   --color-mtga-surface-soft: #f3f6fa;
@@ -32,86 +27,72 @@
   --color-mtga-text: #0f172a;
   --color-mtga-text-muted: #64748b;
 
-  @keyframes bounce-subtle {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-2px); }
-  }
   --animate-bounce-subtle: bounce-subtle 2s ease-in-out infinite;
 }
 
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+/* 
+   仅对输入控件移除默认粗黑外边框 (Focus Outline)
+   保留按钮/链接等元素的可见焦点，避免键盘可访问性回退
+*/
+.input:focus,
+.textarea:focus,
+.input:focus-within,
+.textarea:focus-within {
+  outline: 2px solid transparent !important;
+  outline-offset: 2px !important;
+}
+
+/* 
+   显式覆盖 daisyUI 注入的主题变量。
+   通过 :root 和 [data-theme] 确保在任何模式（浅色/深色）下都能强制生效。
+*/
+:root, [data-theme] {
+  --color-primary: #f0bb32 !important;
+  --color-primary-content: #1e293b !important;
+}
+
+/* 针对 Firefox 的兼容性 */
 @layer base {
-  /* 
-     仅对输入控件移除默认粗黑外边框 (Focus Outline)
-     保留按钮/链接等元素的可见焦点，避免键盘可访问性回退
-  */
-  .input:focus,
-  .textarea:focus,
-  .input:focus-within,
-  .textarea:focus-within {
-    outline: 2px solid transparent !important;
-    outline-offset: 2px !important;
-  }
-
-  /* 
-     显式覆盖 daisyUI 注入的主题变量。
-     通过 :root 和 [data-theme] 确保在任何模式（浅色/深色）下都能强制生效。
-  */
-  :root, [data-theme] {
-    --color-primary: #f0bb32 !important;
-    --color-primary-content: #1e293b !important;
-
-    /* 同时也定义一份 CSS 变量，供非 Tailwind 样式（如 scrollbar）通过 var() 引用 */
-    --mtga-bg: #f7f8fb;
-    --mtga-surface: #ffffff;
-    --mtga-surface-soft: #f3f6fa;
-    --mtga-border: #e5e7eb;
-    --mtga-accent: #f0bb32;
-    --mtga-accent-strong: #d9a307;
-    --mtga-warn: #f59e0b;
-    --mtga-text: #0f172a;
-    --mtga-text-muted: #64748b;
-  }
-  /* 自定义全局滚动条样式 */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: var(--mtga-border); /* 使用定义的边框颜色作为默认色 */
-    border-radius: 10px;
-    border: 1px solid transparent; /* 增加一点内边距效果 */
-    background-clip: padding-box;
-    transition: background 0.2s ease;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--mtga-accent); /* 悬停时使用品牌色 */
-    border: 1px solid transparent;
-    background-clip: padding-box;
-  }
-
-  /* 针对 Firefox 的兼容性 */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--mtga-border) transparent;
+    scrollbar-color: var(--color-mtga-border) transparent;
   }
+}
 
-  body {
-    background-color: var(--mtga-bg);
-    background-image:
-      /* 左上角：琥珀金光晕，增强温暖感 */
-      radial-gradient(circle at 15% 15%, rgba(251, 191, 36, 0.15), transparent 50%),
-      /* 右下角：极淡的夕阳粉，增加层次感 */
-      radial-gradient(circle at 85% 85%, rgba(251, 113, 133, 0.05), transparent 40%),
-      /* 基础线性渐变：以 #fffbeb 为核心的暖色调过渡 */
-      linear-gradient(135deg, #fffbeb 0%, #fff9e6 45%, #fff2e0 100%);
-    color: var(--mtga-text);
-  }
+/* 自定义全局滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-mtga-border); /* 使用定义的边框颜色作为默认色 */
+  border-radius: 10px;
+  border: 1px solid transparent; /* 增加一点内边距效果 */
+  background-clip: padding-box;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-mtga-accent); /* 悬停时使用品牌色 */
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+body {
+  background-color: var(--color-mtga-bg);
+  /* 背景图层叠加：琥珀金光晕 + 夕阳粉光晕 + 暖色线性渐变 */
+  background-image: radial-gradient(circle at 15% 15%, rgba(251, 191, 36, 0.15), transparent 50%), radial-gradient(circle at 85% 85%, rgba(251, 113, 133, 0.05), transparent 40%), linear-gradient(135deg, #fffbeb 0%, #fff9e6 45%, #fff2e0 100%);
+  color: var(--color-mtga-text);
 }
 
   /* 
@@ -240,6 +221,13 @@
   }
 
   /**
+   * 设置页面的行样式 (左侧标签+描述，右侧控件)
+   */
+  .mtga-settings-row {
+    @apply flex items-center justify-between p-3 rounded-xl bg-amber-50/50 border border-amber-100/50;
+  }
+
+  /**
    * 用于点击的长条形子样式
    * 继承自 mtga-soft-panel 的基础样式，具有较小的高度和全宽
    */
@@ -276,8 +264,8 @@
     
     /* 基础视觉样式：匹配按钮悬停态与品牌色 */
     background-color: #fffbeb; /* amber-50 */
-    color: var(--mtga-text);
-    border: 1px solid var(--mtga-accent); /* 使用品牌金黄色 */
+    color: var(--color-mtga-text);
+    border: 1px solid var(--color-mtga-accent); /* 使用品牌金黄色 */
     padding: 0.5rem 0.75rem;
     border-radius: 0.75rem; /* 匹配按钮的 rounded-xl */
     font-size: 0.75rem;
@@ -314,8 +302,8 @@
     width: 8px;
     height: 8px;
     background-color: #fffbeb;
-    border-right: 1px solid var(--mtga-accent);
-    border-bottom: 1px solid var(--mtga-accent);
+    border-right: 1px solid var(--color-mtga-accent);
+    border-bottom: 1px solid var(--color-mtga-accent);
     transform: rotate(45deg);
   }
 

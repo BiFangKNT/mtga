@@ -352,10 +352,10 @@ const moveDown = async () => {
 </script>
 
 <template>
-  <div class="flex flex-wrap items-start justify-between gap-3">
+  <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h2 class="mtga-card-title">代理服务器配置组</h2>
-      <p class="mtga-card-subtitle">管理模型路由与鉴权组合</p>
+      <h2 class="mtga-card-title">配置分组</h2>
+      <p class="mtga-card-subtitle">管理上游模型服务、鉴权与路由策略</p>
     </div>
     <div class="flex items-center gap-2">
       <button

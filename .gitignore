@@ -1,56 +1,80 @@
-# Nuxt dev/build outputs
-.output
-.data
-.nuxt
-.nitro
-.cache
-dist
-
-# Node dependencies
-node_modules
-
-# Logs
-logs
-*.log
-
-# Misc
+# --- IDE & OS ---
 .DS_Store
-.fleet
-.idea
+Thumbs.db
+.vscode/
+.idea/
+.fleet/
+.trae/
+*.bak
+*副本*
+*copy*
 
-# Local env files
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+debug_request.log
+
+# --- Node / Nuxt ---
+node_modules/
+.nuxt/
+.output/
+.data/
+.nitro/
+.cache/
+dist/
+.pnpm-store/
+.npmrc
+
+# --- Environment ---
 .env
 .env.*
 !.env.example
 
-ca/api.*.com.crt
-ca/api.*.com.csr
-ca/api.*.com.key
-ca/ca.crt
-ca/ca.key
-ca/ca.srl
-*.bak
-__pycache__
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.uv_cache/
+*.egg-info/
+# Python build artifacts
+build/
+dist/
 _build_version.py
-build
-dist*
-*copy*
-ca/api.deepseek.com.cnf
-ca/api.deepseek.com.subj
 temp_proxy.py
-hosts.backup
-mtga_config.json
-*副本*
-mtga_config.yaml
-ca/generativelanguage.googleapis.com.*
-debug_request.log
-.DS_Store
-*.log
-MTGA_GUI.app
+
+# --- Rust / Tauri ---
+src-tauri/target/
+src-tauri/gen/
+src-tauri/pyembed/
+# Tauri build output
+src-tauri/build/
 *.dmg
-.trae
-node_modules
-tmp
-logs
-mtga-tauri/src-tauri/mtga_app.egg-info
-mtga-tauri/src-tauri/pyembed/python
+*.app
+MTGA_GUI.app
+
+# --- Application Runtime & Data ---
+# Configs
+mtga_config.yaml
+mtga_config.json
+hosts.backup
+
+# Certificates (Global ignore for generated secrets)
+*.crt
+*.key
+*.csr
+*.srl
+*.pem
+*.p12
+
+# Specific ignores from old file (likely generated in root or specific dirs during dev)
+ca/api.*.com.*
+ca/generativelanguage.googleapis.com.*
+
+# --- Misc ---
+tmp/

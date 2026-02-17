@@ -1,0 +1,187 @@
+name: 🚀 构建和发布版本(TAURI) - test win
+on:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.13"
+  VERSION: "v2.0.0-test-win"
+
+jobs:
+  build-windows:
+    name: 🪟 构建 Windows
+    runs-on: windows-latest
+    env:
+      UV_CACHE_DIR: "${{ github.workspace }}\\.uv_cache"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v6
+
+      - name: 🐍 设置 Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 🟢 设置 Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: 🔧 启用 Corepack
+        id: pnpm-store
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          pnpm --version
+          $store = pnpm store path --silent
+          "pnpm_store_path=$store" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: 💾 缓存 pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.pnpm_store_path }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: 🦀 设置 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 🧰 缓存 Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+          shared-key: tauri-${{ runner.os }}-x64
+
+      - name: 🔍 调试 uv.lock
+        run: |
+          Get-Location
+          if (Test-Path python-src/uv.lock) {
+            Get-Item python-src/uv.lock | Format-List FullName,Length
+            Get-Content python-src/uv.lock -TotalCount 5
+          } else {
+            Write-Host "python-src/uv.lock 不存在"
+          }
+
+      - name: 🧮 计算 uv.lock 哈希
+        id: uv-lock-hash
+        run: |
+          if (Test-Path python-src/uv.lock) {
+            $hash = (Get-FileHash python-src/uv.lock -Algorithm SHA256).Hash
+          } else {
+            $hash = "missing"
+            Write-Host "⚠️ uv.lock 不存在，缓存 key 使用 missing"
+          }
+          "hash=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: 💾 缓存 uv 依赖
+        uses: actions/cache@v5
+        with:
+          path: |
+            python-src/.venv
+            .uv_cache
+            ${{ env.USERPROFILE }}\.local\bin\uv.exe
+            ${{ env.USERPROFILE }}\.local\bin\uvx.exe
+          key: ${{ runner.os }}-py-${{ steps.setup-python.outputs.python-version }}-uv-win-${{ steps.uv-lock-hash.outputs.hash }}
+          restore-keys: |
+            ${{ runner.os }}-py-${{ steps.setup-python.outputs.python-version }}-uv-win-
+
+      - name: 📦 安装 uv
+        run: |
+          $ErrorActionPreference = "Stop"
+          $uvBinDir = Join-Path $env:USERPROFILE ".local\\bin"
+          $env:PATH = "$uvBinDir;$env:PATH"
+          $uvBinDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          for ($i = 1; $i -le 3; $i++) {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+              break
+            }
+            Write-Host "🔁 尝试安装 uv（第 $i 次）..."
+            try {
+              Invoke-WebRequest -Uri "https://astral.sh/uv/install.ps1" -OutFile "install.ps1"
+              ./install.ps1
+            } catch {
+              Write-Host "⚠️ uv 安装脚本执行失败: $($_.Exception.Message)"
+            }
+            Start-Sleep -Seconds (5 * $i)
+          }
+
+          if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+            throw "uv 安装失败（多次重试后仍不可用）"
+          }
+
+          uv --version
+
+      - name: 🔧 同步 Python 依赖
+        run: uv sync --project .
+        working-directory: python-src
+
+      - name: 📦 安装前端依赖
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: 📥 准备 pyembed Python
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pyembedDir = "src-tauri/pyembed"
+          New-Item -ItemType Directory -Path $pyembedDir -Force | Out-Null
+          $assetUrl = gh api /repos/astral-sh/python-build-standalone/releases/latest `
+            -H "Accept: application/vnd.github+json" `
+            -H "X-GitHub-Api-Version: 2022-11-28" `
+            --jq '.assets[] | select(.name | test("cpython-3\\.13\\..*\\+.*-x86_64-pc-windows-msvc-install_only_stripped\\.tar\\.gz")) | .browser_download_url' |
+            Select-Object -First 1
+          if (-not $assetUrl) { throw "❌ 未找到匹配的 Python 构建产物" }
+          $archivePath = Join-Path $pyembedDir "python-standalone.tar.gz"
+          Write-Host "⬇️ 下载: $assetUrl"
+          Invoke-WebRequest -Uri $assetUrl -OutFile $archivePath
+          tar -xzf $archivePath -C $pyembedDir
+
+      - name: 🧾 写入 pyembed .env
+        run: |
+          $envDir = "src-tauri/pyembed/python/Lib"
+          New-Item -ItemType Directory -Path $envDir -Force | Out-Null
+          Copy-Item -Path ".env.example" -Destination (Join-Path $envDir ".env") -Force
+
+      - name: 🧩 安装 pytauri 依赖
+        run: pnpm pytauri:install:win
+        working-directory: .
+
+      - name: 🧱 打包 Tauri
+        run: pnpm tauri:bundle:win:ci
+        working-directory: .
+
+      - name: 🏷️ 输出重命名前安装包列表
+        run: |
+          Write-Host "🗂️ 重命名前文件列表:"
+          Get-ChildItem "src-tauri/target/bundle-release/bundle/nsis" -Filter *.exe |
+            Select-Object -ExpandProperty Name |
+            ForEach-Object { Write-Host " - $_" }
+          $version = "${{ env.VERSION }}"
+          $tag = "windows"
+          $escaped = [regex]::Escape("_${version}_")
+          Write-Host "🧪 调试变量:"
+          Write-Host " - version: $version"
+          Write-Host " - tag: $tag"
+          Write-Host " - escaped: $escaped"
+          Get-ChildItem "src-tauri/target/bundle-release/bundle/nsis" -Filter *.exe | ForEach-Object {
+            $name = $_.Name
+            Write-Host "🔎 检查: $name"
+            if ($name -match $escaped) {
+              Write-Host "✅ 匹配到版本占位: $escaped"
+              $newName = $name -replace $escaped, "_${version}_${tag}_"
+              Write-Host "➡️  目标文件名: $newName"
+              if ($newName -ne $name) {
+                Rename-Item -Path $_.FullName -NewName $newName
+              }
+            }
+          }
+          Write-Host "🗂️ 重命名后文件列表:"
+          Get-ChildItem "src-tauri/target/bundle-release/bundle/nsis" -Filter *.exe |
+            Select-Object -ExpandProperty Name |
+            ForEach-Object { Write-Host " - $_" }

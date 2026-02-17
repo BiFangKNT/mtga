@@ -250,6 +250,9 @@ class SaveConfigPayload(BaseModel):
     current_config_index: int
     mapped_model_id: str | None = None
     mtga_auth_key: str | None = None
+    github_token: str | None = None
+    disable_update_popup: bool | None = None
+    theme_config: dict[str, Any] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -272,12 +275,15 @@ async def greet(body: GreetPayload) -> str:
 async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     config_groups, current_index = config_store.load_config_groups()
-    mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    mapped_model_id, mtga_auth_key, github_token, disable_update_popup, theme_config = config_store.load_global_config()
     return {
         "config_groups": config_groups,
         "current_config_index": current_index,
         "mapped_model_id": mapped_model_id,
         "mtga_auth_key": mtga_auth_key,
+        "github_token": github_token,
+        "disable_update_popup": disable_update_popup,
+        "theme_config": theme_config,
     }
 
 
@@ -289,6 +295,9 @@ async def save_config(body: SaveConfigPayload) -> bool:
         body.current_config_index,
         body.mapped_model_id,
         body.mtga_auth_key,
+        body.github_token,
+        body.disable_update_popup,
+        body.theme_config,
     )
 
 

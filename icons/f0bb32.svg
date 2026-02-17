@@ -1,18 +1,19 @@
 <svg width="200" height="200" viewBox="0 0 95 95" xmlns="http://www.w3.org/2000/svg">
-  <!-- 定义遮罩 -->
-  <mask id="mask1">
-    <!-- 白色部分表示显示 -->
-    <rect width="95" height="95" fill="white"/>
-    <!-- 将原图形填充黑色（遮罩隐藏），用两个path，表示你原始镂空 -->
-    <g transform="translate(0,95) scale(0.05,-0.05)" fill="black" stroke="none">
-      <path d="M0 950 l0 -950 950 0 950 0 0 950 0 950 -950 0 -950 0 0 -950z m1600
-      80 l0 -370 -90 0 -90 0 0 -90 0 -90 -550 0 -550 0 0 460 0 460 640 0 640 0 0
-      -370z"/>
-      <path d="M500 940 l0 -280 460 0 460 0 0 280 0 280 -460 0 -460 0 0 -280z
-      m289 -60 l-61 -61 -58 61 -57 60 57 60 58 61 61 -61 60 -60 -60 -60z m360 0
-      l-61 -61 -58 61 -57 60 57 60 58 61 61 -61 60 -60 -60 -60z"/>
-    </g>
-  </mask>
-  <!-- 用遮罩后绘制反色区域 -->
-  <rect width="95" height="95" fill="#f0bb32" mask="url(#mask1)"/>
+  <defs>
+    <mask id="mask1">
+      <rect width="95" height="95" fill="white"/>
+      <g transform="translate(0,95) scale(0.05,-0.05)" fill="black" stroke="none">
+        <path d="M0 950 l0 -950 950 0 950 0 0 950 0 950 -950 0 -950 0 0 -950z m1600 80 l0 -370 -90 0 -90 0 0 -90 0 -90 -550 0 -550 0 0 460 0 460 640 0 640 0 0 -370z"/>
+        <path d="M500 940 l0 -280 460 0 460 0 0 280 0 280 -460 0 -460 0 0 -280z m289 -60 l-61 -61 -58 61 -57 60 57 60 58 61 61 -61 60 -60 -60 -60z m360 0 l-61 -61 -58 61 -57 60 57 60 58 61 61 -61 60 -60 -60 -60z"/>
+      </g>
+    </mask>
+  </defs>
+  <!-- Background: Chamfered Square Black Base (RGB 26, 27, 29 = #1A1B1D) -->
+  <rect x="0" y="0" width="95" height="95" rx="20" ry="20" fill="#1a1b1d"/>
+  
+  <!-- Foreground: Original Logo Scaled and Centered -->
+  <!-- Scale 0.75, Translate to center -->
+  <g transform="translate(11.875, 11.875) scale(0.75)">
+    <rect width="95" height="95" fill="#f0bb32" mask="url(#mask1)"/>
+  </g>
 </svg>

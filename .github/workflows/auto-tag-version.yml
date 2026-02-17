@@ -1,0 +1,80 @@
+name: Auto tag version bump
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - "**"
+  #   tags-ignore:
+  #     - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  tag-version-commit:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure tag push token configured
+        run: |
+          if [ -z "${{ secrets.MTGA_TAG_PUSH_TOKEN }}" ]; then
+            echo "::error::Missing secret MTGA_TAG_PUSH_TOKEN (PAT/App token required to push tags)"
+            exit 1
+          fi
+      - name: Detect version bump commit and create tag
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.MTGA_TAG_PUSH_TOKEN }}
+          script: |
+            const commits = context.payload.commits || [];
+            const pattern =
+              /^(?:chore|build): 更新(?:项目)?版本号至(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)$/;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            if (commits.length === 0) {
+              core.info("推送事件未包含 commits，跳过");
+              return;
+            }
+
+            for (const commit of commits) {
+              const message = (commit.message || "").split("\n")[0].trim();
+              const match = pattern.exec(message);
+
+              if (!match) {
+                core.info(`提交 ${commit.id} 不匹配约定消息，跳过`);
+                continue;
+              }
+
+              const version = match[1];
+              const tagName = `v${version}`;
+              core.info(`检测到版本号提交 ${commit.id}，准备创建标签 ${tagName}`);
+
+              let tagExists = false;
+              try {
+                await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${tagName}`,
+                });
+                tagExists = true;
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+
+              if (tagExists) {
+                core.info(`标签 ${tagName} 已存在，跳过创建`);
+                continue;
+              }
+
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tagName}`,
+                sha: commit.id,
+              });
+              core.info(`已创建标签 ${tagName} 指向 ${commit.id}`);
+            }

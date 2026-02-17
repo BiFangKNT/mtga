@@ -22,16 +22,6 @@
         "backgroundColor": "#fffbeb",
         "resizable": true,
         "fullscreen": false
-      },
-      {
-        "label": "splash",
-        "title": "MTGA",
-        "width": 1200,
-        "height": 800,
-        "url": "splashscreen.html",
-        "resizable": true,
-        "fullscreen": false,
-        "backgroundColor": "#fffbeb"
       }
     ],
     "security": {
@@ -40,9 +30,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "dmg"],
+    "targets": [
+      "nsis",
+      "dmg"
+    ],
     "resources": {
-      "pyembed/python": "./"
+      "pyembed/python": "pyembed/python",
+      "icons/icon.png": "tray-icon.png"
     },
     "icon": [
       "icons/32x32.png",

@@ -41,6 +41,7 @@ def check_for_updates(
     timeout: int = 10,
     user_agent: str | None = None,
     font: UpdateFontOptions | None = None,
+    github_token: str | None = None,
 ) -> UpdateCheckResult:
     font_options = None
     if font and (font.family or font.size or font.weight):
@@ -56,6 +57,7 @@ def check_for_updates(
             timeout=timeout,
             user_agent=user_agent,
             font=font_options,
+            github_token=github_token,
         )
     except requests.RequestException as exc:
         return UpdateCheckResult(
@@ -63,6 +65,12 @@ def check_for_updates(
             error_message=f"检查更新失败：网络异常 {exc}",
         )
     except (ValueError, RuntimeError) as exc:
+        msg = str(exc)
+        if "403" in msg:
+            return UpdateCheckResult(
+                status="remote_error",
+                error_message=f"检查更新太频繁，请稍后再试或在全局配置中填写 GitHub Token",
+            )
         return UpdateCheckResult(
             status="remote_error",
             error_message=f"检查更新失败：{exc}",
@@ -91,6 +99,7 @@ def check_for_updates_result(
     timeout: int = 10,
     user_agent: str | None = None,
     font: UpdateFontOptions | None = None,
+    github_token: str | None = None,
 ) -> OperationResult:
     result = check_for_updates(
         repo=repo,
@@ -98,6 +107,7 @@ def check_for_updates_result(
         timeout=timeout,
         user_agent=user_agent,
         font=font,
+        github_token=github_token,
     )
 
     if result.status == "network_error":

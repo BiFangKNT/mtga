@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ICONS } from './composables/icons'
 import { applyThemeConfig, loadThemeFromStorage } from './composables/themeConfig'
+import { useTray } from './composables/useTray'
 
 const {
   logs,
@@ -21,7 +22,15 @@ const {
   panelNavSignal,
 } = useMtgaStore()
 
+// 初始化系统托盘
+const tray = useTray()
+
 if (import.meta.client) {
+  onMounted(() => {
+    console.log('[App] App mounted, initializing tray...')
+    tray.init()
+  })
+  
   const savedTheme = loadThemeFromStorage()
   if (savedTheme) {
     applyThemeConfig(savedTheme)
@@ -111,10 +120,10 @@ const handleGlobalMouseOver = (e: MouseEvent) => {
  * 导航菜单配置
  */
 const navigation = [
-  { id: 'config-group', name: '代理配置组', icon: ICONS.CONFIG_GROUP },
-  { id: 'global-config', name: '全局配置', icon: ICONS.GLOBAL_CONFIG },
-  { id: 'main-tabs', name: '主要流程', icon: ICONS.MAIN_TABS },
-  { id: 'settings', name: '设置', icon: ICONS.SETTINGS },
+  { id: 'config-group', name: '配置分组', icon: ICONS.CONFIG_GROUP },
+  { id: 'global-config', name: '全局参数', icon: ICONS.GLOBAL_CONFIG },
+  { id: 'main-tabs', name: '核心服务', icon: ICONS.MAIN_TABS },
+  { id: 'settings', name: '系统设置', icon: ICONS.SETTINGS },
 ]
 
 const resolvePanelTarget = (value: string | null) => {

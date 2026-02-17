@@ -1,0 +1,39 @@
+name: 🔍 测试 fetch-depth 0 提交可见性
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "要检查的提交哈希（完整或前缀）"
+        required: true
+
+jobs:
+  check-commit-visible:
+    name: 检查提交在完整历史中是否可见
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 使用完整历史检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🧾 打印 HEAD 与最近提交
+        run: |
+          echo "当前 HEAD:"
+          git rev-parse HEAD
+          echo "最近 5 条提交:"
+          git log -5 --oneline
+
+      - name: 🔍 验证指定提交是否存在
+        run: |
+          COMMIT="${{ github.event.inputs.commit }}"
+          echo "检查提交: $COMMIT"
+
+          if git cat-file -e "$COMMIT^{commit}" 2>/dev/null; then
+            echo "✅ 提交在本地仓库中存在"
+          else
+            echo "❌ 无法在本地仓库中找到该提交: $COMMIT"
+            echo "提示: 确认该哈希属于当前仓库且拼写正确"
+            exit 1
+          fi

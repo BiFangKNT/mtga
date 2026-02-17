@@ -50,6 +50,27 @@ class ProxyRuntimeState:
     proxy_instance: Any | None = None
 
 
+def stop_proxy_for_shutdown(*, log_func=None) -> OperationResult:
+    if log_func is None:
+        log_func = default_push_log
+    def _log(message: str) -> None:
+        with suppress(Exception):
+            log_func(message)
+
+    _log("收到退出信号，准备停止代理服务器...")
+    result = proxy_orchestration.stop_proxy_instance_result(
+        get_proxy_instance=_get_proxy_instance,
+        set_proxy_instance=_set_proxy_instance,
+        log=_log,
+        reason="shutdown",
+        show_idle_message=True,
+    )
+    hosts_result = modify_hosts_file_result(action="remove", log_func=_log)
+    if not hosts_result.ok:
+        _log(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
+    return result
+
+
 @lru_cache(maxsize=1)
 def _get_resource_manager() -> ResourceManager:
     return ResourceManager()
@@ -75,25 +96,10 @@ def _get_proxy_instance() -> Any | None:
     return _get_proxy_state().proxy_instance
 
 
-def stop_proxy_for_shutdown(*, log_func=None) -> OperationResult:
-    if log_func is None:
-        log_func = default_push_log
-    def _log(message: str) -> None:
-        with suppress(Exception):
-            log_func(message)
-
-    _log("收到退出信号，准备停止代理服务器...")
-    result = proxy_orchestration.stop_proxy_instance_result(
-        get_proxy_instance=_get_proxy_instance,
-        set_proxy_instance=_set_proxy_instance,
-        log=_log,
-        reason="shutdown",
-        show_idle_message=True,
-    )
-    hosts_result = modify_hosts_file_result(action="remove", log_func=_log)
-    if not hosts_result.ok:
-        _log(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
-    return result
+async def stop_proxy_for_shutdown_command() -> dict[str, Any]:
+    logs, log_func = collect_logs()
+    result = stop_proxy_for_shutdown(log_func=log_func)
+    return build_result_payload(result, logs, "代理已停止 (shutdown)")
 
 
 def _stop_proxy_instance_result(
@@ -519,16 +525,30 @@ async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
     result: OperationResult | None
     summary = "一键启动失败"
     try:
+        log_func("开始预检查...")
         result, config = _proxy_start_all_precheck(body, log_func)
+        log_func(f"预检查完成: result={result}, config={'yes' if config else 'no'}")
+        
         if result is None and config is not None:
             log_func("=== 开始一键启动全部服务 ===")
+            log_func("开始证书检查...")
             result = _proxy_start_all_cert(log_func)
+            log_func(f"证书检查完成: result={result}")
+            
         if result is None:
+            log_func("开始 Hosts 修改...")
             result = _proxy_start_all_hosts(log_func)
+            log_func(f"Hosts 修改完成: result={result}")
+            
         if result is None and config is not None:
+            log_func("开始代理启动...")
             result = _proxy_start_all_proxy(config, log_func)
+            log_func(f"代理启动完成: result={result}")
             summary = "一键启动完成"
     except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        log_func(f"⚠️ 一键启动异常详细堆栈:\n{tb}")
         with suppress(Exception):
             log_func(f"⚠️ 一键启动异常: {exc}")
         message = str(exc) or "一键启动异常"
@@ -551,3 +571,4 @@ def register_proxy_commands(commands: Commands) -> None:
     commands.set_command("proxy_stop", proxy_stop)
     commands.set_command("proxy_check_network", proxy_check_network)
     commands.set_command("proxy_start_all", proxy_start_all)
+    commands.set_command("stop_proxy_for_shutdown", stop_proxy_for_shutdown_command)

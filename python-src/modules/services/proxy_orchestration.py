@@ -35,9 +35,17 @@ class GlobalConfigCheckResult:
 
 def ensure_global_config_ready(
     *,
-    load_global_config: Callable[[], tuple[str, str]],
+    load_global_config: Callable[[], tuple],
 ) -> GlobalConfigCheckResult:
-    mapped_model_id, mtga_auth_key = load_global_config()
+    result = load_global_config()
+    # Handle cases where load_global_config returns variable number of values
+    # We only care about the first two: mapped_model_id, mtga_auth_key
+    if len(result) >= 2:
+        mapped_model_id, mtga_auth_key = result[0], result[1]
+    else:
+        mapped_model_id = result[0] if len(result) > 0 else ""
+        mtga_auth_key = ""
+
     mapped_model_id = (mapped_model_id or "").strip()
     mtga_auth_key = (mtga_auth_key or "").strip()
 
@@ -200,12 +208,13 @@ def start_proxy_instance_result(
     deps.log("开始启动代理服务器...")
     instance = ProxyServer(config, log_func=deps.log, thread_manager=deps.thread_manager)
     deps.set_proxy_instance(instance)
-    if instance.start():
+    start_result = instance.start()
+    if start_result.ok:
         deps.log(success_message)
         return OperationResult.success()
-    deps.log("❌ 代理服务器启动失败")
+    deps.log(f"❌ 代理服务器启动失败: {start_result.message}")
     deps.set_proxy_instance(None)
-    return OperationResult.failure("代理服务器启动失败", code=ErrorCode.UNKNOWN)
+    return start_result
 
 
 def start_proxy_instance(

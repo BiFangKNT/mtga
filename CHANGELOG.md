@@ -1,6 +1,30 @@
 # CHANGELOG
 
-## v2.2.0 (Latest)
+## v2.2.1 (Latest)
+### :sparkles: 新功能
+- feat(tray): 新增系统托盘支持，支持左键切换窗口显示/隐藏，右键菜单控制
+- feat(window): 优化窗口关闭行为，默认最小化到系统托盘
+- feat(update): 支持配置 GitHub Token 以解决 API 403 速率限制问题
+- feat(autostart): 优化开机自启动状态检测逻辑
+
+### :bug: 修复
+- fix(config): 修复配置文件加载和保存时的异常处理，避免错误被静默忽略
+- fix(proxy): 改进代理服务启动错误反馈，现在能显示具体的失败原因（如端口占用）
+- fix(acl): 修复 ACL 权限配置导致无法获取窗口图标和退出程序的问题
+- fix(backend): 新增 quit_app 命令以确保程序能完全退出
+- fix(backend): 修复 Python 环境 DLL 加载路径问题，解决后端连接失败
+- fix(tray): 修复系统托盘图标不显示的问题
+- fix(tray): 修复托盘菜单分隔符显示问题及右键退出功能
+- fix(window): 修复窗口关闭按钮无反应的问题（重构为前端接管关闭事件）
+- fix(update): 修复 GitHub 检查更新时可能出现的 403 错误及代理连接重置问题
+- fix(autostart): 修复开机自启动状态可能不一致的问题
+- fix(dev): 修复开发环境下多窗口并发启动的问题
+
+### :art: 界面样式
+- style(ui): 消除启动画面与主窗口切换时的闪烁
+- style(settings): 调整开机自启动选项背景色 (RGB 255,248,228)
+
+## v2.2.0
 ### :sparkles: 新功能
 - feat(proxy): 支持运行时热更新代理配置 (3587ada37488acdabc0f56393069b82377fdf5e1)
 ### :bug: 修复

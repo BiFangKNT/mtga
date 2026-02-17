@@ -15,17 +15,17 @@ const mtgaAuthKey = computed({
 })
 
 const mappedModelTooltip = [
-  "必填：映射模型ID",
-  "对应 Trae 端填写的模型名，自定义，",
-  "与实际模型ID是互相独立的概念。",
+  "必填：全局映射模型ID",
+  "这是您在 Trae/Cursor 等客户端中填写的【模型名称】。",
+  "MTGA 会截获此模型名称的请求，并转发到配置分组中定义的【实际模型ID】。",
   "示例：gpt-5",
 ].join("\n")
 
 const mtgaAuthTooltip = [
-  "必填：MTGA鉴权Key",
-  "对应 Trae 端填写的 API 密钥，自定义，",
-  "与实际 API Key 是互相独立的概念。",
-  "作为 MTGA 代理服务的全局密钥。",
+  "必填：MTGA 全局鉴权密钥",
+  "这是您在 Trae/Cursor 等客户端中填写的【API Key】。",
+  "客户端必须使用此 Key 才能连接到 MTGA 代理服务。",
+  "这与配置分组中的上游 API Key 是相互独立的。",
   "示例：111",
 ].join("\n")
 
@@ -48,8 +48,8 @@ const handleSave = async () => {
 <template>
   <div class="flex items-center justify-between gap-3">
     <div>
-      <h2 class="mtga-card-title">全局配置</h2>
-      <p class="mtga-card-subtitle">管理映射模型与鉴权信息</p>
+      <h2 class="mtga-card-title">全局参数</h2>
+      <p class="mtga-card-subtitle">定义客户端（如 Trae/Cursor）连接 MTGA 的认证信息与模型映射</p>
     </div>
     <span class="mtga-chip">全局参数</span>
   </div>

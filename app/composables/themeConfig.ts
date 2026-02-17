@@ -221,18 +221,23 @@ export const parseCustomColorInput = (rawValue: string) => {
   return ""
 }
 
-export const sanitizeThemeConfig = (theme: ThemeConfig): ThemeConfig => ({
-  primaryColor: normalizeHexColor(theme.primaryColor),
-  secondaryColor: normalizeHexColor(theme.secondaryColor),
-  textPrimaryColor: normalizeHexColor(theme.textPrimaryColor),
-  textSecondaryColor: normalizeHexColor(theme.textSecondaryColor),
-  infoColor: normalizeHexColor(theme.infoColor),
-  warningColor: normalizeHexColor(theme.warningColor),
-  errorColor: normalizeHexColor(theme.errorColor),
-  successColor: normalizeHexColor(theme.successColor),
-  fontFamily: theme.fontFamily.trim(),
-  backgroundImage: theme.backgroundImage.trim(),
-})
+export const sanitizeThemeConfig = (input: unknown): ThemeConfig => {
+  const theme = isObjectRecord(input) ? input : {}
+  const toText = (value: unknown) => (typeof value === "string" ? value : "")
+
+  return {
+    primaryColor: normalizeHexColor(toText(theme.primaryColor)),
+    secondaryColor: normalizeHexColor(toText(theme.secondaryColor)),
+    textPrimaryColor: normalizeHexColor(toText(theme.textPrimaryColor)),
+    textSecondaryColor: normalizeHexColor(toText(theme.textSecondaryColor)),
+    infoColor: normalizeHexColor(toText(theme.infoColor)),
+    warningColor: normalizeHexColor(toText(theme.warningColor)),
+    errorColor: normalizeHexColor(toText(theme.errorColor)),
+    successColor: normalizeHexColor(toText(theme.successColor)),
+    fontFamily: toText(theme.fontFamily).trim(),
+    backgroundImage: toText(theme.backgroundImage).trim(),
+  }
+}
 
 export const copyThemeConfig = (target: ThemeConfig, source: ThemeConfig) => {
   target.primaryColor = source.primaryColor

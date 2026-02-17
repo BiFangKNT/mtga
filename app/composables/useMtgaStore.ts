@@ -134,6 +134,7 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0)
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "")
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "")
+  const githubToken = useState<string>("mtga-github-token", () => "")
   const runtimeOptions = useState<RuntimeOptions>(
     "mtga-runtime-options",
     () => ({ ...DEFAULT_RUNTIME_OPTIONS })
@@ -172,6 +173,10 @@ export const useMtgaStore = () => {
   )
   const proxyStepProcessing = useState<boolean>(
     "mtga-proxy-step-processing",
+    () => false
+  )
+  const disableUpdatePopup = useState<boolean>(
+    "mtga-disable-update-popup",
     () => false
   )
 
@@ -448,6 +453,28 @@ export const useMtgaStore = () => {
     )
     mappedModelId.value = coerceText(result.mapped_model_id)
     mtgaAuthKey.value = coerceText(result.mtga_auth_key)
+    githubToken.value = coerceText(result.github_token)
+    // 优先使用后端配置，如果没有则回退到 localStorage (兼容旧版数据)
+    if (typeof result.disable_update_popup === 'boolean') {
+      disableUpdatePopup.value = result.disable_update_popup
+    }
+
+    // 恢复主题配置
+    if (result.theme_config && typeof result.theme_config === 'object') {
+      try {
+        const { applyThemeConfig, sanitizeThemeConfig } = await import("./themeConfig")
+        const normalized = sanitizeThemeConfig(result.theme_config)
+        // 应用到全局状态（注意这里需要配合 SettingsPanel 的响应式数据，
+        // 但 themeConfig 是在组件中使用的。我们需要一种方式通知或更新全局主题）
+        // 目前 themeConfig 模块主要操作 DOM CSS 变量，我们直接调用 applyThemeConfig 即可生效视觉
+        // 同时保存到 localStorage 以保持兼容性
+        const { saveThemeToStorage } = await import("./themeConfig")
+        saveThemeToStorage(normalized)
+        applyThemeConfig(normalized)
+      } catch {
+        console.warn("[mtga] restore theme config failed")
+      }
+    }
     return true
   }
 
@@ -457,11 +484,24 @@ export const useMtgaStore = () => {
       configGroups.value.length
     )
     currentConfigIndex.value = clampedIndex
+
+    // 获取当前主题配置
+    let currentThemeConfig = null
+    try {
+      const { loadThemeFromStorage } = await import("./themeConfig")
+      currentThemeConfig = loadThemeFromStorage()
+    } catch {
+      // ignore
+    }
+
     const payload: ConfigPayload = {
       config_groups: configGroups.value,
       current_config_index: clampedIndex,
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      github_token: coerceText(githubToken.value),
+      disable_update_popup: disableUpdatePopup.value,
+      theme_config: currentThemeConfig || undefined,
     }
     const ok = await api.saveConfig(payload)
     return Boolean(ok)
@@ -518,7 +558,7 @@ export const useMtgaStore = () => {
     if (details["explicit_proxy_detected"] === true) {
       appendLog(
         "⚠️".repeat(21) +
-          "\n检测到显式代理配置：部分应用可能优先走代理，从而绕过 hosts 导流。"
+        "\n检测到显式代理配置：部分应用可能优先走代理，从而绕过 hosts 导流。"
       )
       appendLog("建议：1. 关闭显式代理（如clash的系统代理），或改用 TUN/VPN")
       appendLog("      2. 检查 Trae 的代理设置。\n" + "⚠️".repeat(21))
@@ -546,6 +586,19 @@ export const useMtgaStore = () => {
       startProxyStepListener()
       return
     }
+
+    if (import.meta.client) {
+      try {
+        const raw = localStorage.getItem("mtga-user-config-v1")
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          disableUpdatePopup.value = !!parsed.disableUpdatePopup
+        }
+      } catch (e) {
+        console.warn("[mtga] load user config failed", e)
+      }
+    }
+
     initialized.value = true
     startLogStream()
     startProxyStepListener()
@@ -685,17 +738,115 @@ export const useMtgaStore = () => {
   }
 
   const runUserDataBackup = async () => {
+    // 备份前先保存当前的前端配置到后端（如果有必要）
+    // 但前端配置目前是存储在 localStorage 的，后端备份脚本主要是备份 user_data_dir 下的文件
+    // 所以我们需要确保 localStorage 的关键配置也同步到了 user_data_dir 下的某个文件，或者备份脚本能包含它
+    // 目前看代码，disableUpdatePopup 是存在 localStorage 的，而后端备份的是 user_data_dir
+    // 这是一个架构问题：前端独有的配置没有下沉到后端文件系统
+
+    // 临时方案：在调用备份前，将关键的前端配置写入到 user_data_dir/frontend_config.json
+    // 但这需要后端提供一个写入接口，或者我们将配置合并到 mtga_config.yaml
+
+    // 更好的方案：
+    // 在 SettingsPanel 中，disableUpdatePopup 的 watcher 已经将其写入 localStorage
+    // 我们可以在这里调用后端 API 将其保存到 config.yaml 中（需要后端支持）
+    // 或者，由于时间紧迫，我们先尝试修复"还原后状态没变"的问题：
+    // 还原操作会覆盖文件，但浏览器 localStorage 不会被后端还原操作修改！
+    // 所以还原后，localStorage 里还是旧的配置。
+    // 我们需要在还原成功后，清除或重置相关的 localStorage 项，或者从还原回来的文件中读取配置（如果配置被保存到了文件）
+
+    // 鉴于目前 disableUpdatePopup 只存在 localStorage，它实际上没有被备份！
+    // 这是一个功能缺失。
+    // 修复计划：
+    // 1. 修改 disableUpdatePopup 的存储方式，使其持久化到 config.yaml (后端)
+    // 2. 或者在备份时，将 localStorage 内容发送给后端保存（复杂）
+
+    // 既然用户提到 "备份还原以GitHub Token为例复原了"，说明后端文件备份是工作的。
+    // "禁用自动更新弹窗开机自启动这些按钮的状态没有变化" -> 说明这些状态没有被正确备份/还原。
+    // GitHub Token 是存在 config.yaml 的，所以能还原。
+    // disableUpdatePopup 是存在 localStorage 的，所以不能还原（因为 localStorage 独立于后端文件系统）。
+    // 开机自启动状态是系统注册表/启动项状态，也不是文件，所以还原文件不会改变自启动状态。
+
+    // 针对 "禁用自动更新弹窗"：
+    // 我们应该将其迁移到后端配置中，和 GitHub Token 一样存储在 mtga_config.yaml
+
+    // 获取当前主题配置
+    let currentThemeConfig = null
+    try {
+      const { loadThemeFromStorage } = await import("./themeConfig")
+      currentThemeConfig = loadThemeFromStorage()
+    } catch {
+      // ignore
+    }
+
+    // 在执行备份前，先强制保存一次当前的所有配置到后端文件
+    // 确保内存中的状态（包括主题、禁用弹窗等）都持久化到磁盘，这样备份文件才是最新的
+    const clampedIndex = clampIndex(
+      currentConfigIndex.value,
+      configGroups.value.length
+    )
+    const payload: ConfigPayload = {
+      config_groups: configGroups.value,
+      current_config_index: clampedIndex,
+      mapped_model_id: coerceText(mappedModelId.value),
+      mtga_auth_key: coerceText(mtgaAuthKey.value),
+      github_token: coerceText(githubToken.value),
+      disable_update_popup: disableUpdatePopup.value,
+      theme_config: currentThemeConfig || undefined,
+    }
+    await api.saveConfig(payload)
+
     const result = await api.userDataBackup()
     return applyInvokeResult(result, "备份用户数据")
   }
 
   const runUserDataRestoreLatest = async () => {
     const result = await api.userDataRestoreLatest()
+    if (result && result.ok) {
+      await loadConfig() // Reload config after restore
+      await loadAppInfo() // Reload app info
+
+      // 还原后，前端配置（如 disableUpdatePopup）会通过 loadConfig 从后端同步回来
+      // 但自启动状态是系统级的，不会因为文件还原而改变。
+      // 如果用户期望还原到备份时的自启动状态（比如备份时开启了自启动），这很难做到，因为备份文件里不包含自启动注册表信息。
+      // 我们能做的是：确保还原后，界面状态与系统实际状态一致。
+
+      // 触发一次自启动状态检查（如果在客户端环境）
+      if (typeof window !== 'undefined') {
+        const { useAutoStart } = await import("./useAutoStart")
+        const { checkStatus } = useAutoStart()
+        await checkStatus()
+      }
+
+      if (isRecord(result.details) && isRecord(result.details.restore_result)) {
+        const backupName = coerceText(result.details.restore_result.backup_name)
+        if (backupName) {
+          applyInvokeResult(result, `已还原备份: ${backupName}`)
+          return true
+        }
+      }
+    }
     return applyInvokeResult(result, "还原用户数据")
   }
 
   const runUserDataClear = async () => {
     const result = await api.userDataClear()
+    if (result && result.ok) {
+      // 清除后，重新加载配置以重置前端状态（loadConfig 会处理空文件情况，返回默认值）
+      await loadConfig()
+
+      // 强制重置主题为默认
+      try {
+        const { applyThemeConfig, DEFAULT_THEME_CONFIG, saveThemeToStorage } = await import("./themeConfig")
+        applyThemeConfig(DEFAULT_THEME_CONFIG)
+        saveThemeToStorage(DEFAULT_THEME_CONFIG)
+      } catch {
+        // ignore
+      }
+
+      // 重新加载 AppInfo
+      await loadAppInfo()
+    }
     return applyInvokeResult(result, "清除用户数据")
   }
 
@@ -768,11 +919,13 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    githubToken,
     runtimeOptions,
     logs,
     logCursor,
     appInfo,
     hasNewVersion,
+    disableUpdatePopup,
     updateDialogOpen,
     updateVersionLabel,
     updateNotesHtml,

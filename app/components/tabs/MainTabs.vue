@@ -3,8 +3,8 @@ import type { MainTabKey } from "~/composables/mtgaTypes"
 
 const tabs: { key: MainTabKey; label: string }[] = [
   { key: "cert", label: "证书管理" },
-  { key: "hosts", label: "hosts文件管理" },
-  { key: "proxy", label: "代理服务器操作" },
+  { key: "hosts", label: "hosts接管" },
+  { key: "proxy", label: "代理服务" },
 ];
 
 const activeTab = ref<MainTabKey>("cert");
@@ -40,10 +40,10 @@ watch(mainTabSignal, () => applyMainTabTarget(mainTabTarget.value), {
 <template>
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h2 class="mtga-card-title">主要流程</h2>
-      <p class="mtga-card-subtitle">证书 / hosts / 代理</p>
+      <h2 class="mtga-card-title">核心服务</h2>
+      <p class="mtga-card-subtitle">证书管理 / hosts接管 / 代理服务</p>
     </div>
-    <span class="mtga-chip">工具集</span>
+    <span class="mtga-chip">核心服务</span>
   </div>
   <div role="tablist" class="mt-4 flex flex-wrap gap-3 border-b border-slate-200/70 pb-2">
     <button

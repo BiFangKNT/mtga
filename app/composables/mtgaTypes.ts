@@ -13,6 +13,9 @@ export type ConfigPayload = {
   current_config_index: number
   mapped_model_id: string
   mtga_auth_key: string
+  github_token?: string
+  disable_update_popup?: boolean
+  theme_config?: Record<string, unknown>
 }
 
 export type AppInfo = {

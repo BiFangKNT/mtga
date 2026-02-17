@@ -33,11 +33,11 @@ class ProxyServer:
             thread_manager=self.thread_manager,
         )
 
-    def start(self, host="0.0.0.0", port=443) -> bool:
+    def start(self, host="0.0.0.0", port=443) -> OperationResult:
         if not self.app_layer.valid:
-            return False
+            return OperationResult.failure("代理应用层初始化失败")
 
-        result = self.runtime.start(
+        return self.runtime.start(
             host=host,
             port=port,
             target_api_base_url=self.app_layer.target_api_base_url,
@@ -45,7 +45,6 @@ class ProxyServer:
             target_model_id=self.app_layer.target_model_id,
             stream_mode=self.app_layer.stream_mode,
         )
-        return result.ok
 
     def stop(self) -> OperationResult:
         stop_result = self.runtime.stop()
@@ -63,7 +62,7 @@ class ProxyServer:
 
 def start_proxy_server(config, log_func=print, *, thread_manager: ThreadManager):
     proxy = ProxyServer(config, log_func, thread_manager=thread_manager)
-    if proxy.start():
+    if proxy.start().ok:
         return proxy
     return None
 

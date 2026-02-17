@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -86,9 +87,17 @@ def render_markdown_via_github_api(
     }
     if user_agent:
         headers["User-Agent"] = user_agent
+    
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    # Use session to disable proxy if needed
+    session = requests.Session()
+    session.trust_env = False  # Disable reading proxy from env vars
 
     try:
-        response = requests.post(
+        response = session.post(
             "https://api.github.com/markdown",
             json={"text": safe_source, "mode": "gfm", "context": repo},
             timeout=timeout,
@@ -220,9 +229,17 @@ def _get_emoji_urls(*, timeout: int, user_agent: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github+json"}
     if user_agent:
         headers["User-Agent"] = user_agent
+    
+    token = os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    # Use session to disable proxy if needed
+    session = requests.Session()
+    session.trust_env = False  # Disable reading proxy from env vars
 
     try:
-        response = requests.get(
+        response = session.get(
             "https://api.github.com/emojis",
             timeout=timeout,
             headers=headers,
@@ -288,6 +305,7 @@ def fetch_latest_release(
     timeout: int = 10,
     user_agent: str | None = None,
     font: HtmlFontOptions | None = None,
+    github_token: str | None = None,
 ) -> ReleaseInfo:
     """从 GitHub API 获取 latest 发行版信息。"""
     if not repo:
@@ -296,8 +314,18 @@ def fetch_latest_release(
     headers = {"Accept": "application/vnd.github+json"}
     if user_agent:
         headers["User-Agent"] = user_agent
+    
+    token = github_token or os.getenv("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
-    response = requests.get(api_url, timeout=timeout, headers=headers)
+    # Use session to disable proxy if needed
+    session = requests.Session()
+    session.trust_env = False  # Disable reading proxy from env vars
+
+    response = session.get(api_url, timeout=timeout, headers=headers)
+    if response.status_code == 403:
+        raise RuntimeError("GitHub API 速率限制 (403)，请稍后再试或配置 GitHub Token")
     if response.status_code != requests.codes.ok:  # type: ignore[attr-defined]
         raise RuntimeError(f"GitHub 返回 {response.status_code}")
 
