@@ -16,6 +16,11 @@ const fmtArgs = mode === "gate" ? ["fmt", "--check"] : ["fmt"];
 
 if (mode === "gate") {
   delete env.PYO3_PYTHON;
+
+  const pyembedResourceDir = path.resolve("src-tauri", "pyembed", "python");
+  if (!fs.existsSync(pyembedResourceDir)) {
+    fs.mkdirSync(pyembedResourceDir, { recursive: true });
+  }
 } else {
   const pyembedPython =
     process.platform === "win32"
