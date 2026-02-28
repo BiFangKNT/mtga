@@ -394,6 +394,26 @@ class ProxyApp:
                 log(f"请求中没有 stream 参数，设置为 {stream_value}")
                 request_data["stream"] = stream_value
 
+        messages = request_data.get("messages", [])
+        if isinstance(messages, list):
+            cleaned = False
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str):
+                    if content == "":
+                        msg["content"] = " "
+                        cleaned = True
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            if block.get("text") == "":
+                                block["text"] = " "
+                                cleaned = True
+            if cleaned:
+                log("检测到空文本块/空内容，已自动将其修改为单个空格以防止目标API报错 (例如 Anthropic API)")
+
         auth_header = request.headers.get("Authorization")
         if not auth.verify(auth_header):
             log("聊天补全请求MTGA鉴权失败")
