@@ -4,6 +4,12 @@ on:
   pull_request:
     branches:
       - dev
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
   workflow_dispatch:
 
 concurrency:
