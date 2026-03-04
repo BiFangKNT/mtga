@@ -20,6 +20,11 @@ const confirmMessage = ref("");
 const pendingDeleteIndex = ref<number | null>(null);
 const pendingSwitchIndex = ref<number | null>(null);
 const switchInProgress = ref(false);
+const refreshInProgress = ref(false);
+const testInProgress = ref(false);
+const saveInProgress = ref(false);
+const deleteInProgress = ref(false);
+const reorderInProgress = ref(false);
 
 const form = reactive({
   name: "",
@@ -87,6 +92,14 @@ const hasSelection = computed(
     selectedIndex.value < configGroups.value.length,
 );
 
+const panelActionBusy = computed(
+  () =>
+    switchInProgress.value ||
+    saveInProgress.value ||
+    deleteInProgress.value ||
+    reorderInProgress.value,
+);
+
 const normalizeMiddleRoute = (value: string) => {
   let raw = value.trim();
   if (!raw) {
@@ -137,18 +150,34 @@ const getApiKeyDisplay = (group: ConfigGroup) => {
 };
 
 const refreshList = async () => {
-  const ok = await store.loadConfig();
-  if (ok) {
-    store.appendLog("已刷新配置组列表");
+  if (refreshInProgress.value) {
+    return;
+  }
+  refreshInProgress.value = true;
+  try {
+    const ok = await store.loadConfig();
+    if (ok) {
+      store.appendLog("已刷新配置组列表");
+    }
+  } finally {
+    refreshInProgress.value = false;
   }
 };
 
 const requestTest = async () => {
+  if (testInProgress.value) {
+    return;
+  }
   if (!hasSelection.value) {
     store.appendLog("请先选择要测活的配置组");
     return;
   }
-  await store.runConfigGroupTest(selectedIndex.value);
+  testInProgress.value = true;
+  try {
+    await store.runConfigGroupTest(selectedIndex.value);
+  } finally {
+    testInProgress.value = false;
+  }
 };
 
 const resetForm = () => {
@@ -195,6 +224,9 @@ const closeEditor = () => {
 };
 
 const handleSave = async () => {
+  if (saveInProgress.value) {
+    return;
+  }
   const payload: ConfigGroup = {
     name: form.name.trim(),
     api_url: form.api_url.trim(),
@@ -219,15 +251,22 @@ const handleSave = async () => {
     configGroups.value.splice(selectedIndex.value, 1, payload);
   }
 
-  const ok = await store.saveConfig();
-  if (ok) {
-    const displayName = getDisplayName(payload, selectedIndex.value);
-    store.appendLog(
-      editorMode.value === "add" ? `已添加配置组: ${displayName}` : `已修改配置组: ${displayName}`,
-    );
-    closeEditor();
-  } else {
-    store.appendLog("保存配置组失败");
+  saveInProgress.value = true;
+  try {
+    const ok = await store.saveConfig();
+    if (ok) {
+      const displayName = getDisplayName(payload, selectedIndex.value);
+      store.appendLog(
+        editorMode.value === "add"
+          ? `已添加配置组: ${displayName}`
+          : `已修改配置组: ${displayName}`,
+      );
+      closeEditor();
+    } else {
+      store.appendLog("保存配置组失败");
+    }
+  } finally {
+    saveInProgress.value = false;
   }
 };
 
@@ -278,34 +317,45 @@ const cancelDelete = () => {
 };
 
 const confirmDelete = async () => {
+  if (deleteInProgress.value) {
+    return;
+  }
   if (pendingDeleteIndex.value == null) {
     return;
   }
-  const index = pendingDeleteIndex.value;
-  const group = configGroups.value[index];
-  if (!group) {
-    store.appendLog("配置组不存在，已取消删除");
+  deleteInProgress.value = true;
+  try {
+    const index = pendingDeleteIndex.value;
+    const group = configGroups.value[index];
+    if (!group) {
+      store.appendLog("配置组不存在，已取消删除");
+      confirmOpen.value = false;
+      pendingDeleteIndex.value = null;
+      return;
+    }
+    configGroups.value.splice(index, 1);
+    if (currentIndex.value >= configGroups.value.length) {
+      currentIndex.value = Math.max(configGroups.value.length - 1, 0);
+    } else if (currentIndex.value > index) {
+      currentIndex.value -= 1;
+    }
+    const ok = await store.saveConfig();
+    if (ok) {
+      store.appendLog(`已删除配置组: ${getDisplayName(group, index)}`);
+    } else {
+      store.appendLog("保存配置组失败");
+    }
     confirmOpen.value = false;
     pendingDeleteIndex.value = null;
-    return;
+  } finally {
+    deleteInProgress.value = false;
   }
-  configGroups.value.splice(index, 1);
-  if (currentIndex.value >= configGroups.value.length) {
-    currentIndex.value = Math.max(configGroups.value.length - 1, 0);
-  } else if (currentIndex.value > index) {
-    currentIndex.value -= 1;
-  }
-  const ok = await store.saveConfig();
-  if (ok) {
-    store.appendLog(`已删除配置组: ${getDisplayName(group, index)}`);
-  } else {
-    store.appendLog("保存配置组失败");
-  }
-  confirmOpen.value = false;
-  pendingDeleteIndex.value = null;
 };
 
 const moveUp = async () => {
+  if (reorderInProgress.value) {
+    return;
+  }
   if (!hasSelection.value || selectedIndex.value <= 0) {
     return;
   }
@@ -315,13 +365,21 @@ const moveUp = async () => {
   if (!current || !prev) {
     return;
   }
-  configGroups.value[index - 1] = current;
-  configGroups.value[index] = prev;
-  currentIndex.value = index - 1;
-  await store.saveConfig();
+  reorderInProgress.value = true;
+  try {
+    configGroups.value[index - 1] = current;
+    configGroups.value[index] = prev;
+    currentIndex.value = index - 1;
+    await store.saveConfig();
+  } finally {
+    reorderInProgress.value = false;
+  }
 };
 
 const moveDown = async () => {
+  if (reorderInProgress.value) {
+    return;
+  }
   if (!hasSelection.value || selectedIndex.value >= configGroups.value.length - 1) {
     return;
   }
@@ -331,10 +389,15 @@ const moveDown = async () => {
   if (!current || !next) {
     return;
   }
-  configGroups.value[index + 1] = current;
-  configGroups.value[index] = next;
-  currentIndex.value = index + 1;
-  await store.saveConfig();
+  reorderInProgress.value = true;
+  try {
+    configGroups.value[index + 1] = current;
+    configGroups.value[index] = next;
+    currentIndex.value = index + 1;
+    await store.saveConfig();
+  } finally {
+    reorderInProgress.value = false;
+  }
 };
 </script>
 
@@ -347,6 +410,8 @@ const moveDown = async () => {
     <div class="flex items-center gap-2">
       <button
         class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600 tooltip mtga-tooltip"
+        :class="testInProgress ? 'loading' : ''"
+        :disabled="testInProgress || panelActionBusy"
         :data-tip="testTooltip"
         style="--mtga-tooltip-max: 250px"
         @click="requestTest"
@@ -355,6 +420,8 @@ const moveDown = async () => {
       </button>
       <button
         class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600 tooltip mtga-tooltip"
+        :class="refreshInProgress ? 'loading' : ''"
+        :disabled="refreshInProgress || panelActionBusy"
         :data-tip="refreshTooltip"
         style="--mtga-tooltip-max: 250px"
         @click="refreshList"
@@ -429,12 +496,33 @@ const moveDown = async () => {
     </div>
 
     <div class="space-y-2">
-      <button class="mtga-btn-primary" @click="openAdd">新增</button>
-      <button class="mtga-btn-outline" @click="openEdit">修改</button>
-      <button class="mtga-btn-error" @click="requestDelete">删除</button>
+      <button class="mtga-btn-primary" :disabled="panelActionBusy" @click="openAdd">新增</button>
+      <button class="mtga-btn-outline" :disabled="panelActionBusy" @click="openEdit">修改</button>
+      <button
+        class="mtga-btn-error"
+        :class="deleteInProgress ? 'loading' : ''"
+        :disabled="panelActionBusy"
+        @click="requestDelete"
+      >
+        删除
+      </button>
       <div class="h-px bg-slate-200/70 mx-1"></div>
-      <button class="mtga-btn-outline" @click="moveUp">上移</button>
-      <button class="mtga-btn-outline" @click="moveDown">下移</button>
+      <button
+        class="mtga-btn-outline"
+        :class="reorderInProgress ? 'loading' : ''"
+        :disabled="reorderInProgress || !hasSelection || selectedIndex <= 0"
+        @click="moveUp"
+      >
+        上移
+      </button>
+      <button
+        class="mtga-btn-outline"
+        :class="reorderInProgress ? 'loading' : ''"
+        :disabled="reorderInProgress || !hasSelection || selectedIndex >= configGroups.length - 1"
+        @click="moveDown"
+      >
+        下移
+      </button>
     </div>
   </div>
 
@@ -451,6 +539,7 @@ const moveDown = async () => {
     :default-middle-route="DEFAULT_MIDDLE_ROUTE"
     :available-models="availableModels"
     :model-loading="modelLoading"
+    :saving="saveInProgress"
     @fetch-models="handleFetchModels"
     @save="handleSave"
     @cancel="closeEditor"

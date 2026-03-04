@@ -1,8 +1,17 @@
 <script setup lang="ts">
 const store = useMtgaStore();
+const startAllPending = ref(false);
 
-const handleStartAll = () => {
-  store.runProxyStartAll();
+const handleStartAll = async () => {
+  if (startAllPending.value) {
+    return;
+  }
+  startAllPending.value = true;
+  try {
+    await store.runProxyStartAll();
+  } finally {
+    startAllPending.value = false;
+  }
 };
 </script>
 
@@ -14,8 +23,10 @@ const handleStartAll = () => {
     </div>
     <button
       class="btn btn-primary px-8 rounded-xl shadow-[0_12px_25px_-10px_rgba(240,187,50,0.6)]"
+      :disabled="startAllPending"
       @click="handleStartAll"
     >
+      <span v-if="startAllPending" class="loading loading-spinner loading-sm" aria-hidden="true" />
       一键启动全部服务
     </button>
   </div>
