@@ -82,7 +82,7 @@ const fontInputDescription = computed(() => {
     return "正在读取系统字体列表...";
   }
   if (fontFamilies.value.length === 0) {
-    return "未读取到系统字体，留空将跟随系统默认";
+    return "未读取到系统字体，可手动输入并保存（不做系统校验）";
   }
   return `共 ${fontFamilies.value.length} 个系统字体，可输入关键字过滤`;
 });
@@ -259,16 +259,16 @@ const handleSave = async () => {
   await loadSystemFontFamilies();
   const normalizedFont = normalizeFontFamily(themeDraft.fontFamily);
   if (normalizedFont) {
-    if (fontFamilies.value.length === 0) {
-      themeError.value = "当前环境无法获取系统字体列表，请先清空字体设置";
-      return;
+    if (fontFamilies.value.length > 0) {
+      const matched = findMatchedSystemFont(normalizedFont);
+      if (!matched) {
+        themeError.value = "字体必须从系统字体列表中选择";
+        return;
+      }
+      themeDraft.fontFamily = matched;
+    } else {
+      themeDraft.fontFamily = normalizedFont;
     }
-    const matched = findMatchedSystemFont(normalizedFont);
-    if (!matched) {
-      themeError.value = "字体必须从系统字体列表中选择";
-      return;
-    }
-    themeDraft.fontFamily = matched;
   }
   const { payload, error } = buildThemeConfigForSave();
   if (!payload) {
