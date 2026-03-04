@@ -9,3 +9,4 @@ src-tauri/pyembed/
 python-src/.venv/
 pnpm-lock.yaml
 CHANGELOG.md
+.codex/

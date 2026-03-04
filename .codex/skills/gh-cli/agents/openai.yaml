@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub CLI Agent"
+  short_description: "Execute non-interactive GitHub CLI workflows safely"
+  default_prompt: "Use $gh-cli to plan and run non-interactive GitHub CLI commands for issues and pull requests."

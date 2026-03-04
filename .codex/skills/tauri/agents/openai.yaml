@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tauri Agent"
+  short_description: "Plan and ship Tauri v2 apps with secure permissions"
+  default_prompt: "Use $tauri to create, integrate, secure, and ship Tauri v2 applications with minimal capabilities."
