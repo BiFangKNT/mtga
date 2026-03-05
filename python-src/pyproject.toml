@@ -11,6 +11,7 @@ dependencies = [
     "requests",
     "platformdirs>=4.3.0",
     "PyYAML",
+    "xxhash>=3.5.0",
 ]
 
 [build-system]

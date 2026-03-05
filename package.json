@@ -33,9 +33,14 @@
     "release:push": "node ./scripts/gitflow.mjs finish"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.2",
+    "@codemirror/search": "^6.6.0",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.16",
     "@tauri-apps/api": "^2.4.0",
     "@tauri-apps/plugin-dialog": "~2.4.2",
     "@tauri-apps/plugin-shell": "^2.3.3",
+    "diff": "^8.0.3",
     "dompurify": "^3.3.1",
     "nuxt": "^4.2.2",
     "tauri-plugin-pytauri-api": "^0.8.0",

@@ -76,6 +76,9 @@ export const useMtgaApi = () => {
   const userDataRestoreLatest = () => safeInvoke<InvokeResult>("user_data_restore_latest");
   const userDataClear = () => safeInvoke<InvokeResult>("user_data_clear");
   const checkUpdates = () => safeInvoke<InvokeResult>("check_updates");
+  const systemPromptsList = () => safeInvoke<InvokeResult>("system_prompts_list");
+  const systemPromptsUpdate = (payload: { hash: string; edited_text: string }) =>
+    safeInvoke<InvokeResult>("system_prompts_update", payload);
   const pullLogs = (payload: {
     after_id?: number | null;
     timeout_ms?: number;
@@ -134,6 +137,8 @@ export const useMtgaApi = () => {
     userDataRestoreLatest,
     userDataClear,
     checkUpdates,
+    systemPromptsList,
+    systemPromptsUpdate,
     pullLogs,
     startProxyStepChannel,
   };

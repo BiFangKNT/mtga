@@ -204,6 +204,7 @@ from .commands import (
     register_model_test_commands,
     register_proxy_commands,
     register_startup_commands,
+    register_system_prompt_commands,
     register_update_commands,
     register_user_data_commands,
 )
@@ -215,6 +216,7 @@ register_log_commands(command_registry)
 register_model_test_commands(command_registry)
 register_proxy_commands(command_registry)
 register_startup_commands(command_registry)
+register_system_prompt_commands(command_registry)
 register_update_commands(command_registry)
 register_user_data_commands(command_registry)
 

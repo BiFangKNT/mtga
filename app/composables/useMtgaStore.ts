@@ -10,6 +10,7 @@ import type {
   LogPullResult,
   MainTabKey,
   ProxyStartStepEvent,
+  SystemPromptItem,
 } from "./mtgaTypes";
 
 type RuntimeOptions = {
@@ -19,7 +20,7 @@ type RuntimeOptions = {
   streamMode: "true" | "false";
 };
 
-type PanelTarget = "config-group" | "global-config" | "main-tabs" | "settings";
+type PanelTarget = "config-group" | "global-config" | "main-tabs" | "system-prompts" | "settings";
 
 const DEFAULT_APP_INFO: AppInfo = {
   display_name: "MTGA",
@@ -53,6 +54,7 @@ const isPanelTarget = (value: unknown): value is PanelTarget =>
   value === "config-group" ||
   value === "global-config" ||
   value === "main-tabs" ||
+  value === "system-prompts" ||
   value === "settings";
 
 const isProxyStartStepEvent = (value: unknown): value is ProxyStartStepEvent => {
@@ -111,6 +113,44 @@ const normalizeModelList = (value: unknown) => {
   return Array.from(unique).sort((a, b) => a.localeCompare(b));
 };
 
+const normalizeSystemPromptList = (value: unknown): SystemPromptItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: SystemPromptItem[] = [];
+  value.forEach((item) => {
+    if (!isRecord(item)) {
+      return;
+    }
+    const hash = coerceText(item["hash"]).trim();
+    const originalText = coerceText(item["original_text"]);
+    const createdAt = coerceText(item["created_at"]);
+    if (!hash || !createdAt) {
+      return;
+    }
+
+    const nextItem: SystemPromptItem = {
+      hash,
+      original_text: originalText,
+      created_at: createdAt,
+    };
+
+    const latestDeltaRaw = item["latest_delta"];
+    if (isRecord(latestDeltaRaw)) {
+      const editedText = coerceText(latestDeltaRaw["edited_text"]);
+      const editedAt = coerceText(latestDeltaRaw["edited_at"]);
+      const editor = coerceText(latestDeltaRaw["editor"]);
+      nextItem.latest_delta = {
+        edited_text: editedText,
+        edited_at: editedAt,
+        ...(editor ? { editor } : {}),
+      };
+    }
+    normalized.push(nextItem);
+  });
+  return normalized;
+};
+
 const clampIndex = (value: number, max: number) => {
   if (max <= 0) {
     return 0;
@@ -129,6 +169,7 @@ export const useMtgaStore = () => {
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
   const logs = useState<string[]>("mtga-logs", () => []);
+  const systemPrompts = useState<SystemPromptItem[]>("mtga-system-prompts", () => []);
   const logCursor = useState<number>("mtga-log-cursor", () => 0);
   const logStreamActive = useState<boolean>("mtga-log-stream-active", () => false);
   const appInfo = useState<AppInfo>("mtga-app-info", () => ({ ...DEFAULT_APP_INFO }));
@@ -678,6 +719,30 @@ export const useMtgaStore = () => {
     return ok;
   };
 
+  const loadSystemPrompts = async () => {
+    const result = await api.systemPromptsList();
+    const ok = applyInvokeResult(result, "加载系统提示词");
+    if (!ok) {
+      return false;
+    }
+    if (!result || !isRecord(result.details)) {
+      systemPrompts.value = [];
+      return true;
+    }
+    systemPrompts.value = normalizeSystemPromptList(result.details["items"]);
+    return true;
+  };
+
+  const updateSystemPrompt = async (payload: { hash: string; edited_text: string }) => {
+    const result = await api.systemPromptsUpdate(payload);
+    const ok = applyInvokeResult(result, "更新系统提示词");
+    if (!ok) {
+      return false;
+    }
+    await loadSystemPrompts();
+    return true;
+  };
+
   const runCheckUpdatesOnce = async () => {
     if (updateAutoChecked.value) {
       return false;
@@ -723,6 +788,7 @@ export const useMtgaStore = () => {
     mtgaAuthKey,
     runtimeOptions,
     logs,
+    systemPrompts,
     logCursor,
     appInfo,
     hasNewVersion,
@@ -762,6 +828,8 @@ export const useMtgaStore = () => {
     runCheckUpdatesOnce,
     closeUpdateDialog,
     openUpdateRelease,
+    loadSystemPrompts,
+    updateSystemPrompt,
     runPlaceholder,
   };
 };

@@ -18,6 +18,7 @@ from modules.proxy.proxy_transport import ProxyTransport
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
+from modules.services.system_prompt_service import SystemPromptStore
 
 
 class ProxyApp:
@@ -52,6 +53,7 @@ class ProxyApp:
         self.stream_mode: str | None = None
         self.debug_mode = False
         self.disable_ssl_strict_mode = False
+        self.system_prompt_store = SystemPromptStore(resource_manager)
 
         proxy_config = build_proxy_config(
             self.config,
@@ -231,6 +233,134 @@ class ProxyApp:
     def _get_mapped_model_id(self) -> str:
         return self.custom_model_id
 
+    def _extract_system_prompt_text(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return ""
+        content_list = cast(list[Any], content)
+
+        parts: list[str] = []
+        for item in content_list:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    parts.append(text)
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_map = cast(dict[str, Any], item)
+            text_value = item_map.get("text")
+            if isinstance(text_value, str):
+                text = text_value.strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+
+    def _collect_system_prompt_entries(
+        self,
+        messages: list[Any],
+    ) -> tuple[dict[int, str], list[tuple[str, str]]]:
+        indexed_hashes: dict[int, str] = {}
+        capture_entries: list[tuple[str, str]] = []
+
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                continue
+            message_map = cast(dict[str, Any], message)
+            if message_map.get("role") != "system":
+                continue
+            extracted = self._extract_system_prompt_text(message_map.get("content"))
+            if not extracted:
+                continue
+            hash_value = self.system_prompt_store.compute_hash(extracted)
+            indexed_hashes[index] = hash_value
+            capture_entries.append((hash_value, extracted))
+
+        return indexed_hashes, capture_entries
+
+    def _apply_overrides_to_messages(
+        self,
+        *,
+        messages: list[Any],
+        indexed_hashes: dict[int, str],
+        overrides: dict[str, str],
+        log: Callable[[str], None],
+    ) -> tuple[list[Any], bool]:
+        changed = False
+        next_messages: list[Any] = []
+
+        for index, message in enumerate(messages):
+            hash_value = indexed_hashes.get(index)
+            if not hash_value:
+                next_messages.append(message)
+                continue
+            edited_text = overrides.get(hash_value)
+            if edited_text is None:
+                next_messages.append(message)
+                continue
+
+            changed = True
+            if edited_text == "":
+                log(f"🧹 清空系统提示词并移除消息 hash={hash_value[:12]}")
+                continue
+
+            if isinstance(message, dict):
+                message_map = cast(dict[str, Any], message)
+                replaced = dict(message_map)
+                replaced["content"] = edited_text
+                next_messages.append(replaced)
+            else:
+                next_messages.append(message)
+            log(f"✏️ 应用系统提示词增量 hash={hash_value[:12]}")
+
+        return next_messages, changed
+
+    def _apply_system_prompt_overrides(
+        self,
+        *,
+        request_data: dict[str, Any],
+        log: Callable[[str], None],
+    ) -> None:
+        messages_obj = request_data.get("messages")
+        if not isinstance(messages_obj, list):
+            return
+        messages = cast(list[Any], messages_obj)
+        indexed_hashes, capture_entries = self._collect_system_prompt_entries(messages)
+
+        if not capture_entries:
+            return
+
+        added_hashes, overrides = self.system_prompt_store.capture_and_collect_overrides(
+            capture_entries
+        )
+        for added_hash in added_hashes:
+            log(f"📝 收录系统提示词 hash={added_hash[:12]}")
+
+        if not overrides:
+            return
+
+        next_messages, changed = self._apply_overrides_to_messages(
+            messages=messages,
+            indexed_hashes=indexed_hashes,
+            overrides=overrides,
+            log=log,
+        )
+
+        if changed:
+            request_data["messages"] = next_messages
+
+    def _try_apply_system_prompt_overrides(
+        self,
+        *,
+        request_data: dict[str, Any],
+        log: Callable[[str], None],
+    ) -> None:
+        try:
+            self._apply_system_prompt_overrides(request_data=request_data, log=log)
+        except Exception as prompt_exc:  # noqa: BLE001
+            log(f"⚠️ 系统提示词处理失败: {prompt_exc}")
+
     def _build_route(self, base_route: str, suffix: str) -> str:
         middle_route = base_route or ""
         if not middle_route.startswith("/"):
@@ -372,6 +502,7 @@ class ProxyApp:
                 }
             ), 400
         request_data = cast(dict[str, Any], request_data_obj)
+        self._try_apply_system_prompt_overrides(request_data=request_data, log=log)
 
         client_requested_stream = request_data.get("stream", False)
         log(f"客户端请求的流模式: {client_requested_stream}")
