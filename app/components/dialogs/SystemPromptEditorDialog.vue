@@ -49,11 +49,14 @@ const showDiff = ref(false);
 const canUndo = ref(false);
 const canRedo = ref(false);
 const copied = ref(false);
+const mergeHeaderTemplate = ref("minmax(0, 1fr) minmax(0, 1fr)");
 let singleView: EditorView | null = null;
 let diffView: MergeView | null = null;
 let editableStateSnapshot: unknown | null = null;
 let editableScroll = { top: 0, left: 0 };
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+let mergeLayoutObserver: ResizeObserver | null = null;
+let mergeLayoutRaf = 0;
 let mountRevision = 0;
 let diffSwitching = false;
 let pendingDiffMode: boolean | null = null;
@@ -184,6 +187,9 @@ const editableUpdateListener = EditorView.updateListener.of((update) => {
     };
   }
   refreshHistoryState(update.state);
+  if (diffView) {
+    scheduleMergeHeaderLayoutUpdate();
+  }
 });
 
 const createEditableExtensions = () => [
@@ -241,6 +247,63 @@ const waitForNextFrame = () =>
     requestAnimationFrame(() => resolve());
   });
 
+const resetMergeHeaderLayout = () => {
+  mergeHeaderTemplate.value = "minmax(0, 1fr) minmax(0, 1fr)";
+};
+
+const disconnectMergeLayoutObserver = () => {
+  if (mergeLayoutObserver) {
+    mergeLayoutObserver.disconnect();
+    mergeLayoutObserver = null;
+  }
+  if (mergeLayoutRaf) {
+    cancelAnimationFrame(mergeLayoutRaf);
+    mergeLayoutRaf = 0;
+  }
+};
+
+const updateMergeHeaderLayout = () => {
+  if (!diffView) {
+    resetMergeHeaderLayout();
+    return;
+  }
+  const editors = diffView.dom.querySelectorAll<HTMLElement>(".cm-mergeViewEditor");
+  const leftEditor = editors.item(0);
+  const rightEditor = editors.item(1);
+  if (!(leftEditor && rightEditor)) {
+    resetMergeHeaderLayout();
+    return;
+  }
+  const leftWidth = leftEditor.getBoundingClientRect().width;
+  const rightWidth = rightEditor.getBoundingClientRect().width;
+  if (!(leftWidth > 0 && rightWidth > 0)) {
+    resetMergeHeaderLayout();
+    return;
+  }
+  mergeHeaderTemplate.value = `${leftWidth}px ${rightWidth}px`;
+};
+
+const scheduleMergeHeaderLayoutUpdate = () => {
+  if (!diffView || mergeLayoutRaf) {
+    return;
+  }
+  mergeLayoutRaf = requestAnimationFrame(() => {
+    mergeLayoutRaf = 0;
+    updateMergeHeaderLayout();
+  });
+};
+
+const attachMergeLayoutObserver = () => {
+  disconnectMergeLayoutObserver();
+  if (!diffView || typeof ResizeObserver === "undefined") {
+    return;
+  }
+  mergeLayoutObserver = new ResizeObserver(() => {
+    scheduleMergeHeaderLayoutUpdate();
+  });
+  mergeLayoutObserver.observe(diffView.dom);
+};
+
 const flushActiveEditableInput = async () => {
   const activeView = getActiveEditableView();
   if (!activeView) {
@@ -268,10 +331,12 @@ const restoreEditableScroll = () => {
 };
 
 const destroyViews = () => {
+  disconnectMergeLayoutObserver();
   diffView?.destroy();
   diffView = null;
   singleView?.destroy();
   singleView = null;
+  resetMergeHeaderLayout();
   refreshHistoryState(null);
 };
 
@@ -316,7 +381,7 @@ const createDiffView = () => {
   diffView = new MergeView({
     parent: mergeHost.value,
     orientation: "a-b",
-    gutter: true,
+    gutter: false,
     highlightChanges: true,
     a: {
       doc: originalText.value,
@@ -327,7 +392,10 @@ const createDiffView = () => {
       extensions: createEditableExtensions(),
     },
   });
+  attachMergeLayoutObserver();
+  scheduleMergeHeaderLayoutUpdate();
   hydrateMergeEditableState();
+  scheduleMergeHeaderLayoutUpdate();
   restoreEditableScroll();
 };
 
@@ -641,7 +709,10 @@ onUnmounted(() => {
         v-else
         class="flex flex-1 min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80"
       >
-        <div class="grid shrink-0 grid-cols-2 border-b border-slate-200">
+        <div
+          class="grid shrink-0 border-b border-slate-200"
+          :style="{ gridTemplateColumns: mergeHeaderTemplate }"
+        >
           <div class="bg-slate-100 px-3 py-2 text-xs text-slate-600">原文</div>
           <div class="border-l border-slate-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             当前编辑稿
