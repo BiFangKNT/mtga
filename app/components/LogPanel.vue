@@ -10,13 +10,34 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  (event: "clear"): void;
+}>();
+
 const logBox = ref<HTMLDivElement | null>(null);
+const clearConfirmOpen = ref(false);
 
 const logCount = computed(() => props.logs?.length ?? 0);
 
 const formattedLogs = computed(() =>
   props.logs && props.logs.length ? props.logs.join("\n") : props.emptyText,
 );
+
+const requestClearLogs = () => {
+  if (!logCount.value) {
+    return;
+  }
+  clearConfirmOpen.value = true;
+};
+
+const cancelClearLogs = () => {
+  clearConfirmOpen.value = false;
+};
+
+const confirmClearLogs = () => {
+  emit("clear");
+  clearConfirmOpen.value = false;
+};
 
 watch(
   () => props.logs,
@@ -37,7 +58,13 @@ watch(
       <p class="mtga-card-subtitle">实时记录后端与操作状态</p>
     </div>
     <div class="flex items-center gap-2">
-      <span class="mtga-chip">实时输出</span>
+      <button
+        class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600"
+        :disabled="logCount === 0"
+        @click="requestClearLogs"
+      >
+        清空
+      </button>
       <span class="text-xs text-slate-500">共 {{ logCount }} 条</span>
     </div>
   </div>
@@ -47,4 +74,14 @@ watch(
   >
     <pre class="whitespace-pre-wrap leading-relaxed">{{ formattedLogs }}</pre>
   </div>
+
+  <ConfirmDialog
+    :open="clearConfirmOpen"
+    title="确认清空日志"
+    message="确定要清空当前日志吗？"
+    type="error"
+    confirm-text="清空"
+    @cancel="cancelClearLogs"
+    @confirm="confirmClearLogs"
+  />
 </template>

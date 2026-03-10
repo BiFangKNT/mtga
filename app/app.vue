@@ -48,6 +48,10 @@ const selectTab = (id: string) => {
   }
 };
 
+const clearLogs = () => {
+  logs.value = [];
+};
+
 /**
  * 全局 Tooltip 代理状态
  */
@@ -239,7 +243,7 @@ onBeforeUnmount(() => {
 
       <template #right>
         <div class="h-full flex flex-col p-6">
-          <LogPanel :logs="logs" class="flex-1" />
+          <LogPanel :logs="logs" class="flex-1" @clear="clearLogs" />
         </div>
       </template>
 
