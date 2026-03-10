@@ -397,22 +397,30 @@ class ProxyApp:
         messages = request_data.get("messages", [])
         if isinstance(messages, list):
             cleaned = False
-            for msg in messages:
+            for msg in cast(list[Any], messages):
                 if not isinstance(msg, dict):
                     continue
-                content = msg.get("content")
+                msg_dict: dict[str, Any] = msg  # pyright: ignore[reportUnknownVariableType]
+                content = msg_dict.get("content")
                 if isinstance(content, str):
                     if not content.strip():
-                        msg["content"] = "-"
+                        msg_dict["content"] = "-"
                         cleaned = True
                 elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            if not block.get("text", "").strip():
-                                block["text"] = "-"
-                                cleaned = True
+                    for block in cast(list[Any], content):
+                        if not isinstance(block, dict):
+                            continue
+                        block_dict: dict[str, Any] = block  # pyright: ignore[reportUnknownVariableType]
+                        block_type = block_dict.get("type")
+                        block_text = block_dict.get("text", "")
+                        if block_type == "text" and not block_text.strip():
+                            block_dict["text"] = "-"
+                            cleaned = True
             if cleaned:
-                log("检测到空文本块/内容或者是纯空白符，已自动将其修改为单个横杠以防止目标 API 报错 (例如 Anthropic API)")
+                log(
+                    "检测到空文本块/内容或纯空白符，已自动将其修改为单个横杠"
+                    "以防止目标 API 报错 (例如 Anthropic API)"
+                )
 
         auth_header = request.headers.get("Authorization")
         if not auth.verify(auth_header):

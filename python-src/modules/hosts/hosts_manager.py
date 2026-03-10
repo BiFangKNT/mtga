@@ -442,7 +442,7 @@ def open_hosts_file(log_func: LogFunc = print) -> bool:
             session = get_mac_privileged_session(log_func=log_func)
             if session:
                 success, data = session.run_command(["open", "-t", hosts_file], log_func=log_func)
-                data_dict = data if isinstance(data, dict) else {}
+                data_dict = data  # JsonDict is always a dict
                 if success:
                     log_func("已使用默认文本编辑器打开 hosts 文件")
                     result = True
