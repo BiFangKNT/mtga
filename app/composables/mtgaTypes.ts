@@ -51,3 +51,16 @@ export type ProxyStartStepEvent = {
   message?: string | null;
   panel_target?: "config-group" | "global-config" | null;
 };
+
+export type SystemPromptDelta = {
+  edited_text: string;
+  edited_at: string;
+  editor?: string;
+};
+
+export type SystemPromptItem = {
+  hash: string;
+  original_text: string;
+  created_at: string;
+  latest_delta?: SystemPromptDelta | null;
+};

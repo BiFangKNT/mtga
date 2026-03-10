@@ -1,0 +1,4 @@
+interface:
+  display_name: "uv Agent"
+  short_description: "Execute uv workflows for Python projects"
+  default_prompt: "Use $uv to run and troubleshoot uv-based Python workflows safely."

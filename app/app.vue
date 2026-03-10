@@ -114,6 +114,7 @@ const navigation = [
   { id: "config-group", name: "代理配置组", icon: ICONS.CONFIG_GROUP },
   { id: "global-config", name: "全局配置", icon: ICONS.GLOBAL_CONFIG },
   { id: "main-tabs", name: "主要流程", icon: ICONS.MAIN_TABS },
+  { id: "system-prompts", name: "系统提示词", icon: ICONS.SYSTEM_PROMPTS },
   { id: "settings", name: "设置", icon: ICONS.SETTINGS },
 ];
 
@@ -228,6 +229,7 @@ onBeforeUnmount(() => {
                 <ConfigGroupPanel v-if="activeTab === 'config-group'" />
                 <GlobalConfigPanel v-if="activeTab === 'global-config'" />
                 <MainTabs v-if="activeTab === 'main-tabs'" />
+                <SystemPromptPanel v-if="activeTab === 'system-prompts'" />
                 <SettingsPanel v-if="activeTab === 'settings'" />
               </div>
             </Transition>

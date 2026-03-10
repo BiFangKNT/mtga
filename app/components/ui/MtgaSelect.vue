@@ -37,6 +37,13 @@ const emit = defineEmits<{
 
 const isOpen = ref(false);
 const containerRef = ref<HTMLElement | null>(null);
+const triggerRef = ref<HTMLElement | null>(null);
+const dropdownPanelRef = ref<HTMLElement | null>(null);
+const isPositioned = ref(false);
+const dropdownPlacement = ref<"top" | "bottom">("bottom");
+const dropdownStyle = ref<Record<string, string>>({});
+let globalListenersAttached = false;
+let unmounted = false;
 
 // 归一化选项格式
 const normalizedOptions = computed(() => {
@@ -68,17 +75,98 @@ const handleSelect = (val: string | number) => {
 // 点击外部关闭
 const handleClickOutside = (event: MouseEvent) => {
   const target = event.target;
-  if (containerRef.value && target instanceof Node && !containerRef.value.contains(target)) {
+  if (!(target instanceof Node)) {
+    return;
+  }
+  const insideTrigger = containerRef.value?.contains(target) ?? false;
+  const insidePanel = dropdownPanelRef.value?.contains(target) ?? false;
+  if (!insideTrigger && !insidePanel) {
     isOpen.value = false;
   }
 };
+
+const updateDropdownPosition = () => {
+  if (!isOpen.value || !triggerRef.value) {
+    return;
+  }
+
+  const rect = triggerRef.value.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const viewportPadding = 8;
+  const gap = 6;
+  const maxPanelHeight = 240;
+
+  const availableBottom = viewportHeight - rect.bottom - viewportPadding;
+  const availableTop = rect.top - viewportPadding;
+  const renderOnTop = availableBottom < maxPanelHeight && availableTop > availableBottom;
+  dropdownPlacement.value = renderOnTop ? "top" : "bottom";
+
+  const width = Math.min(rect.width, viewportWidth - viewportPadding * 2);
+  const maxLeft = Math.max(viewportPadding, viewportWidth - width - viewportPadding);
+  const left = Math.min(Math.max(rect.left, viewportPadding), maxLeft);
+  const maxHeight = Math.max(
+    120,
+    Math.min(maxPanelHeight, renderOnTop ? availableTop - gap : availableBottom - gap),
+  );
+
+  dropdownStyle.value = {
+    position: "fixed",
+    left: `${left}px`,
+    width: `${width}px`,
+    zIndex: "1000",
+    maxHeight: `${maxHeight}px`,
+    top: renderOnTop ? "auto" : `${rect.bottom + gap}px`,
+    bottom: renderOnTop ? `${viewportHeight - rect.top + gap}px` : "auto",
+  };
+  isPositioned.value = true;
+};
+
+const attachGlobalListeners = () => {
+  if (globalListenersAttached) {
+    return;
+  }
+  window.addEventListener("scroll", updateDropdownPosition, true);
+  window.addEventListener("resize", updateDropdownPosition);
+  globalListenersAttached = true;
+};
+
+const detachGlobalListeners = () => {
+  if (!globalListenersAttached) {
+    return;
+  }
+  window.removeEventListener("scroll", updateDropdownPosition, true);
+  window.removeEventListener("resize", updateDropdownPosition);
+  globalListenersAttached = false;
+};
+
+watch(
+  isOpen,
+  async (open) => {
+    if (open) {
+      isPositioned.value = false;
+      await nextTick();
+      if (unmounted || !isOpen.value) {
+        return;
+      }
+      updateDropdownPosition();
+      attachGlobalListeners();
+    } else {
+      detachGlobalListeners();
+      isPositioned.value = false;
+    }
+  },
+  { flush: "post" },
+);
 
 onMounted(() => {
   document.addEventListener("click", handleClickOutside);
 });
 
 onUnmounted(() => {
+  unmounted = true;
   document.removeEventListener("click", handleClickOutside);
+  detachGlobalListeners();
 });
 
 // 尺寸样式映射
@@ -128,6 +216,7 @@ const sizeClasses = computed(() => {
 
     <!-- 选择框 Trigger -->
     <div
+      ref="triggerRef"
       class="relative flex items-center group transition-all duration-200 ease-out border rounded-xl shadow-sm cursor-pointer select-none"
       :class="[
         sizeClasses.trigger,
@@ -173,59 +262,70 @@ const sizeClasses = computed(() => {
     </div>
 
     <!-- 下拉面板 (Popover) -->
-    <Transition
-      enter-active-class="transition duration-100 ease-out"
-      enter-from-class="transform scale-98 opacity-0 -translate-y-1"
-      enter-to-class="transform scale-100 opacity-100 translate-y-0"
-      leave-active-class="transition duration-75 ease-in"
-      leave-from-class="transform scale-100 opacity-100 translate-y-0"
-      leave-to-class="transform scale-98 opacity-0 -translate-y-1"
-    >
-      <div
-        v-if="isOpen"
-        class="absolute left-0 right-0 z-1000 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden py-1 min-w-full"
-        :class="[sizeClasses.panel]"
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-100 ease-out"
+        :enter-from-class="
+          dropdownPlacement === 'top'
+            ? 'transform scale-98 opacity-0 translate-y-1'
+            : 'transform scale-98 opacity-0 -translate-y-1'
+        "
+        enter-to-class="transform scale-100 opacity-100 translate-y-0"
+        leave-active-class="transition duration-75 ease-in"
+        leave-from-class="transform scale-100 opacity-100 translate-y-0"
+        :leave-to-class="
+          dropdownPlacement === 'top'
+            ? 'transform scale-98 opacity-0 translate-y-1'
+            : 'transform scale-98 opacity-0 -translate-y-1'
+        "
       >
         <div
-          v-if="normalizedOptions.length === 0"
-          class="px-4 py-3 text-center text-slate-400 text-xs"
+          v-if="isOpen && isPositioned"
+          ref="dropdownPanelRef"
+          class="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden py-1"
+          :style="dropdownStyle"
         >
-          暂无选项
-        </div>
-        <ul v-else class="max-h-60 overflow-y-auto custom-scrollbar">
-          <li v-for="opt in normalizedOptions" :key="opt.value">
-            <div
-              class="cursor-pointer transition-colors duration-150 flex items-center justify-between antialiased"
-              :class="[
-                sizeClasses.item,
-                modelValue === opt.value
-                  ? 'bg-primary/10 text-slate-900 font-bold'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-              ]"
-              @click="handleSelect(opt.value)"
-            >
-              <span class="truncate">{{ opt.label }}</span>
-              <!-- 选中标记 -->
-              <svg
-                v-if="modelValue === opt.value"
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-4 w-4 text-primary"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          <div
+            v-if="normalizedOptions.length === 0"
+            class="px-4 py-3 text-center text-slate-400 text-xs"
+          >
+            暂无选项
+          </div>
+          <ul v-else class="overflow-y-auto custom-scrollbar" :style="{ maxHeight: 'inherit' }">
+            <li v-for="opt in normalizedOptions" :key="opt.value">
+              <div
+                class="cursor-pointer transition-colors duration-150 flex items-center justify-between antialiased"
+                :class="[
+                  sizeClasses.item,
+                  modelValue === opt.value
+                    ? 'bg-primary/10 text-slate-900 font-bold'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                ]"
+                @click="handleSelect(opt.value)"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </Transition>
+                <span class="truncate">{{ opt.label }}</span>
+                <!-- 选中标记 -->
+                <svg
+                  v-if="modelValue === opt.value"
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4 text-primary"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 底部描述/错误信息 -->
     <div v-if="description || error" class="label py-1 min-h-[24px]">

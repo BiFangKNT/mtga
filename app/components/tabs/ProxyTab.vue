@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const store = useMtgaStore();
 const options = store.runtimeOptions;
+const runningAction = ref<"start" | "stop" | "check" | null>(null);
 
 const debugModeTooltip = [
   "开启后：",
@@ -10,16 +11,28 @@ const debugModeTooltip = [
   "（默认不做第 2 项检查，仅在调试模式下启用）",
 ].join("\n");
 
-const handleStart = () => {
-  store.runProxyStart();
+const runAction = async (action: "start" | "stop" | "check", runner: () => Promise<boolean>) => {
+  if (runningAction.value) {
+    return;
+  }
+  runningAction.value = action;
+  try {
+    await runner();
+  } finally {
+    runningAction.value = null;
+  }
 };
 
-const handleStop = () => {
-  store.runProxyStop();
+const handleStart = async () => {
+  await runAction("start", () => store.runProxyStart());
 };
 
-const handleCheck = () => {
-  store.runProxyCheckNetwork();
+const handleStop = async () => {
+  await runAction("stop", () => store.runProxyStop());
+};
+
+const handleCheck = async () => {
+  await runAction("check", () => store.runProxyCheckNetwork());
 };
 </script>
 
@@ -68,9 +81,30 @@ const handleCheck = () => {
       <div class="text-xs text-slate-500">启动 / 停止 / 网络检查</div>
     </div>
     <div class="space-y-2">
-      <button class="mtga-btn-primary" @click="handleStart">启动代理服务器</button>
-      <button class="mtga-btn-error" @click="handleStop">停止代理服务器</button>
-      <button class="mtga-btn-outline" @click="handleCheck">检查网络环境</button>
+      <button
+        class="mtga-btn-primary"
+        :class="runningAction === 'start' ? 'loading' : ''"
+        :disabled="Boolean(runningAction)"
+        @click="handleStart"
+      >
+        启动代理服务器
+      </button>
+      <button
+        class="mtga-btn-error"
+        :class="runningAction === 'stop' ? 'loading' : ''"
+        :disabled="Boolean(runningAction)"
+        @click="handleStop"
+      >
+        停止代理服务器
+      </button>
+      <button
+        class="mtga-btn-outline"
+        :class="runningAction === 'check' ? 'loading' : ''"
+        :disabled="Boolean(runningAction)"
+        @click="handleCheck"
+      >
+        检查网络环境
+      </button>
     </div>
   </div>
 </template>

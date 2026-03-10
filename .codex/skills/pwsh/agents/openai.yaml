@@ -1,0 +1,4 @@
+interface:
+  display_name: "PowerShell Agent"
+  short_description: "Run robust PowerShell 5.1/7 commands with safe quoting"
+  default_prompt: "Use $pwsh to plan and run PowerShell commands with cross-version compatibility."

@@ -66,7 +66,7 @@ const handleEscape = () => {
         </div>
 
         <!-- 默认插槽：主要内容区 -->
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 min-h-0 overflow-y-auto">
           <slot></slot>
         </div>
 

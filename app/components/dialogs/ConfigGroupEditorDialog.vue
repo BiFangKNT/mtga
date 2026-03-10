@@ -13,6 +13,7 @@ const props = withDefaults(
     defaultMiddleRoute?: string;
     availableModels?: string[];
     modelLoading?: boolean;
+    saving?: boolean;
   }>(),
   {
     open: false,
@@ -27,6 +28,7 @@ const props = withDefaults(
     defaultMiddleRoute: "/v1",
     availableModels: () => [],
     modelLoading: false,
+    saving: false,
   },
 );
 
@@ -88,6 +90,9 @@ const handleCancel = () => {
 };
 
 const handleSave = () => {
+  if (props.saving) {
+    return;
+  }
   emit("save");
 };
 
@@ -187,7 +192,14 @@ const handleFetchModels = () => {
 
     <template #footer>
       <button class="mtga-btn-dialog-ghost flex-1" @click="handleCancel">取消</button>
-      <button class="mtga-btn-dialog-primary flex-1" @click="handleSave">保存</button>
+      <button
+        class="mtga-btn-dialog-primary flex-1"
+        :class="props.saving ? 'loading' : ''"
+        :disabled="props.saving"
+        @click="handleSave"
+      >
+        保存
+      </button>
     </template>
   </MtgaDialog>
 </template>
