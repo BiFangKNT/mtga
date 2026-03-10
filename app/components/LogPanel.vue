@@ -43,7 +43,7 @@ watch(
   </div>
   <div
     ref="logBox"
-    class="mt-4 flex-1 overflow-auto rounded-xl border border-slate-200/50 bg-slate-500/10 backdrop-blur-md p-4 text-sm font-mono text-slate-700"
+    class="mtga-log-scroll mt-4 flex-1 overflow-auto rounded-xl border border-slate-200/50 bg-slate-500/10 backdrop-blur-md p-4 text-sm font-mono text-slate-700"
   >
     <pre class="whitespace-pre-wrap leading-relaxed">{{ formattedLogs }}</pre>
   </div>
