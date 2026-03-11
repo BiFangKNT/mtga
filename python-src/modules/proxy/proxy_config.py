@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -15,8 +15,15 @@ type LogFunc = Callable[[str], None]
 
 
 @dataclass(frozen=True)
+class ProxyApiEndpoint:
+    api_url: str
+    api_key: str
+
+
+@dataclass(frozen=True)
 class ProxyConfig:
     target_api_base_url: str
+    api_endpoints: tuple[ProxyApiEndpoint, ...]
     middle_route: str
     custom_model_id: str
     target_model_id: str
@@ -53,6 +60,43 @@ def _resolve_target_model_id(*, raw_config: dict[str, Any], custom_model_id: str
     return target_model_id if target_model_id else custom_model_id
 
 
+def _parse_api_endpoints(*, raw_config: dict[str, Any]) -> tuple[ProxyApiEndpoint, ...]:
+    raw_list = raw_config.get("api_endpoints")
+    if isinstance(raw_list, list):
+        raw_items = cast(list[Any], raw_list)
+        endpoints: list[ProxyApiEndpoint] = []
+        for item_any in raw_items:
+            if not isinstance(item_any, dict):
+                continue
+            item = cast(dict[str, Any], item_any)
+            url_value = item.get("api_url") or item.get("url") or ""
+            if not isinstance(url_value, str):
+                url_value = ""
+            api_url = url_value.strip()
+            if not api_url:
+                continue
+            key_value = item.get("api_key") or item.get("key") or ""
+            if not isinstance(key_value, str):
+                key_value = ""
+            api_key = key_value.strip()
+            endpoints.append(ProxyApiEndpoint(api_url=api_url, api_key=api_key))
+        if endpoints:
+            return tuple(endpoints)
+
+    api_url_value = raw_config.get("api_url", PLACEHOLDER_API_URL)
+    if not isinstance(api_url_value, str):
+        api_url_value = PLACEHOLDER_API_URL
+    api_key_value = raw_config.get("api_key") or ""
+    if not isinstance(api_key_value, str):
+        api_key_value = ""
+    return (
+        ProxyApiEndpoint(
+            api_url=api_url_value,
+            api_key=api_key_value,
+        ),
+    )
+
+
 def normalize_middle_route(value: str | None) -> str:
     raw_value = (value or "").strip()
     if not raw_value:
@@ -75,7 +119,8 @@ def build_proxy_config(
     raw_config = raw_config or {}
     global_config = load_global_config(resource_manager=resource_manager, log_func=log_func)
 
-    target_api_base_url = raw_config.get("api_url", PLACEHOLDER_API_URL)
+    api_endpoints = _parse_api_endpoints(raw_config=raw_config)
+    target_api_base_url = api_endpoints[0].api_url
     if target_api_base_url == PLACEHOLDER_API_URL:
         log_func("错误: 请在配置中设置正确的 API URL")
         return None
@@ -92,19 +137,21 @@ def build_proxy_config(
 
     return ProxyConfig(
         target_api_base_url=target_api_base_url,
+        api_endpoints=api_endpoints,
         middle_route=middle_route,
         custom_model_id=custom_model_id,
         target_model_id=target_model_id,
         stream_mode=raw_config.get("stream_mode"),
         debug_mode=bool(raw_config.get("debug_mode", False)),
         disable_ssl_strict_mode=bool(raw_config.get("disable_ssl_strict_mode", False)),
-        api_key=(raw_config.get("api_key") or ""),
+        api_key=api_endpoints[0].api_key,
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
     )
 
 
 __all__ = [
     "DEFAULT_MIDDLE_ROUTE",
+    "ProxyApiEndpoint",
     "ProxyConfig",
     "PLACEHOLDER_API_URL",
     "build_proxy_config",

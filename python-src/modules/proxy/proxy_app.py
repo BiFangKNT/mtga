@@ -13,12 +13,19 @@ import requests
 from flask import Flask, Response, jsonify, request
 
 from modules.proxy.proxy_auth import ProxyAuth
-from modules.proxy.proxy_config import DEFAULT_MIDDLE_ROUTE, ProxyConfig, build_proxy_config
+from modules.proxy.proxy_config import (
+    DEFAULT_MIDDLE_ROUTE,
+    ProxyApiEndpoint,
+    ProxyConfig,
+    build_proxy_config,
+)
 from modules.proxy.proxy_transport import ProxyTransport
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
+
+HTTP_STATUS_TOO_MANY_REQUESTS = 429
 
 
 class ProxyApp:
@@ -39,6 +46,7 @@ class ProxyApp:
         self._transport_ref_counts: dict[int, int] = {}
         self._root_logger_default_level = logging.getLogger().level
         self._app_logger_default_level = logging.WARNING
+        self._endpoint_cursor = 0
         self.app: Flask | None = None
         self.valid = True
         self.proxy_config: ProxyConfig | None = None
@@ -111,6 +119,7 @@ class ProxyApp:
                 "transport": self.transport,
                 "http_client": self.http_client,
                 "proxy_config": self.proxy_config,
+                "endpoint_cursor": self._endpoint_cursor,
             }
 
     def _snapshot_chat_runtime_state(self) -> dict[str, Any]:
@@ -133,6 +142,7 @@ class ProxyApp:
                 "transport": transport,
                 "http_client": self.http_client,
                 "proxy_config": self.proxy_config,
+                "endpoint_cursor": self._endpoint_cursor,
             }
 
     def _release_transport_ref(self, transport: ProxyTransport | None) -> None:
@@ -210,6 +220,7 @@ class ProxyApp:
             self.auth = new_auth
             self.transport = new_transport
             self.http_client = new_transport.session
+            self._endpoint_cursor = 0
 
         self._apply_debug_logging(self.debug_mode)
 
@@ -226,6 +237,10 @@ class ProxyApp:
         base = time.strftime("%H:%M:%S", time.localtime(now))
         ms = int((now % 1) * 1000)
         return f"{base}.{ms:03d}"
+
+    def _set_endpoint_cursor(self, value: int) -> None:
+        with self._config_lock:
+            self._endpoint_cursor = value
 
     def _log_request(self, request_id: str, message: str) -> None:
         self.log_func(f"{self._timestamp_ms()} [{request_id}] {message}")
@@ -452,6 +467,7 @@ class ProxyApp:
         transport = snapshot["transport"]
         http_client = snapshot["http_client"]
         proxy_config = snapshot["proxy_config"]
+        endpoint_cursor = int(snapshot["endpoint_cursor"] or 0)
         transport_released = False
 
         def release_transport() -> None:
@@ -533,36 +549,65 @@ class ProxyApp:
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
             ), 401
 
-        target_api_key = ""
-        if isinstance(proxy_config, ProxyConfig):
-            target_api_key = proxy_config.api_key
-        forward_headers = auth.build_forward_headers(
-            auth_header,
-            target_api_key,
-            log_func=log,
-        )
-
         try:
-            target_url = (
-                f"{target_api_base_url.rstrip('/')}"
-                f"{self._build_route(middle_route, 'chat/completions')}"
-            )
-            log(f"转发请求到: {target_url}")
-
             is_stream = request_data.get("stream", False)
             log(f"流模式: {is_stream}")
 
-            response_from_target = http_client.post(
-                target_url,
-                json=request_data,
-                headers=forward_headers,
-                stream=is_stream,
-                timeout=300,
-            )
-            response_from_target.raise_for_status()
-            if debug_mode:
-                log(f"上游响应状态码: {response_from_target.status_code}")
-                log(f"上游 Content-Type: {response_from_target.headers.get('content-type')}")
+            api_endpoints: tuple[ProxyApiEndpoint, ...]
+            if isinstance(proxy_config, ProxyConfig):
+                api_endpoints = proxy_config.api_endpoints
+            else:
+                api_endpoints = (ProxyApiEndpoint(api_url=target_api_base_url, api_key=""),)
+
+            start_index = endpoint_cursor % len(api_endpoints)
+            response_from_target = None
+            for attempt in range(len(api_endpoints)):
+                endpoint_index = (start_index + attempt) % len(api_endpoints)
+                endpoint = api_endpoints[endpoint_index]
+                target_url = (
+                    f"{endpoint.api_url.rstrip('/')}"
+                    f"{self._build_route(middle_route, 'chat/completions')}"
+                )
+                log(f"转发请求到: {target_url}")
+
+                target_api_key = endpoint.api_key
+                if not target_api_key and isinstance(proxy_config, ProxyConfig):
+                    target_api_key = proxy_config.api_key
+                forward_headers = auth.build_forward_headers(
+                    auth_header,
+                    target_api_key,
+                    log_func=log,
+                )
+
+                response_from_target = http_client.post(
+                    target_url,
+                    json=request_data,
+                    headers=forward_headers,
+                    stream=is_stream,
+                    timeout=300,
+                )
+
+                if (
+                    response_from_target.status_code == HTTP_STATUS_TOO_MANY_REQUESTS
+                    and attempt < len(api_endpoints) - 1
+                ):
+                    next_index = (endpoint_index + 1) % len(api_endpoints)
+                    log(f"上游触发 429，切换节点 {endpoint_index} -> {next_index}")
+                    self._set_endpoint_cursor(next_index)
+                    with contextlib.suppress(Exception):
+                        response_from_target.close()
+                    response_from_target = None
+                    continue
+
+                response_from_target.raise_for_status()
+                self._set_endpoint_cursor(endpoint_index)
+                if debug_mode:
+                    log(f"上游响应状态码: {response_from_target.status_code}")
+                    log(f"上游 Content-Type: {response_from_target.headers.get('content-type')}")
+                break
+
+            if response_from_target is None:
+                raise requests.exceptions.RequestException("No available target API endpoint")
 
             if is_stream:
                 log("返回流式响应")
@@ -749,6 +794,9 @@ class ProxyApp:
         except requests.exceptions.HTTPError as e:
             error_msg = f"目标 API HTTP 错误: {e.response.status_code} - {e.response.text}"
             log(error_msg)
+            with contextlib.suppress(Exception):
+                if e.response is not None:
+                    e.response.close()
             release_transport()
             return jsonify(
                 {"error": f"Target API error: {e.response.status_code}", "details": e.response.text}

@@ -126,7 +126,7 @@ def find_latest_backup(
     if not backup_folders:
         raise NoBackupsError("未找到任何备份")
 
-    latest_backup = max(backup_folders, key=lambda x: os.path.basename(x))
+    latest_backup = max(backup_folders, key=os.path.basename)
     backup_name = os.path.basename(latest_backup)
     return LatestBackupInfo(backup_name=backup_name, backup_path=latest_backup)
 
