@@ -18,6 +18,10 @@ class SystemPromptUpdatePayload(BaseModel):
     edited_text: str
 
 
+class SystemPromptDeletePayload(BaseModel):
+    hashes: list[str]
+
+
 @lru_cache(maxsize=1)
 def _get_resource_manager() -> ResourceManager:
     return ResourceManager()
@@ -48,9 +52,19 @@ def register_system_prompt_commands(commands: Commands) -> None:
             log_func(f"已更新系统提示词增量 hash={hash_value[:12]}")
         return build_result_payload(result, logs, "系统提示词更新完成")
 
+    @commands.command()
+    async def system_prompts_delete(body: SystemPromptDeletePayload) -> dict[str, Any]:
+        logs, log_func = collect_logs()
+        result = _get_prompt_store().delete_items(body.hashes)
+        if result.ok:
+            deleted_count = result.details.get("deleted_count", 0)
+            if isinstance(deleted_count, int):
+                log_func(f"已删除系统提示词记录 count={deleted_count}")
+        return build_result_payload(result, logs, "系统提示词删除完成")
+
     _ = system_prompts_list
     _ = system_prompts_update
+    _ = system_prompts_delete
 
 
 __all__ = ["register_system_prompt_commands"]
-

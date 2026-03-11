@@ -743,6 +743,23 @@ export const useMtgaStore = () => {
     return true;
   };
 
+  const deleteSystemPrompts = async (payload: { hashes: string[] }) => {
+    const normalizedHashes = payload.hashes
+      .map((hash) => coerceText(hash).trim())
+      .filter((hash) => hash.length > 0);
+    if (!normalizedHashes.length) {
+      appendLog("删除系统提示词失败：未提供有效 hash");
+      return false;
+    }
+    const result = await api.systemPromptsDelete({ hashes: normalizedHashes });
+    const ok = applyInvokeResult(result, "删除系统提示词");
+    if (!ok) {
+      return false;
+    }
+    await loadSystemPrompts();
+    return true;
+  };
+
   const runCheckUpdatesOnce = async () => {
     if (updateAutoChecked.value) {
       return false;
@@ -830,6 +847,7 @@ export const useMtgaStore = () => {
     openUpdateRelease,
     loadSystemPrompts,
     updateSystemPrompt,
+    deleteSystemPrompts,
     runPlaceholder,
   };
 };

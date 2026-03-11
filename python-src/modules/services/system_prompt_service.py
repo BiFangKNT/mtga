@@ -164,6 +164,56 @@ class SystemPromptStore:
                 item=self._normalize_item(item),
             )
 
+    def delete_items(self, hashes: list[str]) -> OperationResult:
+        if not hashes:
+            return OperationResult.failure("至少提供一条待删除记录")
+
+        normalized_hashes: list[str] = []
+        seen_hashes: set[str] = set()
+        for raw_hash in hashes:
+            hash_value = raw_hash.strip()
+            if not hash_value or hash_value in seen_hashes:
+                continue
+            seen_hashes.add(hash_value)
+            normalized_hashes.append(hash_value)
+
+        if not normalized_hashes:
+            return OperationResult.failure("至少提供一条有效 hash")
+
+        with self._lock:
+            data = self._load_unlocked()
+            items = list(data["items"])
+            targets = set(normalized_hashes)
+            remaining_items: list[SystemPromptItem] = []
+            deleted_hashes: list[str] = []
+            for item in items:
+                item_hash = item["hash"]
+                if item_hash in targets:
+                    deleted_hashes.append(item_hash)
+                    continue
+                remaining_items.append(item)
+
+            deleted_count = len(deleted_hashes)
+            if deleted_count == 0:
+                return OperationResult.success(
+                    "未找到可删除的系统提示词",
+                    requested_count=len(normalized_hashes),
+                    deleted_count=0,
+                    deleted_hashes=[],
+                )
+
+            data["version"] = 1
+            data["items"] = remaining_items
+            self._save_unlocked(data)
+
+            return OperationResult.success(
+                "系统提示词记录已删除",
+                requested_count=len(normalized_hashes),
+                deleted_count=deleted_count,
+                deleted_hashes=deleted_hashes,
+                remaining_count=len(remaining_items),
+            )
+
     def _load_unlocked(self) -> SystemPromptData:
         if not self._path.exists():
             return _empty_data()
