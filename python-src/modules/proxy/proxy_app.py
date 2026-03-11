@@ -587,17 +587,21 @@ class ProxyApp:
                     timeout=300,
                 )
 
-                if (
-                    response_from_target.status_code == HTTP_STATUS_TOO_MANY_REQUESTS
-                    and attempt < len(api_endpoints) - 1
-                ):
-                    next_index = (endpoint_index + 1) % len(api_endpoints)
-                    log(f"上游触发 429，切换节点 {endpoint_index} -> {next_index}")
-                    self._set_endpoint_cursor(next_index)
-                    with contextlib.suppress(Exception):
-                        response_from_target.close()
-                    response_from_target = None
-                    continue
+                if response_from_target.status_code == HTTP_STATUS_TOO_MANY_REQUESTS:
+                    retry_after = response_from_target.headers.get("retry-after")
+                    retry_after_text = retry_after if retry_after else "-"
+                    log(
+                        "上游触发 429"
+                        f"（节点={endpoint_index}，总节点={len(api_endpoints)}，retry-after={retry_after_text}）"
+                    )
+                    if attempt < len(api_endpoints) - 1:
+                        next_index = (endpoint_index + 1) % len(api_endpoints)
+                        log(f"切换到下一个节点 {endpoint_index} -> {next_index}")
+                        self._set_endpoint_cursor(next_index)
+                        with contextlib.suppress(Exception):
+                            response_from_target.close()
+                        response_from_target = None
+                        continue
 
                 response_from_target.raise_for_status()
                 self._set_endpoint_cursor(endpoint_index)
