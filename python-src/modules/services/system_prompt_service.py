@@ -21,9 +21,9 @@ def _now_iso() -> str:
 
 
 class SystemPromptDelta(TypedDict):
-    edited_text: str
     edited_at: str
     editor: str
+    edited_text: NotRequired[str]
 
 
 class SystemPromptItem(TypedDict):
@@ -113,7 +113,9 @@ class SystemPromptStore:
                 delta_obj = item.get("latest_delta")
                 if not delta_obj:
                     continue
-                overrides[hash_value] = delta_obj["edited_text"]
+                edited_text = delta_obj.get("edited_text")
+                if isinstance(edited_text, str):
+                    overrides[hash_value] = edited_text
             return added_hashes, overrides
 
     def update_prompt_delta(
@@ -145,14 +147,13 @@ class SystemPromptStore:
                 "original_text": current_item["original_text"],
                 "created_at": current_item["created_at"],
             }
-            previous_delta = current_item.get("latest_delta")
-            if previous_delta:
-                item["latest_delta"] = previous_delta
-            item["latest_delta"] = {
-                "edited_text": edited_text,
+            next_delta: SystemPromptDelta = {
                 "edited_at": now,
                 "editor": editor,
             }
+            if edited_text != current_item["original_text"]:
+                next_delta["edited_text"] = edited_text
+            item["latest_delta"] = next_delta
             items[target_index] = item
 
             data["version"] = 1
@@ -283,12 +284,11 @@ class SystemPromptStore:
             edited_text = delta_map.get("edited_text")
             edited_at = delta_map.get("edited_at")
             editor = delta_map.get("editor")
+            delta: SystemPromptDelta = {
+                "edited_at": edited_at if isinstance(edited_at, str) and edited_at else _now_iso(),
+                "editor": editor if isinstance(editor, str) and editor else "ui",
+            }
             if isinstance(edited_text, str):
-                item["latest_delta"] = {
-                    "edited_text": edited_text,
-                    "edited_at": (
-                        edited_at if isinstance(edited_at, str) and edited_at else _now_iso()
-                    ),
-                    "editor": editor if isinstance(editor, str) and editor else "ui",
-                }
+                delta["edited_text"] = edited_text
+            item["latest_delta"] = delta
         return item

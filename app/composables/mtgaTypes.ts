@@ -53,7 +53,7 @@ export type ProxyStartStepEvent = {
 };
 
 export type SystemPromptDelta = {
-  edited_text: string;
+  edited_text?: string;
   edited_at: string;
   editor?: string;
 };

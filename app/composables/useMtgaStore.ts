@@ -137,14 +137,18 @@ const normalizeSystemPromptList = (value: unknown): SystemPromptItem[] => {
 
     const latestDeltaRaw = item["latest_delta"];
     if (isRecord(latestDeltaRaw)) {
-      const editedText = coerceText(latestDeltaRaw["edited_text"]);
       const editedAt = coerceText(latestDeltaRaw["edited_at"]);
       const editor = coerceText(latestDeltaRaw["editor"]);
-      nextItem.latest_delta = {
-        edited_text: editedText,
+      const nextDelta: SystemPromptDelta = {
         edited_at: editedAt,
         ...(editor ? { editor } : {}),
       };
+      const hasEditedText = Object.prototype.hasOwnProperty.call(latestDeltaRaw, "edited_text");
+      const editedTextRaw = latestDeltaRaw["edited_text"];
+      if (hasEditedText && typeof editedTextRaw === "string") {
+        nextDelta.edited_text = editedTextRaw;
+      }
+      nextItem.latest_delta = nextDelta;
     }
     normalized.push(nextItem);
   });
