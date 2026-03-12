@@ -24,7 +24,7 @@ class ConfigStore:
             pass
         return [], 0
 
-    def load_global_config(self) -> tuple[str, str]:
+    def load_global_config(self) -> tuple[str, str, bool]:
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, encoding="utf-8") as f:
@@ -32,10 +32,11 @@ class ConfigStore:
                     if config:
                         mapped_model_id = config.get("mapped_model_id", "")
                         mtga_auth_key = config.get("mtga_auth_key", "")
-                        return mapped_model_id, mtga_auth_key
+                        enable_429_failover = bool(config.get("enable_429_failover", False))
+                        return mapped_model_id, mtga_auth_key, enable_429_failover
         except Exception:
             pass
-        return "", ""
+        return "", "", False
 
     def save_config_groups(
         self,
@@ -43,6 +44,7 @@ class ConfigStore:
         current_index: int = 0,
         mapped_model_id: str | None = None,
         mtga_auth_key: str | None = None,
+        enable_429_failover: bool | None = None,
     ) -> bool:
         try:
             config_data: dict[str, Any] = {}
@@ -57,6 +59,8 @@ class ConfigStore:
                 config_data["mapped_model_id"] = mapped_model_id
             if mtga_auth_key is not None:
                 config_data["mtga_auth_key"] = mtga_auth_key
+            if enable_429_failover is not None:
+                config_data["enable_429_failover"] = enable_429_failover
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
 
