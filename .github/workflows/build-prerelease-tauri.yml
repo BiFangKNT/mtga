@@ -29,8 +29,43 @@ env:
   PYTHON_VERSION: "3.13"
 
 jobs:
+  preflight-auth:
+    name: 🔐 预检发布凭据
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 🔍 校验 CI_DEPLOY_KEY 与目标分支可访问性
+        env:
+          CI_DEPLOY_KEY: ${{ secrets.CI_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CI_DEPLOY_KEY:-}" ]; then
+            echo "❌ 缺少 secrets.CI_DEPLOY_KEY，无法执行发布回写推送"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${CI_DEPLOY_KEY}" > ~/.ssh/ci_deploy_key
+          chmod 600 ~/.ssh/ci_deploy_key
+
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ci_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'
+          remote="git@github.com:${GITHUB_REPOSITORY}.git"
+
+          for branch in dev tauri; do
+            if ! git ls-remote --exit-code --heads "$remote" "$branch" >/dev/null; then
+              echo "❌ CI_DEPLOY_KEY 无法访问分支 ${branch}，请确认 deploy key 已配置写权限并加入规则集 bypass"
+              exit 1
+            fi
+          done
+
+          echo "✅ CI_DEPLOY_KEY 校验通过，可访问目标分支"
+
   prepare-version:
     name: 🧮 计算版本信息
+    needs: preflight-auth
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -511,6 +546,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ssh-key: ${{ secrets.CI_DEPLOY_KEY }}
 
       - name: 📥 下载所有构建产物
         uses: actions/download-artifact@v7
