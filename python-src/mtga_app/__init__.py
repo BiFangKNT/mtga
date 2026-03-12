@@ -258,6 +258,7 @@ class SaveConfigPayload(BaseModel):
     current_config_index: int
     mapped_model_id: str | None = None
     mtga_auth_key: str | None = None
+    enable_429_failover: bool | None = None
 
 
 @lru_cache(maxsize=1)
@@ -280,12 +281,13 @@ async def greet(body: GreetPayload) -> str:
 async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     config_groups, current_index = config_store.load_config_groups()
-    mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    mapped_model_id, mtga_auth_key, enable_429_failover = config_store.load_global_config()
     return {
         "config_groups": config_groups,
         "current_config_index": current_index,
         "mapped_model_id": mapped_model_id,
         "mtga_auth_key": mtga_auth_key,
+        "enable_429_failover": enable_429_failover,
     }
 
 
@@ -297,6 +299,7 @@ async def save_config(body: SaveConfigPayload) -> bool:
         body.current_config_index,
         body.mapped_model_id,
         body.mtga_auth_key,
+        body.enable_429_failover,
     )
 
 
