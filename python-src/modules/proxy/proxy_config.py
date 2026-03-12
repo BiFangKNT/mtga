@@ -18,6 +18,7 @@ type LogFunc = Callable[[str], None]
 class ProxyApiEndpoint:
     api_url: str
     api_key: str
+    target_model_id: str
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class ProxyConfig:
     disable_ssl_strict_mode: bool
     api_key: str
     mtga_auth_key: str
+    enable_429_failover: bool
 
 
 def load_global_config(
@@ -60,41 +62,69 @@ def _resolve_target_model_id(*, raw_config: dict[str, Any], custom_model_id: str
     return target_model_id if target_model_id else custom_model_id
 
 
-def _parse_api_endpoints(*, raw_config: dict[str, Any]) -> tuple[ProxyApiEndpoint, ...]:
-    raw_list = raw_config.get("api_endpoints")
-    if isinstance(raw_list, list):
-        raw_items = cast(list[Any], raw_list)
-        endpoints: list[ProxyApiEndpoint] = []
-        for item_any in raw_items:
-            if not isinstance(item_any, dict):
-                continue
-            item = cast(dict[str, Any], item_any)
-            url_value = item.get("api_url") or item.get("url") or ""
-            if not isinstance(url_value, str):
-                url_value = ""
-            api_url = url_value.strip()
-            if not api_url:
-                continue
-            key_value = item.get("api_key") or item.get("key") or ""
-            if not isinstance(key_value, str):
-                key_value = ""
-            api_key = key_value.strip()
-            endpoints.append(ProxyApiEndpoint(api_url=api_url, api_key=api_key))
-        if endpoints:
-            return tuple(endpoints)
+def _parse_api_endpoints(
+    *,
+    raw_config: dict[str, Any],
+    global_config: dict[str, Any],
+    custom_model_id: str,
+) -> tuple[ProxyApiEndpoint, ...]:
+    enable_failover = bool(global_config.get("enable_429_failover", False))
+    endpoints: list[ProxyApiEndpoint] = []
 
+    # 1. Primary endpoint (from raw_config)
     api_url_value = raw_config.get("api_url", PLACEHOLDER_API_URL)
     if not isinstance(api_url_value, str):
         api_url_value = PLACEHOLDER_API_URL
     api_key_value = raw_config.get("api_key") or ""
     if not isinstance(api_key_value, str):
         api_key_value = ""
-    return (
-        ProxyApiEndpoint(
-            api_url=api_url_value,
-            api_key=api_key_value,
-        ),
+    target_model_id = (raw_config.get("model_id") or "").strip()
+    if not target_model_id:
+        target_model_id = custom_model_id
+
+    primary_endpoint = ProxyApiEndpoint(
+        api_url=api_url_value,
+        api_key=api_key_value,
+        target_model_id=target_model_id,
     )
+    endpoints.append(primary_endpoint)
+
+    # 2. Failover endpoints
+    if enable_failover:
+        raw_groups = global_config.get("config_groups")
+        if isinstance(raw_groups, list):
+            config_groups = cast(list[Any], raw_groups)
+            for group_any in config_groups:
+                if not isinstance(group_any, dict):
+                    continue
+                group = cast(dict[str, Any], group_any)
+
+                url = (group.get("api_url") or "").strip()
+                if not url or url == PLACEHOLDER_API_URL:
+                    continue
+
+                key = (group.get("api_key") or "").strip()
+                model = (group.get("model_id") or "").strip()
+                if not model:
+                    model = custom_model_id
+
+                # Deduplicate
+                if (
+                    url == api_url_value
+                    and key == api_key_value
+                    and model == target_model_id
+                ):
+                    continue
+
+                endpoints.append(
+                    ProxyApiEndpoint(
+                        api_url=url,
+                        api_key=key,
+                        target_model_id=model,
+                    )
+                )
+
+    return tuple(endpoints)
 
 
 def normalize_middle_route(value: str | None) -> str:
@@ -119,16 +149,21 @@ def build_proxy_config(
     raw_config = raw_config or {}
     global_config = load_global_config(resource_manager=resource_manager, log_func=log_func)
 
-    api_endpoints = _parse_api_endpoints(raw_config=raw_config)
+    custom_model_id = _resolve_custom_model_id(
+        global_config=global_config,
+        raw_config=raw_config,
+    )
+
+    api_endpoints = _parse_api_endpoints(
+        raw_config=raw_config,
+        global_config=global_config,
+        custom_model_id=custom_model_id,
+    )
     target_api_base_url = api_endpoints[0].api_url
     if target_api_base_url == PLACEHOLDER_API_URL:
         log_func("错误: 请在配置中设置正确的 API URL")
         return None
 
-    custom_model_id = _resolve_custom_model_id(
-        global_config=global_config,
-        raw_config=raw_config,
-    )
     target_model_id = _resolve_target_model_id(
         raw_config=raw_config,
         custom_model_id=custom_model_id,
@@ -146,6 +181,7 @@ def build_proxy_config(
         disable_ssl_strict_mode=bool(raw_config.get("disable_ssl_strict_mode", False)),
         api_key=api_endpoints[0].api_key,
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
+        enable_429_failover=bool(global_config.get("enable_429_failover", False)),
     )
 
 
