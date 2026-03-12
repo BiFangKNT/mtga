@@ -13,6 +13,7 @@ export type ConfigPayload = {
   current_config_index: number;
   mapped_model_id: string;
   mtga_auth_key: string;
+  enable_429_failover?: boolean;
 };
 
 export type AppInfo = {

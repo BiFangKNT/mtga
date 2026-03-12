@@ -165,6 +165,7 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0);
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
+  const enable429Failover = useState<boolean>("mtga-enable-429-failover", () => false);
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -452,6 +453,7 @@ export const useMtgaStore = () => {
     );
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
+    enable429Failover.value = Boolean(result.enable_429_failover);
     return true;
   };
 
@@ -463,6 +465,7 @@ export const useMtgaStore = () => {
       current_config_index: clampedIndex,
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      enable_429_failover: enable429Failover.value,
     };
     const ok = await api.saveConfig(payload);
     return Boolean(ok);
@@ -786,6 +789,7 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    enable429Failover,
     runtimeOptions,
     logs,
     systemPrompts,

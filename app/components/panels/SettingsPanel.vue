@@ -116,6 +116,22 @@ const openThemeDialog = () => {
   themeDialogOpen.value = true;
 };
 
+const enable429Failover = computed({
+  get: () => store.enable429Failover.value,
+  set: (value) => {
+    store.enable429Failover.value = value;
+  },
+});
+
+const handleFailoverChange = async () => {
+  const ok = await store.saveConfig();
+  if (ok) {
+    store.appendLog(`API 智能调度已${enable429Failover.value ? "启用" : "禁用"}`);
+  } else {
+    store.appendLog("保存配置失败");
+  }
+};
+
 const handleThemeSave = (value: ThemeConfig) => {
   const normalized = sanitizeThemeConfig(value);
   copyThemeConfig(themeConfig, normalized);
@@ -139,6 +155,26 @@ const handleThemeSave = (value: ThemeConfig) => {
   </div>
 
   <div class="mt-4 space-y-4">
+    <div class="mtga-soft-panel space-y-3">
+      <div>
+        <div class="text-sm font-semibold text-slate-900">高级策略</div>
+        <div class="text-xs text-slate-500">API 调度与故障转移</div>
+      </div>
+      <label class="label cursor-pointer justify-start gap-3 p-0">
+        <input
+          v-model="enable429Failover"
+          type="checkbox"
+          class="toggle toggle-primary toggle-sm"
+          @change="handleFailoverChange"
+        />
+        <span class="label-text text-slate-700">启用 API 智能调度（轮询 + 429 切换）</span>
+      </label>
+      <div class="text-xs text-slate-500 pl-11">
+        开启后，请求会在配置组间轮询分发；当某个节点触发 429 (Too Many Requests) 时，
+        将自动切换到下一个节点，并对 429 节点进行短暂冷却以避免重复命中。
+      </div>
+    </div>
+
     <div class="mtga-soft-panel space-y-3">
       <div>
         <div class="text-sm font-semibold text-slate-900">用户数据</div>
