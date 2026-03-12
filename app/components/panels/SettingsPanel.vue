@@ -164,8 +164,8 @@ const handleThemeSave = (value: ThemeConfig) => {
   <div class="mt-4 space-y-4">
     <div class="mtga-soft-panel space-y-3">
       <div>
-        <div class="text-sm font-semibold text-slate-900">高级策略</div>
-        <div class="text-xs text-slate-500">API 调度与故障转移</div>
+        <div class="text-sm font-semibold text-slate-900">转发策略</div>
+        <div class="text-xs text-slate-500">负载均衡与自动容错</div>
       </div>
       <label class="label cursor-pointer justify-start gap-3 p-0">
         <input
@@ -174,21 +174,21 @@ const handleThemeSave = (value: ThemeConfig) => {
           class="toggle toggle-primary toggle-sm"
           @change="handleFailoverChange"
         />
-        <span class="label-text text-slate-700">启用 API 智能调度（轮询 + 429 切换）</span>
+        <span class="label-text text-slate-700">启用多节点轮询与自动故障转移</span>
       </label>
-      <label class="label justify-start gap-3 p-0 pl-11">
-        <span class="label-text text-slate-700">429 冷却（秒）</span>
+      <div v-if="enable429Failover" class="flex items-center gap-3 pl-11">
+        <span class="text-xs text-slate-600">节点冷却周期 (秒)</span>
         <input
           v-model.number="failover429CooldownSeconds"
           type="number"
+          class="mtga-input w-20 px-2 py-1 text-center"
           min="1"
-          class="input input-sm w-24"
           @change="handleFailoverChange"
         />
-      </label>
-      <div class="text-xs text-slate-500 pl-11">
-        开启后，请求会在配置组间轮询分发；当某个节点触发 429 (Too Many Requests) 时，
-        将自动切换到下一个节点，并对 429 节点进行短暂冷却以避免重复命中。
+      </div>
+      <div class="text-xs text-slate-500 pl-11 leading-relaxed">
+        开启后，请求将在各配置组间轮询分发。若节点触发 429 (Too Many Requests)
+        频率限制，将自动静默切换至可用节点并对受限节点执行冷却隔离，确保服务连续性。
       </div>
     </div>
 
