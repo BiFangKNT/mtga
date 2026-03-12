@@ -26,6 +26,7 @@ from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
 
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
+HTTP_STATUS_BAD_REQUEST = 400
 
 
 class ProxyApp:
@@ -594,7 +595,7 @@ class ProxyApp:
                     return until - now
 
             if enable_routing:
-                available = []
+                available: list[int] = []
                 for idx in endpoint_order:
                     remaining = cooldown_remaining_seconds(endpoint_key(api_endpoints[idx]))
                     if remaining <= 0:
@@ -634,10 +635,10 @@ class ProxyApp:
                     if thinking_obj is not None:
                         log(f"适配 SiliconFlow 参数，thinking={json.dumps(thinking_obj)}")
                         if isinstance(thinking_obj, dict):
-                            t_type = thinking_obj.get("type")
-                            t_budget = (
-                                thinking_obj.get("budget_tokens")
-                                or thinking_obj.get("budget")
+                            thinking_map = cast(dict[str, Any], thinking_obj)
+                            t_type = thinking_map.get("type")
+                            t_budget = thinking_map.get("budget_tokens") or thinking_map.get(
+                                "budget"
                             )
                             if isinstance(t_type, str) and t_type:
                                 current_request_data["enable_thinking"] = t_type != "disabled"
@@ -673,7 +674,11 @@ class ProxyApp:
                     if retry_after and retry_after.isdigit():
                         retry_after_seconds = float(int(retry_after))
                     if retry_after_seconds is None:
-                        retry_after_seconds = 10.0
+                        retry_after_seconds = (
+                            float(proxy_config.failover_429_cooldown_seconds)
+                            if isinstance(proxy_config, ProxyConfig)
+                            else 60.0
+                        )
                     key = endpoint_key(endpoint)
                     with self._config_lock:
                         self._endpoint_429_until[key] = time.monotonic() + retry_after_seconds
@@ -887,9 +892,10 @@ class ProxyApp:
         except requests.exceptions.HTTPError as e:
             error_msg = f"目标 API HTTP 错误: {e.response.status_code} - {e.response.text}"
             log(error_msg)
-            if e.response.status_code == 400:
+            if e.response.status_code == HTTP_STATUS_BAD_REQUEST:
                 with contextlib.suppress(Exception):
-                    log(f"--- 触发 400 错误的请求参数 ---\\n{json.dumps(request_data, indent=2, ensure_ascii=False)}")
+                    request_dump = json.dumps(request_data, indent=2, ensure_ascii=False)
+                    log(f"--- 触发 400 错误的请求参数 ---\\n{request_dump}")
             with contextlib.suppress(Exception):
                 if e.response is not None:
                     e.response.close()

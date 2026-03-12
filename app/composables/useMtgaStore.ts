@@ -166,6 +166,10 @@ export const useMtgaStore = () => {
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
   const enable429Failover = useState<boolean>("mtga-enable-429-failover", () => false);
+  const failover429CooldownSeconds = useState<number>(
+    "mtga-failover-429-cooldown-seconds",
+    () => 60,
+  );
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -454,6 +458,10 @@ export const useMtgaStore = () => {
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
     enable429Failover.value = Boolean(result.enable_429_failover);
+    const cooldownRaw = Number(result.failover_429_cooldown_seconds);
+    failover429CooldownSeconds.value = Number.isFinite(cooldownRaw)
+      ? Math.max(1, Math.round(cooldownRaw))
+      : 60;
     return true;
   };
 
@@ -466,6 +474,10 @@ export const useMtgaStore = () => {
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
       enable_429_failover: enable429Failover.value,
+      failover_429_cooldown_seconds: Math.max(
+        1,
+        Math.round(Number(failover429CooldownSeconds.value) || 60),
+      ),
     };
     const ok = await api.saveConfig(payload);
     return Boolean(ok);
@@ -790,6 +802,7 @@ export const useMtgaStore = () => {
     mappedModelId,
     mtgaAuthKey,
     enable429Failover,
+    failover429CooldownSeconds,
     runtimeOptions,
     logs,
     systemPrompts,

@@ -14,6 +14,7 @@ export type ConfigPayload = {
   mapped_model_id: string;
   mtga_auth_key: string;
   enable_429_failover?: boolean;
+  failover_429_cooldown_seconds?: number;
 };
 
 export type AppInfo = {

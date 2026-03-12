@@ -107,11 +107,18 @@ class ProxyTransport:
                     log_file = None
             buffer += chunk
             while True:
-                sep = buffer.find(b"\n\n")
-                if sep == -1:
+                sep_lf = buffer.find(b"\n\n")
+                sep_crlf = buffer.find(b"\r\n\r\n")
+                candidates = [pos for pos in (sep_lf, sep_crlf) if pos != -1]
+                if not candidates:
                     break
-                event = buffer[:sep]
-                buffer = buffer[sep + 2 :]
+                sep = min(candidates)
+                if sep == sep_crlf:
+                    event = buffer[:sep]
+                    buffer = buffer[sep + 4 :]
+                else:
+                    event = buffer[:sep]
+                    buffer = buffer[sep + 2 :]
                 yield chunk_index, event
         if buffer.strip():
             log("警告: 上游 SSE 结束时存在未完整分隔的残留数据")

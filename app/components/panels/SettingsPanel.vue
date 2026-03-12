@@ -123,6 +123,13 @@ const enable429Failover = computed({
   },
 });
 
+const failover429CooldownSeconds = computed({
+  get: () => store.failover429CooldownSeconds.value,
+  set: (value) => {
+    store.failover429CooldownSeconds.value = value;
+  },
+});
+
 const handleFailoverChange = async () => {
   const ok = await store.saveConfig();
   if (ok) {
@@ -168,6 +175,16 @@ const handleThemeSave = (value: ThemeConfig) => {
           @change="handleFailoverChange"
         />
         <span class="label-text text-slate-700">启用 API 智能调度（轮询 + 429 切换）</span>
+      </label>
+      <label class="label justify-start gap-3 p-0 pl-11">
+        <span class="label-text text-slate-700">429 冷却（秒）</span>
+        <input
+          v-model.number="failover429CooldownSeconds"
+          type="number"
+          min="1"
+          class="input input-sm w-24"
+          @change="handleFailoverChange"
+        />
       </label>
       <div class="text-xs text-slate-500 pl-11">
         开启后，请求会在配置组间轮询分发；当某个节点触发 429 (Too Many Requests) 时，

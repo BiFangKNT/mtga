@@ -34,6 +34,7 @@ class ProxyConfig:
     api_key: str
     mtga_auth_key: str
     enable_429_failover: bool
+    failover_429_cooldown_seconds: int
 
 
 def load_global_config(
@@ -182,6 +183,9 @@ def build_proxy_config(
         api_key=api_endpoints[0].api_key,
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
         enable_429_failover=bool(global_config.get("enable_429_failover", False)),
+        failover_429_cooldown_seconds=max(
+            1, int(global_config.get("failover_429_cooldown_seconds", 60) or 60)
+        ),
     )
 
 
