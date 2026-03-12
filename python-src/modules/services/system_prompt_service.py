@@ -21,9 +21,9 @@ def _now_iso() -> str:
 
 
 class SystemPromptDelta(TypedDict):
-    edited_text: str
     edited_at: str
     editor: str
+    edited_text: NotRequired[str]
 
 
 class SystemPromptItem(TypedDict):
@@ -113,7 +113,9 @@ class SystemPromptStore:
                 delta_obj = item.get("latest_delta")
                 if not delta_obj:
                     continue
-                overrides[hash_value] = delta_obj["edited_text"]
+                edited_text = delta_obj.get("edited_text")
+                if isinstance(edited_text, str):
+                    overrides[hash_value] = edited_text
             return added_hashes, overrides
 
     def update_prompt_delta(
@@ -145,14 +147,13 @@ class SystemPromptStore:
                 "original_text": current_item["original_text"],
                 "created_at": current_item["created_at"],
             }
-            previous_delta = current_item.get("latest_delta")
-            if previous_delta:
-                item["latest_delta"] = previous_delta
-            item["latest_delta"] = {
-                "edited_text": edited_text,
+            next_delta: SystemPromptDelta = {
                 "edited_at": now,
                 "editor": editor,
             }
+            if edited_text != current_item["original_text"]:
+                next_delta["edited_text"] = edited_text
+            item["latest_delta"] = next_delta
             items[target_index] = item
 
             data["version"] = 1
@@ -162,6 +163,56 @@ class SystemPromptStore:
             return OperationResult.success(
                 "系统提示词增量已更新",
                 item=self._normalize_item(item),
+            )
+
+    def delete_items(self, hashes: list[str]) -> OperationResult:
+        if not hashes:
+            return OperationResult.failure("至少提供一条待删除记录")
+
+        normalized_hashes: list[str] = []
+        seen_hashes: set[str] = set()
+        for raw_hash in hashes:
+            hash_value = raw_hash.strip()
+            if not hash_value or hash_value in seen_hashes:
+                continue
+            seen_hashes.add(hash_value)
+            normalized_hashes.append(hash_value)
+
+        if not normalized_hashes:
+            return OperationResult.failure("至少提供一条有效 hash")
+
+        with self._lock:
+            data = self._load_unlocked()
+            items = list(data["items"])
+            targets = set(normalized_hashes)
+            remaining_items: list[SystemPromptItem] = []
+            deleted_hashes: list[str] = []
+            for item in items:
+                item_hash = item["hash"]
+                if item_hash in targets:
+                    deleted_hashes.append(item_hash)
+                    continue
+                remaining_items.append(item)
+
+            deleted_count = len(deleted_hashes)
+            if deleted_count == 0:
+                return OperationResult.success(
+                    "未找到可删除的系统提示词",
+                    requested_count=len(normalized_hashes),
+                    deleted_count=0,
+                    deleted_hashes=[],
+                )
+
+            data["version"] = 1
+            data["items"] = remaining_items
+            self._save_unlocked(data)
+
+            return OperationResult.success(
+                "系统提示词记录已删除",
+                requested_count=len(normalized_hashes),
+                deleted_count=deleted_count,
+                deleted_hashes=deleted_hashes,
+                remaining_count=len(remaining_items),
             )
 
     def _load_unlocked(self) -> SystemPromptData:
@@ -233,12 +284,11 @@ class SystemPromptStore:
             edited_text = delta_map.get("edited_text")
             edited_at = delta_map.get("edited_at")
             editor = delta_map.get("editor")
+            delta: SystemPromptDelta = {
+                "edited_at": edited_at if isinstance(edited_at, str) and edited_at else _now_iso(),
+                "editor": editor if isinstance(editor, str) and editor else "ui",
+            }
             if isinstance(edited_text, str):
-                item["latest_delta"] = {
-                    "edited_text": edited_text,
-                    "edited_at": (
-                        edited_at if isinstance(edited_at, str) and edited_at else _now_iso()
-                    ),
-                    "editor": editor if isinstance(editor, str) and editor else "ui",
-                }
+                delta["edited_text"] = edited_text
+            item["latest_delta"] = delta
         return item

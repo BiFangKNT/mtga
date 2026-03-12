@@ -84,6 +84,18 @@ const createdAtLabel = computed(() => {
   return date.toLocaleString("zh-CN", { hour12: false });
 });
 
+const editedAtLabel = computed(() => {
+  const raw = props.item?.latest_delta?.edited_at ?? "";
+  if (!raw) {
+    return "";
+  }
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return raw;
+  }
+  return date.toLocaleString("zh-CN", { hour12: false });
+});
+
 const isDirty = computed(() => draftText.value !== effectiveText.value);
 const charCount = computed(() => draftText.value.length);
 const lineCount = computed(() => draftText.value.split("\n").length);
@@ -637,7 +649,7 @@ onUnmounted(() => {
     <template #header>
       <div class="space-y-3">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0 space-y-1">
+          <div class="min-w-0 flex-1 space-y-1">
             <h3 class="text-lg font-semibold text-slate-900">系统提示词编辑器</h3>
             <div class="flex min-w-0 items-center gap-2">
               <span class="truncate font-mono text-[11px] text-slate-500">
@@ -647,7 +659,6 @@ onUnmounted(() => {
                 {{ copied ? "已复制" : "复制" }}
               </button>
             </div>
-            <p class="text-[11px] text-slate-400">收录时间：{{ createdAtLabel || "-" }}</p>
           </div>
           <div class="flex items-center gap-2">
             <label class="label cursor-pointer gap-2 px-0 py-0">
@@ -670,6 +681,12 @@ onUnmounted(() => {
               {{ isDirty ? "未保存修改" : "已同步" }}
             </span>
           </div>
+        </div>
+        <div class="flex w-full items-center gap-2 text-[11px] text-slate-400">
+          <span class="truncate">创建时间：{{ createdAtLabel || "-" }}</span>
+          <span v-if="editedAtLabel" class="ml-auto shrink-0 text-right"
+            >编辑时间：{{ editedAtLabel }}</span
+          >
         </div>
 
         <div class="flex flex-wrap items-center gap-1">

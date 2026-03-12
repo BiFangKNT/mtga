@@ -79,6 +79,8 @@ export const useMtgaApi = () => {
   const systemPromptsList = () => safeInvoke<InvokeResult>("system_prompts_list");
   const systemPromptsUpdate = (payload: { hash: string; edited_text: string }) =>
     safeInvoke<InvokeResult>("system_prompts_update", payload);
+  const systemPromptsDelete = (payload: { hashes: string[] }) =>
+    safeInvoke<InvokeResult>("system_prompts_delete", payload);
   const pullLogs = (payload: {
     after_id?: number | null;
     timeout_ms?: number;
@@ -139,6 +141,7 @@ export const useMtgaApi = () => {
     checkUpdates,
     systemPromptsList,
     systemPromptsUpdate,
+    systemPromptsDelete,
     pullLogs,
     startProxyStepChannel,
   };
