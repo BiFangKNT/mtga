@@ -31,7 +31,7 @@
 
 
 
-## v2.2.0 (Latest)
+## v2.2.0
 ### :sparkles: 新功能
 - feat(proxy): 支持运行时热更新代理配置 (3587ada37488acdabc0f56393069b82377fdf5e1)
 ### :bug: 修复
