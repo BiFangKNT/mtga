@@ -93,15 +93,7 @@ jobs:
             if [ -n "${{ github.event.inputs.version }}" ]; then
               VERSION="${{ github.event.inputs.version }}"
             elif command -v python3 >/dev/null 2>&1; then
-              PY_VERSION_SCRIPT=$'import json\n'\
-                $'from pathlib import Path\n\n'\
-                $'tauri_conf = Path("src-tauri/tauri.conf.json")\n'\
-                $'data = json.loads(tauri_conf.read_text(encoding="utf-8"))\n'\
-                $'version = data.get("version")\n'\
-                $'if not version:\n'\
-                $'    raise SystemExit("Missing version in tauri.conf.json")\n'\
-                $'print(version)'
-              VERSION=$(python3 -c "$PY_VERSION_SCRIPT")
+              VERSION=$(python3 -c 'exec("import json\nfrom pathlib import Path\n\ntauri_conf = Path(\"src-tauri/tauri.conf.json\")\ndata = json.loads(tauri_conf.read_text(encoding=\"utf-8\"))\nversion = data.get(\"version\")\nif not version:\n    raise SystemExit(\"Missing version in tauri.conf.json\")\nprint(version)\n")')
               echo "ℹ️ 未提供版本号，回退到 src-tauri/tauri.conf.json 中的 $VERSION"
             else
               echo "❌ 无法解析 src-tauri/tauri.conf.json，请在 workflow_dispatch 中提供版本号"
