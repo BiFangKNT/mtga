@@ -676,6 +676,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ℹ️ 非正式版标签（$TAG_NAME），跳过 CHANGELOG 回写与分支同步"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
