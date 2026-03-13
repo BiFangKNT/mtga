@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v2.3.1 - 2026-03-12
+
+
+### :sparkles: 新功能
+
+- 支持批量删除系统提示词记录 ([e6f7861](https://github.com/BiFangKNT/mtga/commit/e6f78614dcaa528015731c2a6a6b7bfc2cafeb6e))
+
+- 使edited_text字段可选并优化编辑时间显示 ([533cc66](https://github.com/BiFangKNT/mtga/commit/533cc6653dee4fa283d97de8f75efa7e5b9927f0))
+
+
+
 ## v2.3.0 - 2026-03-10
 
 
