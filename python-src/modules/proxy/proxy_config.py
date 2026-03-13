@@ -19,6 +19,7 @@ class ProxyApiEndpoint:
     api_url: str
     api_key: str
     target_model_id: str
+    middle_route: str = DEFAULT_MIDDLE_ROUTE
 
 
 @dataclass(frozen=True)
@@ -82,11 +83,14 @@ def _parse_api_endpoints(
     target_model_id = (raw_config.get("model_id") or "").strip()
     if not target_model_id:
         target_model_id = custom_model_id
+    
+    primary_middle_route = normalize_middle_route(raw_config.get("middle_route"))
 
     primary_endpoint = ProxyApiEndpoint(
         api_url=api_url_value,
         api_key=api_key_value,
         target_model_id=target_model_id,
+        middle_route=primary_middle_route,
     )
     endpoints.append(primary_endpoint)
 
@@ -108,12 +112,15 @@ def _parse_api_endpoints(
                 model = (group.get("model_id") or "").strip()
                 if not model:
                     model = custom_model_id
+                
+                # 解析配置组中的 middle_route，若未配置则使用默认值
+                route = normalize_middle_route(group.get("middle_route"))
 
-                # Deduplicate
                 if (
                     url == api_url_value
                     and key == api_key_value
                     and model == target_model_id
+                    and route == primary_middle_route
                 ):
                     continue
 
@@ -122,6 +129,7 @@ def _parse_api_endpoints(
                         api_url=url,
                         api_key=key,
                         target_model_id=model,
+                        middle_route=route,
                     )
                 )
 
@@ -139,6 +147,18 @@ def normalize_middle_route(value: str | None) -> str:
         if not raw_value:
             raw_value = "/"
     return raw_value
+
+
+def _parse_cooldown_seconds(global_config: dict[str, Any]) -> int:
+    try:
+        val = global_config.get("failover_429_cooldown_seconds")
+        if isinstance(val, (int, float)):
+            return max(1, int(val))
+        if isinstance(val, str) and val.strip().isdigit():
+            return max(1, int(val))
+        return 60
+    except (ValueError, TypeError):
+        return 60
 
 
 def build_proxy_config(
@@ -183,9 +203,7 @@ def build_proxy_config(
         api_key=api_endpoints[0].api_key,
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
         enable_429_failover=bool(global_config.get("enable_429_failover", False)),
-        failover_429_cooldown_seconds=max(
-            1, int(global_config.get("failover_429_cooldown_seconds", 60) or 60)
-        ),
+        failover_429_cooldown_seconds=_parse_cooldown_seconds(global_config),
     )
 
 
