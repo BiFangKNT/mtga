@@ -7,7 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号 (例如: 2.0.0-beta.1)"
+        description: >-
+          版本号（例如：2.0.0-beta.1）。手动触发只支持更新已存在 tag；
+          新 tag 请用 git-flow-next 创建 release 分支并通过 `pnpm release:push` 推送。
         required: false
         default: ""
       release_type:
@@ -124,6 +126,18 @@ jobs:
           echo "release_label=$RELEASE_LABEL" >> $GITHUB_OUTPUT
           echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
 
+      - name: 🔎 校验手动重发标签存在
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ steps.version.outputs.tag_name }}"
+          if ! git rev-parse "$TAG_NAME^{commit}" >/dev/null 2>&1; then
+            echo "❌ workflow_dispatch 仅支持重打已存在标签: $TAG_NAME"
+            echo "请先创建并推送该标签后再重发。"
+            exit 1
+          fi
+          echo "✅ 目标标签存在：$TAG_NAME，后续构建将固定在该标签提交上"
+
   build-macos:
     name: 🍎 构建 macOS
     needs: prepare-version
@@ -148,6 +162,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
           fetch-depth: 0
 
       - name: 🐍 设置 Python
@@ -347,6 +362,8 @@ jobs:
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
 
       - name: 🐍 设置 Python
         id: setup-python
@@ -537,6 +554,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
           fetch-depth: 0
           ssh-key: ${{ secrets.CI_DEPLOY_KEY }}
 
@@ -557,28 +575,6 @@ jobs:
           echo "RELEASE_TYPE=${{ needs.prepare-version.outputs.release_type }}" >> $GITHUB_ENV
           echo "RELEASE_LABEL=${{ needs.prepare-version.outputs.release_label }}" >> $GITHUB_ENV
           echo "RELEASE_NAME=${{ needs.prepare-version.outputs.release_name }}" >> $GITHUB_ENV
-
-      - name: 🏷️ 创建或更新标签
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          LABEL="$RELEASE_LABEL"
-          if [ "$LABEL" = "预发布版" ]; then
-            EMOJI="🚀"
-          else
-            EMOJI="🎉"
-          fi
-
-          # 删除已存在的标签（如果有）
-          git tag -d "$TAG_NAME" || true
-          git push origin :refs/tags/"$TAG_NAME" || true
-
-          # 创建新标签
-          git tag -a "$TAG_NAME" \
-            -m "$EMOJI $LABEL $VERSION"
-          git push origin "$TAG_NAME"
 
       - name: 🧮 解析发布范围（start_commit 优先，否则上一正式版 -> 当前提交）
         run: |
@@ -741,6 +737,8 @@ jobs:
           tag: ${{ needs.prepare-version.outputs.tag_name }}
           name: ${{ needs.prepare-version.outputs.release_name }}
           bodyFile: release_notes.md
+          # 幂等：同一版本重跑时更新已存在的 release，避免重复创建报错
+          allowUpdates: true
           prerelease: ${{ needs.prepare-version.outputs.release_type != 'release' }}
           draft: false
           artifacts: |
