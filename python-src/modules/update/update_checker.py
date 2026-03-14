@@ -10,7 +10,10 @@ from typing import Any, cast
 
 import requests
 
-_SEMVER_PATTERN = re.compile(r"v?(?P<version>\d+(?:\.\d+)*)", re.IGNORECASE)
+_SEMVER_PATTERN = re.compile(
+    r"v?(?P<version>\d+(?:\.\d+)*)(?:-(?P<prerelease>[0-9a-z-]+(?:\.[0-9a-z-]+)*))?",
+    re.IGNORECASE,
+)
 _G_EMOJI_PATTERN = re.compile(
     r"<g-emoji\b(?P<attrs>[^>]*)>(?P<content>.*?)</g-emoji>",
     re.IGNORECASE | re.DOTALL,
@@ -245,7 +248,7 @@ def _normalize_version_tuple(version_text: str | None) -> tuple[int, ...]:
     match = _SEMVER_PATTERN.search(version_text.strip())
     if not match:
         return ()
-    numeric_part = match.group("version").split("-")[0]
+    numeric_part = match.group("version")
     tokens: list[int] = []
     for chunk in numeric_part.split("."):
         digits = re.match(r"\d+", chunk)
@@ -253,6 +256,52 @@ def _normalize_version_tuple(version_text: str | None) -> tuple[int, ...]:
             continue
         tokens.append(int(digits.group()))
     return tuple(tokens)
+
+
+def _parse_prerelease(version_text: str | None) -> tuple[int | str, ...] | None:
+    """解析 semver 的 prerelease 标识，返回用于比较的 token 列表。"""
+    if not version_text:
+        return None
+    match = _SEMVER_PATTERN.search(version_text.strip())
+    if not match:
+        return None
+    prerelease = match.group("prerelease")
+    if not prerelease:
+        return None
+
+    tokens: list[int | str] = []
+    for token in prerelease.split("."):
+        if token.isdigit():
+            tokens.append(int(token))
+        else:
+            tokens.append(token.lower())
+    return tuple(tokens)
+
+
+def _compare_prerelease(
+    remote_prerelease: tuple[int | str, ...],
+    local_prerelease: tuple[int | str, ...],
+) -> int:
+    """按 SemVer 规则比较 prerelease，返回 1/0/-1。"""
+    for remote_token, local_token in zip(remote_prerelease, local_prerelease, strict=False):
+        if remote_token == local_token:
+            continue
+
+        remote_is_num = isinstance(remote_token, int)
+        local_is_num = isinstance(local_token, int)
+        if remote_is_num and local_is_num:
+            return 1 if remote_token > local_token else -1
+        if remote_is_num != local_is_num:
+            # SemVer: 数字标识优先级低于非数字标识。
+            return -1 if remote_is_num else 1
+
+        remote_text = str(remote_token)
+        local_text = str(local_token)
+        return 1 if remote_text > local_text else -1
+
+    if len(remote_prerelease) == len(local_prerelease):
+        return 0
+    return 1 if len(remote_prerelease) > len(local_prerelease) else -1
 
 
 def extract_version_label(text: str | None) -> str | None:
@@ -264,23 +313,30 @@ def extract_version_label(text: str | None) -> str | None:
         return None
     version = match.group(0)
     if not version.lower().startswith("v"):
-        version = f"v{match.group('version')}"
+        version = f"v{version}"
     return version
 
 
 def is_remote_version_newer(remote_version: str | None, local_version: str | None) -> bool:
-    """比较远程与本地版本号，先看主版本，若相同则比较次版本。"""
+    """比较远程与本地版本号，支持 prerelease（例如 -beta.1）。"""
     remote_tuple = _normalize_version_tuple(remote_version)
     local_tuple = _normalize_version_tuple(local_version)
     if not remote_tuple:
         return False
     if not local_tuple:
         return True
-    major_remote = remote_tuple[0]
-    major_local = local_tuple[0]
-    if major_remote == major_local:
+
+    if remote_tuple[0] != local_tuple[0]:
+        return remote_tuple[0] > local_tuple[0]
+    if remote_tuple != local_tuple:
         return remote_tuple > local_tuple
-    return major_remote > major_local
+
+    remote_prerelease = _parse_prerelease(remote_version)
+    local_prerelease = _parse_prerelease(local_version)
+    # 同数字版本：正式版 > prerelease。
+    if remote_prerelease is None or local_prerelease is None:
+        return remote_prerelease is None and local_prerelease is not None
+    return _compare_prerelease(remote_prerelease, local_prerelease) > 0
 
 
 def fetch_latest_release(
