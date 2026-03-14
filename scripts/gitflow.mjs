@@ -275,10 +275,54 @@ function finishRelease(argv) {
   console.log("✅ 完成");
 }
 
+function syncBranches() {
+  assertGitRepo();
+
+  const statusResult = run("git", ["status", "--porcelain"], { capture: true, check: false });
+  if ((statusResult.status ?? 1) !== 0) {
+    fail("无法读取 git status", 3);
+  }
+  const dirty = trimOutput(statusResult.stdout);
+  if (dirty) {
+    console.error(
+      "当前工作区不干净（git status --porcelain 有输出），请先 commit/stash/clean 后再运行：",
+    );
+    for (const line of dirty.split("\n")) {
+      if (line.trim()) console.error(`  ${line}`);
+    }
+    fail("中断：工作区不干净", 20);
+  }
+
+  const branches = ["dev", "tauri"];
+  for (const branch of branches) {
+    const checkoutResult = run("git", ["checkout", branch], { check: false });
+    if ((checkoutResult.status ?? 1) !== 0) {
+      const code = checkoutResult.status ?? 1;
+      fail(`切换分支失败：git checkout ${branch}`, code);
+    }
+    console.log(`▶ 已切换分支: ${branch}`);
+
+    const pullResult = run("git", ["pull"], { check: false });
+    if ((pullResult.status ?? 1) !== 0) {
+      const code = pullResult.status ?? 1;
+      fail(`拉取分支失败：git pull (${branch})`, code);
+    }
+    console.log(`✅ 已拉取分支: ${branch}`);
+  }
+
+  const checkoutDevResult = run("git", ["checkout", "dev"], { check: false });
+  if ((checkoutDevResult.status ?? 1) !== 0) {
+    const code = checkoutDevResult.status ?? 1;
+    fail("切回开发分支失败：git checkout dev", code);
+  }
+  console.log("✅ 已切回分支: dev");
+}
+
 function printUsage() {
   console.log("用法:");
   console.log("  node ./scripts/gitflow.mjs setup");
   console.log("  node ./scripts/gitflow.mjs finish [-v version] [-r remote] [-m main] [-d dev]");
+  console.log("  node ./scripts/gitflow.mjs sync");
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -295,6 +339,11 @@ if (command === "setup") {
 
 if (command === "finish") {
   finishRelease(args);
+  process.exit(0);
+}
+
+if (command === "sync") {
+  syncBranches();
   process.exit(0);
 }
 
