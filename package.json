@@ -30,6 +30,7 @@
     "tauri:bundle:win:ci": "for %I in (src-tauri\\\\pyembed\\\\python\\\\python.exe) do set PYO3_PYTHON=%~fI && pnpm -- tauri build -- --profile bundle-release",
     "tauri:bundle:mac:ci": "export PYO3_PYTHON=$(realpath ./src-tauri/pyembed/python/bin/python3) && export RUSTFLAGS=\"-C link-arg=-Wl,-rpath,@executable_path/../Resources/lib -L $(realpath ./src-tauri/pyembed/python/lib)\" && install_name_tool -id '@rpath/libpython3.13.dylib' ./src-tauri/pyembed/python/lib/libpython3.13.dylib && pnpm -- tauri build -- --profile bundle-release",
     "gitflow:setup": "node ./scripts/gitflow.mjs setup",
+    "git:sync": "node ./scripts/gitflow.mjs sync",
     "release:push": "node ./scripts/gitflow.mjs finish"
   },
   "dependencies": {

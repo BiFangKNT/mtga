@@ -1,6 +1,74 @@
 # CHANGELOG
 
-## v2.2.0 (Latest)
+## v2.3.2 - 2026-03-14
+
+
+
+
+
+### :sparkles: 新功能
+
+- 支持 prerelease 版本的 SemVer 比较 ([264f724](https://github.com/BiFangKNT/mtga/commit/264f724bc3dba6e50a368cd231730190c5b2c467))
+
+
+
+
+
+
+### :bug: 修复
+
+- 修复合并视图编辑器溢出和面板定位问题 ([fb973af](https://github.com/BiFangKNT/mtga/commit/fb973afdecbe6db8e68fb2b0e0e7b11881fe1db6))
+
+
+
+
+
+
+
+
+## v2.3.1 - 2026-03-12
+
+
+### :sparkles: 新功能
+
+- 支持批量删除系统提示词记录 ([e6f7861](https://github.com/BiFangKNT/mtga/commit/e6f78614dcaa528015731c2a6a6b7bfc2cafeb6e))
+
+- 使edited_text字段可选并优化编辑时间显示 ([533cc66](https://github.com/BiFangKNT/mtga/commit/533cc6653dee4fa283d97de8f75efa7e5b9927f0))
+
+
+
+## v2.3.0 - 2026-03-10
+
+
+### :art: 界面样式
+
+- 为日志面板添加自定义滚动条样式 ([ec40204](https://github.com/BiFangKNT/mtga/commit/ec402040a94cfae63c2e5ecf3526f063c58fd1a5))
+
+
+
+### :bug: 修复
+
+- 修复合并视图表头宽度与编辑器不一致的问题 ([6af76e3](https://github.com/BiFangKNT/mtga/commit/6af76e34fd1c4d6cdf2ba701421caeef075ca2ac))
+
+
+
+### :sparkles: 新功能
+
+- 为按钮操作添加防重复点击和加载状态 ([a6de4b8](https://github.com/BiFangKNT/mtga/commit/a6de4b8b3b4e7427f99cce3dd86d056e55942a62))
+
+- 允许在无法获取系统字体时手动输入字体 ([922568e](https://github.com/BiFangKNT/mtga/commit/922568ed5f9ab3e2f89ed2e8e8fdfa107c4548d5))
+
+- 改进 MtgaSelect 下拉面板的定位和滚动行为 ([0a0c317](https://github.com/BiFangKNT/mtga/commit/0a0c3177b9a15a20586e078edc9e944cf7aba778))
+
+- 新增系统提示词管理功能 ([2d726b8](https://github.com/BiFangKNT/mtga/commit/2d726b84b47433cdf6e9c4cd5c68ff934520ee73))
+
+- 升级编辑器并支持差异对比模式 ([fb43f1b](https://github.com/BiFangKNT/mtga/commit/fb43f1b84a3d3a95b9ee84aa97448a1895bfb9af))
+
+- 添加清空日志功能 ([3038202](https://github.com/BiFangKNT/mtga/commit/30382024a663509976696f994865b2687a3f300f))
+
+
+
+## v2.2.0
 ### :sparkles: 新功能
 - feat(proxy): 支持运行时热更新代理配置 (3587ada37488acdabc0f56393069b82377fdf5e1)
 ### :bug: 修复

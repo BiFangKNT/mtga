@@ -775,6 +775,7 @@ onUnmounted(() => {
 
 .mtga-merge-host :deep(.cm-mergeViewEditor) {
   min-width: 0;
+  overflow: visible;
 }
 
 .mtga-merge-host :deep(.cm-merge-a .cm-changedLine),
@@ -800,9 +801,13 @@ onUnmounted(() => {
   width: 4px;
 }
 
-.mtga-merge-host :deep(.cm-search) {
+.mtga-merge-host :deep(.cm-panels) {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
+}
+
+.mtga-merge-host :deep(.cm-search) {
+  position: relative;
 }
 </style>
