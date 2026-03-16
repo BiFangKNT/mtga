@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## v2.3.2 - 2026-03-14
+
+
+
+
+
+### :sparkles: 新功能
+
+- 支持 prerelease 版本的 SemVer 比较 ([264f724](https://github.com/BiFangKNT/mtga/commit/264f724bc3dba6e50a368cd231730190c5b2c467))
+
+
+
+
+
+
+### :bug: 修复
+
+- 修复合并视图编辑器溢出和面板定位问题 ([fb973af](https://github.com/BiFangKNT/mtga/commit/fb973afdecbe6db8e68fb2b0e0e7b11881fe1db6))
+
+
+
+
+
+
+
+
 ## v2.3.1 - 2026-03-12
 
 
