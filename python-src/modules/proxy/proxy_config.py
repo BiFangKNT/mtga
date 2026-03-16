@@ -64,6 +64,47 @@ def _resolve_target_model_id(*, raw_config: dict[str, Any], custom_model_id: str
     return target_model_id if target_model_id else custom_model_id
 
 
+def _parse_endpoint_from_group(
+    group: dict[str, Any], *, custom_model_id: str
+) -> ProxyApiEndpoint | None:
+    url = (group.get("api_url") or "").strip()
+    if not url or url == PLACEHOLDER_API_URL:
+        return None
+    key = (group.get("api_key") or "").strip()
+    model = (group.get("model_id") or "").strip() or custom_model_id
+    route = normalize_middle_route(group.get("middle_route"))
+    return ProxyApiEndpoint(
+        api_url=url,
+        api_key=key,
+        target_model_id=model,
+        middle_route=route,
+    )
+
+
+def _extract_config_groups(global_config: dict[str, Any]) -> list[dict[str, Any]]:
+    config_groups: list[dict[str, Any]] = []
+    raw_groups_obj = global_config.get("config_groups")
+    if not isinstance(raw_groups_obj, list):
+        return config_groups
+    for group_any in cast(list[object], raw_groups_obj):
+        if isinstance(group_any, dict):
+            config_groups.append(cast(dict[str, Any], group_any))
+    return config_groups
+
+
+def _extract_routing_group_ids(global_config: dict[str, Any]) -> list[str]:
+    routing_group_ids: list[str] = []
+    routing_group_ids_raw = global_config.get("routing_group_ids")
+    if not isinstance(routing_group_ids_raw, list):
+        return routing_group_ids
+    for item in cast(list[object], routing_group_ids_raw):
+        if isinstance(item, str):
+            value = item.strip()
+            if value:
+                routing_group_ids.append(value)
+    return routing_group_ids
+
+
 def _parse_api_endpoints(
     *,
     raw_config: dict[str, Any],
@@ -71,67 +112,45 @@ def _parse_api_endpoints(
     custom_model_id: str,
 ) -> tuple[ProxyApiEndpoint, ...]:
     enable_failover = bool(global_config.get("enable_429_failover", False))
+    config_groups = _extract_config_groups(global_config)
+    routing_group_ids = _extract_routing_group_ids(global_config)
     endpoints: list[ProxyApiEndpoint] = []
+    endpoint_signatures: set[tuple[str, str, str, str]] = set()
 
-    # 1. Primary endpoint (from raw_config)
-    api_url_value = raw_config.get("api_url", PLACEHOLDER_API_URL)
-    if not isinstance(api_url_value, str):
-        api_url_value = PLACEHOLDER_API_URL
-    api_key_value = raw_config.get("api_key") or ""
-    if not isinstance(api_key_value, str):
-        api_key_value = ""
-    target_model_id = (raw_config.get("model_id") or "").strip()
-    if not target_model_id:
-        target_model_id = custom_model_id
-    
-    primary_middle_route = normalize_middle_route(raw_config.get("middle_route"))
+    def append_unique(group: dict[str, Any]) -> None:
+        endpoint = _parse_endpoint_from_group(group, custom_model_id=custom_model_id)
+        if endpoint is None:
+            return
+        signature = (
+            endpoint.api_url,
+            endpoint.api_key,
+            endpoint.target_model_id,
+            endpoint.middle_route,
+        )
+        if signature in endpoint_signatures:
+            return
+        endpoint_signatures.add(signature)
+        endpoints.append(endpoint)
 
-    primary_endpoint = ProxyApiEndpoint(
-        api_url=api_url_value,
-        api_key=api_key_value,
-        target_model_id=target_model_id,
-        middle_route=primary_middle_route,
-    )
-    endpoints.append(primary_endpoint)
+    selected_mode = bool(enable_failover and routing_group_ids)
+    if selected_mode:
+        selected_ids = set(routing_group_ids)
+        for group in config_groups:
+            group_id = str(group.get("id") or "").strip()
+            if group_id and group_id in selected_ids:
+                append_unique(group)
 
-    # 2. Failover endpoints
-    if enable_failover:
-        raw_groups = global_config.get("config_groups")
-        if isinstance(raw_groups, list):
-            config_groups = cast(list[Any], raw_groups)
-            for group_any in config_groups:
-                if not isinstance(group_any, dict):
-                    continue
-                group = cast(dict[str, Any], group_any)
+    # 如果启用了选择模式但结果为空（例如：选中组均无效），回退到仅使用当前激活配置
+    # 这意味着如果用户开启轮询但没选任何组，就相当于没开启轮询
+    if selected_mode and not endpoints:
+        selected_mode = False
+        # 清空以便重新添加单点
+        endpoints.clear()
+        endpoint_signatures.clear()
 
-                url = (group.get("api_url") or "").strip()
-                if not url or url == PLACEHOLDER_API_URL:
-                    continue
-
-                key = (group.get("api_key") or "").strip()
-                model = (group.get("model_id") or "").strip()
-                if not model:
-                    model = custom_model_id
-                
-                # 解析配置组中的 middle_route，若未配置则使用默认值
-                route = normalize_middle_route(group.get("middle_route"))
-
-                if (
-                    url == api_url_value
-                    and key == api_key_value
-                    and model == target_model_id
-                    and route == primary_middle_route
-                ):
-                    continue
-
-                endpoints.append(
-                    ProxyApiEndpoint(
-                        api_url=url,
-                        api_key=key,
-                        target_model_id=model,
-                        middle_route=route,
-                    )
-                )
+    # 如果未启用选择模式（或回退），只添加当前激活的配置
+    if not selected_mode:
+        append_unique(raw_config)
 
     return tuple(endpoints)
 
@@ -180,6 +199,9 @@ def build_proxy_config(
         global_config=global_config,
         custom_model_id=custom_model_id,
     )
+    if not api_endpoints:
+        log_func("错误: 没有可用的 API 端点")
+        return None
     target_api_base_url = api_endpoints[0].api_url
     if target_api_base_url == PLACEHOLDER_API_URL:
         log_func("错误: 请在配置中设置正确的 API URL")

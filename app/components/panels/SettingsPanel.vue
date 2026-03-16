@@ -15,6 +15,7 @@ import {
 
 const store = useMtgaStore();
 const appInfo = store.appInfo;
+const configGroups = store.configGroups;
 
 const clearConfirmOpen = ref(false);
 const clearConfirmTitle = "确认清除数据";
@@ -130,6 +131,58 @@ const failover429CooldownSeconds = computed({
   },
 });
 
+const routingGroupIds = computed({
+  get: () => store.routingGroupIds.value,
+  set: (value) => {
+    store.routingGroupIds.value = value;
+  },
+});
+
+type RoutingGroupOption = {
+  key: string;
+  label: string;
+  ids: string[];
+};
+
+const routingGroupOptions = computed<RoutingGroupOption[]>(() => {
+  const grouped = new Map<string, RoutingGroupOption>();
+  configGroups.value.forEach((group, index) => {
+    const id = (group.id || "").trim();
+    if (!id) {
+      return;
+    }
+    const name = (group.name || "").trim();
+    const key = name ? `name:${name}` : `id:${id}`;
+    const label = name || `配置组 ${index + 1}`;
+    const current = grouped.get(key);
+    if (current) {
+      current.ids.push(id);
+      return;
+    }
+    grouped.set(key, { key, label, ids: [id] });
+  });
+  return Array.from(grouped.values());
+});
+
+const selectedRoutingGroupKeys = computed({
+  get: () => {
+    const selectedIds = new Set(routingGroupIds.value);
+    return routingGroupOptions.value
+      .filter((option) => option.ids.some((id) => selectedIds.has(id)))
+      .map((option) => option.key);
+  },
+  set: (keys: string[]) => {
+    const selectedKeys = new Set(keys);
+    routingGroupIds.value = Array.from(
+      new Set(
+        routingGroupOptions.value
+          .filter((option) => selectedKeys.has(option.key))
+          .flatMap((option) => option.ids),
+      ),
+    );
+  },
+});
+
 const handleFailoverChange = async () => {
   const ok = await store.saveConfig();
   if (ok) {
@@ -137,6 +190,19 @@ const handleFailoverChange = async () => {
   } else {
     store.appendLog("保存配置失败");
   }
+};
+
+const handleRoutingGroupsChange = async () => {
+  const ok = await store.saveConfig();
+  if (ok) {
+    if (selectedRoutingGroupKeys.value.length) {
+      store.appendLog(`已设置轮询配置组数量：${selectedRoutingGroupKeys.value.length}`);
+    } else {
+      store.appendLog("轮询配置组未指定，仅使用当前激活配置");
+    }
+    return;
+  }
+  store.appendLog("保存配置失败");
 };
 
 const handleThemeSave = (value: ThemeConfig) => {
@@ -186,8 +252,30 @@ const handleThemeSave = (value: ThemeConfig) => {
           @change="handleFailoverChange"
         />
       </div>
+      <div v-if="enable429Failover" class="pl-11 space-y-2">
+        <div class="text-xs text-slate-600">轮询配置组（可多选，未选则仅使用当前激活配置）</div>
+        <div v-if="routingGroupOptions.length" class="space-y-1">
+          <label
+            v-for="option in routingGroupOptions"
+            :key="option.key"
+            class="label cursor-pointer justify-start gap-2 p-0"
+          >
+            <input
+              v-model="selectedRoutingGroupKeys"
+              type="checkbox"
+              class="checkbox checkbox-primary checkbox-xs"
+              :value="option.key"
+              @change="handleRoutingGroupsChange"
+            />
+            <span class="label-text text-xs text-slate-700">
+              {{ option.label }} · {{ option.ids.length }} 个 API
+            </span>
+          </label>
+        </div>
+        <div v-else class="text-xs text-slate-400">暂无可选配置组</div>
+      </div>
       <div class="text-xs text-slate-500 pl-11 leading-relaxed">
-        开启后，请求将在各配置组间轮询分发。若节点触发 429 (Too Many Requests)
+        开启后，请求将在选中配置组间轮询分发。若节点触发 429 (Too Many Requests)
         频率限制，将自动静默切换至可用节点并对受限节点执行冷却隔离，确保服务连续性。
       </div>
     </div>

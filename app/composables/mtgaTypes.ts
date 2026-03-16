@@ -1,4 +1,5 @@
 export type ConfigGroup = {
+  id?: string;
   name?: string;
   api_url: string;
   model_id: string;
@@ -13,6 +14,7 @@ export type ConfigPayload = {
   current_config_index: number;
   mapped_model_id: string;
   mtga_auth_key: string;
+  routing_group_ids?: string[];
   enable_429_failover?: boolean;
   failover_429_cooldown_seconds?: number;
 };

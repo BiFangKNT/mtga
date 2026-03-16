@@ -248,6 +248,10 @@ const handleSave = async () => {
     configGroups.value.push(payload);
     currentIndex.value = configGroups.value.length - 1;
   } else if (hasSelection.value) {
+    const currentGroup = configGroups.value[selectedIndex.value];
+    if (currentGroup?.id) {
+      payload.id = currentGroup.id;
+    }
     configGroups.value.splice(selectedIndex.value, 1, payload);
   }
 
@@ -449,7 +453,7 @@ const moveDown = async () => {
           <tbody v-if="configGroups.length">
             <tr
               v-for="(group, index) in configGroups"
-              :key="index"
+              :key="group.id || index"
               class="cursor-pointer transition-colors hover:bg-amber-100/30 group"
               :class="selectedIndex === index ? 'bg-amber-100/70' : ''"
               :style="{ height: 'var(--row-h)' }"
