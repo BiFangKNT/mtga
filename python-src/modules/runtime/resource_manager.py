@@ -155,20 +155,6 @@ def get_ca_template_path() -> str:
     return get_resource_path("ca")
 
 
-def get_openssl_path() -> str:
-    """获取 OpenSSL 可执行文件路径"""
-    if os.name == "nt":  # Windows
-        return get_resource_path("openssl/openssl.exe")
-    else:
-        # Unix/Linux/macOS 使用系统 OpenSSL
-        return "openssl"
-
-
-def get_openssl_dir() -> str:
-    """获取 OpenSSL 目录路径"""
-    return get_resource_path("openssl")
-
-
 def get_temp_dir() -> str:
     """获取临时文件目录"""
     return tempfile.gettempdir()
@@ -229,8 +215,6 @@ class ResourceManager:
         self.user_data_dir = get_user_data_dir()
         self.ca_path = get_ca_path()
         self.ca_template_path = get_ca_template_path()
-        self.openssl_path = get_openssl_path()
-        self.openssl_dir = get_openssl_dir()
 
         # 初始化时复制模板文件
         self._ensure_user_data_setup()
@@ -293,7 +277,7 @@ class ResourceManager:
         debug_info.append(f"程序资源目录: {self.program_resource_dir}")
         debug_info.append(f"用户数据目录: {self.user_data_dir}")
         debug_info.append(f"CA目录: {self.ca_path}")
-        debug_info.append(f"OpenSSL路径: {self.openssl_path}")
+        debug_info.append("证书生成后端: cryptography")
         debug_info.append(f"运行环境: {get_packaging_runtime()}")
 
         # 如果是打包环境，显示额外的调试信息
@@ -314,9 +298,5 @@ class ResourceManager:
         # 检查 CA 目录（用户数据目录）
         if not os.path.exists(self.ca_path):
             missing_resources.append(f"CA目录: {self.ca_path}")
-
-        # 检查 OpenSSL（程序资源目录）
-        if os.name == "nt" and not os.path.exists(self.openssl_path):
-            missing_resources.append(f"OpenSSL可执行文件: {self.openssl_path}")
 
         return missing_resources

@@ -7,18 +7,21 @@ from ctypes import wintypes
 from functools import lru_cache
 from typing import Any, cast
 
+from cryptography import x509
+
 from modules.cert.cert_utils import (
+    certificate_fingerprint_sha1,
+    certificate_name_to_text,
+    certificate_not_after_unix,
     filter_certs_by_name,
     log_lines,
     normalize_fingerprint,
     parse_certutil_store,
-    parse_openssl_enddate_to_unix,
-    parse_openssl_fingerprint,
 )
 from modules.platform.macos_privileged_helper import get_mac_privileged_session
 from modules.platform.system import is_macos, is_posix, is_windows
 from modules.runtime.operation_result import OperationResult
-from modules.runtime.process_utils import run_command, run_subprocess
+from modules.runtime.process_utils import run_command
 
 MAC_KEYCHAIN_ITEM_NOT_FOUND = 44
 
@@ -99,20 +102,18 @@ def _split_pem_blocks(pem_text: str) -> list[str]:
     return blocks
 
 
-def _parse_openssl_cert_output(output: str) -> dict[str, object]:
-    subject = ""
-    issuer = ""
-    for line in output.splitlines():
-        lower = line.lower()
-        if lower.startswith("subject="):
-            subject = line.split("=", 1)[1].strip()
-        elif lower.startswith("issuer="):
-            issuer = line.split("=", 1)[1].strip()
+def _parse_pem_certificate(pem_block: str, log_func: LogFunc = print) -> dict[str, object] | None:
+    try:
+        certificate = x509.load_pem_x509_certificate(pem_block.encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        log_func(f"⚠️ 解析 PEM 证书失败: {exc}")
+        return None
+
     return {
-        "subject": subject,
-        "issuer": issuer,
-        "fingerprint_sha1": parse_openssl_fingerprint(output),
-        "not_after_unix": parse_openssl_enddate_to_unix(output),
+        "subject": certificate_name_to_text(certificate.subject),
+        "issuer": certificate_name_to_text(certificate.issuer),
+        "fingerprint_sha1": certificate_fingerprint_sha1(certificate),
+        "not_after_unix": certificate_not_after_unix(certificate),
     }
 
 
@@ -403,26 +404,8 @@ def _check_ca_on_macos(ca_common_name: str, log_func: LogFunc = print) -> Operat
 
     certs: list[dict[str, object]] = []
     for pem_block in _split_pem_blocks(stdout):
-        result = run_subprocess(
-            [
-                "openssl",
-                "x509",
-                "-noout",
-                "-fingerprint",
-                "-sha1",
-                "-enddate",
-                "-subject",
-                "-issuer",
-            ],
-            input=pem_block,
-            text=True,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            log_lines(result.stderr, log_func)
-            continue
-        cert_info = _parse_openssl_cert_output(result.stdout)
-        if cert_info.get("fingerprint_sha1"):
+        cert_info = _parse_pem_certificate(pem_block, log_func=log_func)
+        if cert_info and cert_info.get("fingerprint_sha1"):
             certs.append(cert_info)
 
     if certs:

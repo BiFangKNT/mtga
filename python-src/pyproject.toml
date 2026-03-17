@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "pytauri==0.8.*",
     "pytauri-wheel==0.8.*",
+    "cryptography>=45.0.0",
     "flask",
     "requests",
     "platformdirs>=4.3.0",
@@ -28,7 +29,7 @@ exclude = ["build*", "target*", "pyembed*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-modules = ["resources/ca/**", "resources/openssl/**"]
+modules = ["resources/ca/**"]
 
 [dependency-groups]
 dev = [

@@ -8,6 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+
 type LogFunc = Callable[[str], None]
 
 def log_lines(lines: str | None, log_func: LogFunc = print) -> None:
@@ -53,6 +56,24 @@ def parse_openssl_enddate_to_unix(output: str | None) -> int | None:
                 return None
             return int(parsed.replace(tzinfo=UTC).timestamp())
     return None
+
+
+def certificate_fingerprint_sha1(certificate: x509.Certificate) -> str:
+    """提取证书 SHA1 指纹并规范化。"""
+    return normalize_fingerprint(certificate.fingerprint(hashes.SHA1()).hex()) or ""
+
+
+def certificate_not_after_unix(certificate: x509.Certificate) -> int:
+    """将证书到期时间转换为 Unix 时间戳（秒）。"""
+    not_after_utc = getattr(certificate, "not_valid_after_utc", None)
+    if isinstance(not_after_utc, datetime):
+        return int(not_after_utc.timestamp())
+    return int(certificate.not_valid_after.replace(tzinfo=UTC).timestamp())
+
+
+def certificate_name_to_text(name: x509.Name) -> str:
+    """将 cryptography 的名称对象转换为可读字符串。"""
+    return name.rfc4514_string()
 
 
 def parse_certutil_store(output: str) -> list[dict[str, str]]:
@@ -107,6 +128,9 @@ def filter_certs_by_name(
 
 
 __all__ = [
+    "certificate_fingerprint_sha1",
+    "certificate_name_to_text",
+    "certificate_not_after_unix",
     "filter_certs_by_name",
     "log_lines",
     "normalize_fingerprint",
