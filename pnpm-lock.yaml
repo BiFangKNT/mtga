@@ -90,6 +90,9 @@ importers:
       eslint-plugin-yml:
         specifier: ^3.0.0
         version: 3.0.0(eslint@9.39.2(jiti@2.6.1))
+      node:
+        specifier: runtime:>=24 <25
+        version: 24.14.0
       prettier:
         specifier: ^3.8.1
         version: 3.8.1
@@ -3425,6 +3428,9 @@ packages:
   node-addon-api@7.1.1:
     resolution: {integrity: sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==}
 
+  node-bin-setup@1.1.4:
+    resolution: {integrity: sha512-vWNHOne0ZUavArqPP5LJta50+S8R261Fr5SvGul37HbEDcowvLjwdvd0ZeSr0r2lTSrPxl6okq9QUw8BFGiAxA==}
+
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
 
@@ -3450,6 +3456,11 @@ packages:
 
   node-releases@2.0.27:
     resolution: {integrity: sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA==}
+
+  node@24.14.0:
+    resolution: {integrity: sha512-LVMaDvrsQFPIz3E4wMlwXC2LI8xXG//q9/jSfEMp3EORcPi9q9VPV/ERFZDRlXfh18wVj4TMbsWlHgk/CdTDag==}
+    engines: {npm: '>=5.0.0'}
+    hasBin: true
 
   nopt@8.1.0:
     resolution: {integrity: sha512-ieGu42u/Qsa4TFktmaKEwM6MQH0pOWnaB3htzh0JRtx84+Mebc0cbZYN5bC+6WTZ4+77xrL9Pn5m7CV6VIkV7A==}
@@ -8145,6 +8156,8 @@ snapshots:
 
   node-addon-api@7.1.1: {}
 
+  node-bin-setup@1.1.4: {}
+
   node-fetch-native@1.6.7: {}
 
   node-fetch@2.7.0:
@@ -8158,6 +8171,10 @@ snapshots:
   node-mock-http@1.0.4: {}
 
   node-releases@2.0.27: {}
+
+  node@24.14.0:
+    dependencies:
+      node-bin-setup: 1.1.4
 
   nopt@8.1.0:
     dependencies:
