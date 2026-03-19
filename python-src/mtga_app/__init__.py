@@ -217,6 +217,9 @@ class SaveConfigPayload(BaseModel):
     current_config_index: int
     mapped_model_id: str | None = None
     mtga_auth_key: str | None = None
+    routing_group_ids: list[str] | None = None
+    enable_429_failover: bool | None = None
+    failover_429_cooldown_seconds: int | None = None
 
 
 @lru_cache(maxsize=1)
@@ -239,23 +242,39 @@ async def greet(body: GreetPayload) -> str:
 async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     config_groups, current_index = config_store.load_config_groups()
-    mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    mapped_model_id, mtga_auth_key, enable_429_failover, cooldown_seconds, routing_group_ids = (
+        config_store.load_global_config()
+    )
     return {
         "config_groups": config_groups,
         "current_config_index": current_index,
         "mapped_model_id": mapped_model_id,
         "mtga_auth_key": mtga_auth_key,
+        "routing_group_ids": routing_group_ids,
+        "enable_429_failover": enable_429_failover,
+        "failover_429_cooldown_seconds": cooldown_seconds,
     }
 
 
 @command_registry.command()
 async def save_config(body: SaveConfigPayload) -> bool:
     config_store = _get_config_store()
+    global_updates: dict[str, Any] = {}
+    if body.mapped_model_id is not None:
+        global_updates["mapped_model_id"] = body.mapped_model_id
+    if body.mtga_auth_key is not None:
+        global_updates["mtga_auth_key"] = body.mtga_auth_key
+    if body.routing_group_ids is not None:
+        global_updates["routing_group_ids"] = body.routing_group_ids
+    if body.enable_429_failover is not None:
+        global_updates["enable_429_failover"] = body.enable_429_failover
+    if body.failover_429_cooldown_seconds is not None:
+        global_updates["failover_429_cooldown_seconds"] = body.failover_429_cooldown_seconds
+
     return config_store.save_config_groups(
         body.config_groups,
         body.current_config_index,
-        body.mapped_model_id,
-        body.mtga_auth_key,
+        global_config_updates=global_updates if global_updates else None,
     )
 
 

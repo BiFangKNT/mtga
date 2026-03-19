@@ -162,6 +162,19 @@ const clampIndex = (value: number, max: number) => {
   return Math.min(Math.max(value, 0), max - 1);
 };
 
+const createConfigGroupId = (index: number) => {
+  if (typeof globalThis !== "undefined" && globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `group-${Date.now()}-${index}-${Math.random().toString(16).slice(2, 10)}`;
+};
+
+const normalizeConfigGroups = (groups: ConfigGroup[]) =>
+  groups.map((group, index) => {
+    const id = coerceText(group.id).trim() || createConfigGroupId(index);
+    return { ...group, id };
+  });
+
 export const useMtgaStore = () => {
   const api = useMtgaApi();
 
@@ -169,6 +182,12 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0);
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
+  const routingGroupIds = useState<string[]>("mtga-routing-group-ids", () => []);
+  const enable429Failover = useState<boolean>("mtga-enable-429-failover", () => false);
+  const failover429CooldownSeconds = useState<number>(
+    "mtga-failover-429-cooldown-seconds",
+    () => 60,
+  );
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -449,24 +468,59 @@ export const useMtgaStore = () => {
     if (!result) {
       return false;
     }
-    configGroups.value = result.config_groups || [];
+    const loadedGroups = Array.isArray(result.config_groups) ? result.config_groups : [];
+    configGroups.value = normalizeConfigGroups(loadedGroups);
     currentConfigIndex.value = clampIndex(
       result.current_config_index ?? 0,
       configGroups.value.length,
     );
+    const availableGroupIds = new Set(
+      configGroups.value.map((group) => coerceText(group.id).trim()),
+    );
+    routingGroupIds.value = Array.isArray(result.routing_group_ids)
+      ? Array.from(
+          new Set(
+            result.routing_group_ids
+              .map((id) => coerceText(id).trim())
+              .filter((id) => id && availableGroupIds.has(id)),
+          ),
+        )
+      : [];
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
+    enable429Failover.value = Boolean(result.enable_429_failover);
+    const cooldownRaw = Number(result.failover_429_cooldown_seconds);
+    failover429CooldownSeconds.value = Number.isFinite(cooldownRaw)
+      ? Math.max(1, Math.round(cooldownRaw))
+      : 60;
     return true;
   };
 
   const saveConfig = async () => {
+    configGroups.value = normalizeConfigGroups(configGroups.value);
     const clampedIndex = clampIndex(currentConfigIndex.value, configGroups.value.length);
     currentConfigIndex.value = clampedIndex;
+    const availableGroupIds = new Set(
+      configGroups.value.map((group) => coerceText(group.id).trim()),
+    );
+    routingGroupIds.value = Array.from(
+      new Set(
+        routingGroupIds.value
+          .map((id) => coerceText(id).trim())
+          .filter((id) => id && availableGroupIds.has(id)),
+      ),
+    );
     const payload: ConfigPayload = {
       config_groups: configGroups.value,
       current_config_index: clampedIndex,
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      routing_group_ids: routingGroupIds.value,
+      enable_429_failover: enable429Failover.value,
+      failover_429_cooldown_seconds: Math.max(
+        1,
+        Math.round(Number(failover429CooldownSeconds.value) || 60),
+      ),
     };
     const ok = await api.saveConfig(payload);
     return Boolean(ok);
@@ -807,6 +861,9 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    routingGroupIds,
+    enable429Failover,
+    failover429CooldownSeconds,
     runtimeOptions,
     logs,
     systemPrompts,

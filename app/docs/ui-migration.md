@@ -56,6 +56,8 @@ app/
 - [x] `MainTabs` 支持切换并挂载各 Tab 内容（证书/hosts/代理/数据/关于）。
 - [x] `ConfigGroupPanel` 改为可交互：列表数据、选中状态、增删改弹窗。
 - [x] `GlobalConfigPanel` 与 `RuntimeOptionsPanel` 接入真实数据与保存逻辑。
+- [x] 新增 `routing_group_ids` 配置读写，支持按组路由选择。
+- [x] 设置页接入配置组多选，轮询仅针对选中组（空则回退全部）。
 - [x] `LogPanel` 支持追加日志流（从后端或前端事件）。
 - [x] `UpdateDialog`、确认弹窗完善交互与 HTML 内容渲染。
 - [x] 用 `pyInvoke` 串起最小功能链路（例如 `greet` -> 日志输出）。
@@ -146,6 +148,7 @@ config_groups: ConfigGroup[]
 current_config_index: number
 mapped_model_id: string
 mtga_auth_key: string
+routing_group_ids: string[]
 runtime_options: {
   debugMode: boolean
   disableSslStrict: boolean

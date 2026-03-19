@@ -35,9 +35,9 @@ class GlobalConfigCheckResult:
 
 def ensure_global_config_ready(
     *,
-    load_global_config: Callable[[], tuple[str, str]],
+    load_global_config: Callable[[], tuple[str, str, bool, int, list[str]]],
 ) -> GlobalConfigCheckResult:
-    mapped_model_id, mtga_auth_key = load_global_config()
+    mapped_model_id, mtga_auth_key, *_ = load_global_config()
     mapped_model_id = (mapped_model_id or "").strip()
     mtga_auth_key = (mtga_auth_key or "").strip()
 

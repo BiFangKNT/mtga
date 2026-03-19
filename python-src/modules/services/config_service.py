@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -24,7 +24,7 @@ class ConfigStore:
             pass
         return [], 0
 
-    def load_global_config(self) -> tuple[str, str]:
+    def load_global_config(self) -> tuple[str, str, bool, int, list[str]]:
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, encoding="utf-8") as f:
@@ -32,17 +32,41 @@ class ConfigStore:
                     if config:
                         mapped_model_id = config.get("mapped_model_id", "")
                         mtga_auth_key = config.get("mtga_auth_key", "")
-                        return mapped_model_id, mtga_auth_key
+                        enable_429_failover = bool(config.get("enable_429_failover", False))
+                        cooldown = config.get("failover_429_cooldown_seconds", 60)
+                        routing_group_ids_raw = config.get("routing_group_ids")
+                        routing_group_ids: list[str] = []
+                        if isinstance(routing_group_ids_raw, list):
+                            seen: set[str] = set()
+                            for item in cast(list[object], routing_group_ids_raw):
+                                if not isinstance(item, str):
+                                    continue
+                                group_id = item.strip()
+                                if not group_id or group_id in seen:
+                                    continue
+                                seen.add(group_id)
+                                routing_group_ids.append(group_id)
+                        try:
+                            cooldown_seconds = max(1, int(cooldown or 60))
+                        except Exception:
+                            cooldown_seconds = 60
+                        return (
+                            mapped_model_id,
+                            mtga_auth_key,
+                            enable_429_failover,
+                            cooldown_seconds,
+                            routing_group_ids,
+                        )
         except Exception:
             pass
-        return "", ""
+        return "", "", False, 60, []
 
     def save_config_groups(
         self,
         config_groups: list[dict[str, Any]],
         current_index: int = 0,
-        mapped_model_id: str | None = None,
-        mtga_auth_key: str | None = None,
+        *,
+        global_config_updates: dict[str, Any] | None = None,
     ) -> bool:
         try:
             config_data: dict[str, Any] = {}
@@ -53,10 +77,41 @@ class ConfigStore:
             config_data["config_groups"] = config_groups
             config_data["current_config_index"] = current_index
 
-            if mapped_model_id is not None:
-                config_data["mapped_model_id"] = mapped_model_id
-            if mtga_auth_key is not None:
-                config_data["mtga_auth_key"] = mtga_auth_key
+            if global_config_updates:
+                mapped_model_id = global_config_updates.get("mapped_model_id")
+                if mapped_model_id is not None:
+                    config_data["mapped_model_id"] = mapped_model_id
+
+                mtga_auth_key = global_config_updates.get("mtga_auth_key")
+                if mtga_auth_key is not None:
+                    config_data["mtga_auth_key"] = mtga_auth_key
+
+                enable_429_failover = global_config_updates.get("enable_429_failover")
+                if enable_429_failover is not None:
+                    config_data["enable_429_failover"] = bool(enable_429_failover)
+
+                failover_429_cooldown_seconds = global_config_updates.get(
+                    "failover_429_cooldown_seconds"
+                )
+                if failover_429_cooldown_seconds is not None:
+                    config_data["failover_429_cooldown_seconds"] = max(
+                        1, int(failover_429_cooldown_seconds or 60)
+                    )
+
+                routing_group_ids_raw = global_config_updates.get("routing_group_ids")
+                if routing_group_ids_raw is not None:
+                    routing_group_ids: list[str] = []
+                    seen: set[str] = set()
+                    if isinstance(routing_group_ids_raw, list):
+                        for item in cast(list[object], routing_group_ids_raw):
+                            if not isinstance(item, str):
+                                continue
+                            group_id = item.strip()
+                            if not group_id or group_id in seen:
+                                continue
+                            seen.add(group_id)
+                            routing_group_ids.append(group_id)
+                    config_data["routing_group_ids"] = routing_group_ids
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
 

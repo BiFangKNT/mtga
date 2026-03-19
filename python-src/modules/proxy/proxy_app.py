@@ -13,12 +13,20 @@ import requests
 from flask import Flask, Response, jsonify, request
 
 from modules.proxy.proxy_auth import ProxyAuth
-from modules.proxy.proxy_config import DEFAULT_MIDDLE_ROUTE, ProxyConfig, build_proxy_config
+from modules.proxy.proxy_config import (
+    DEFAULT_MIDDLE_ROUTE,
+    ProxyApiEndpoint,
+    ProxyConfig,
+    build_proxy_config,
+)
 from modules.proxy.proxy_transport import ProxyTransport
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
+
+HTTP_STATUS_TOO_MANY_REQUESTS = 429
+HTTP_STATUS_BAD_REQUEST = 400
 
 
 class ProxyApp:
@@ -39,6 +47,8 @@ class ProxyApp:
         self._transport_ref_counts: dict[int, int] = {}
         self._root_logger_default_level = logging.getLogger().level
         self._app_logger_default_level = logging.WARNING
+        self._endpoint_cursor = 0
+        self._endpoint_429_until: dict[str, float] = {}
         self.app: Flask | None = None
         self.valid = True
         self.proxy_config: ProxyConfig | None = None
@@ -111,6 +121,7 @@ class ProxyApp:
                 "transport": self.transport,
                 "http_client": self.http_client,
                 "proxy_config": self.proxy_config,
+                "endpoint_cursor": self._endpoint_cursor,
             }
 
     def _snapshot_chat_runtime_state(self) -> dict[str, Any]:
@@ -133,6 +144,7 @@ class ProxyApp:
                 "transport": transport,
                 "http_client": self.http_client,
                 "proxy_config": self.proxy_config,
+                "endpoint_cursor": self._endpoint_cursor,
             }
 
     def _release_transport_ref(self, transport: ProxyTransport | None) -> None:
@@ -210,6 +222,7 @@ class ProxyApp:
             self.auth = new_auth
             self.transport = new_transport
             self.http_client = new_transport.session
+            self._endpoint_cursor = 0
 
         self._apply_debug_logging(self.debug_mode)
 
@@ -226,6 +239,10 @@ class ProxyApp:
         base = time.strftime("%H:%M:%S", time.localtime(now))
         ms = int((now % 1) * 1000)
         return f"{base}.{ms:03d}"
+
+    def _set_endpoint_cursor(self, value: int) -> None:
+        with self._config_lock:
+            self._endpoint_cursor = value
 
     def _log_request(self, request_id: str, message: str) -> None:
         self.log_func(f"{self._timestamp_ms()} [{request_id}] {message}")
@@ -445,13 +462,13 @@ class ProxyApp:
         inbound_route = str(snapshot["inbound_route"])
         target_model_id = str(snapshot["target_model_id"])
         target_api_base_url = str(snapshot["target_api_base_url"])
-        middle_route = str(snapshot["middle_route"])
         stream_mode = snapshot["stream_mode"]
         debug_mode = bool(snapshot["debug_mode"])
         auth = snapshot["auth"]
         transport = snapshot["transport"]
         http_client = snapshot["http_client"]
         proxy_config = snapshot["proxy_config"]
+        endpoint_cursor = int(snapshot["endpoint_cursor"] or 0)
         transport_released = False
 
         def release_transport() -> None:
@@ -507,12 +524,10 @@ class ProxyApp:
         client_requested_stream = request_data.get("stream", False)
         log(f"客户端请求的流模式: {client_requested_stream}")
 
-        if "model" in request_data:
-            original_model = request_data["model"]
-            log(f"替换模型名: {original_model} -> {target_model_id}")
-            request_data["model"] = target_model_id
-        else:
-            log(f"请求中没有 model 字段，添加 model: {target_model_id}")
+        # 记录客户端原始请求的模型名，用于后续日志展示
+        original_model = request_data.get("model", "unknown")
+
+        if "model" not in request_data:
             request_data["model"] = target_model_id
 
         if stream_mode is not None:
@@ -533,36 +548,208 @@ class ProxyApp:
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
             ), 401
 
-        target_api_key = ""
-        if isinstance(proxy_config, ProxyConfig):
-            target_api_key = proxy_config.api_key
-        forward_headers = auth.build_forward_headers(
-            auth_header,
-            target_api_key,
-            log_func=log,
-        )
-
         try:
-            target_url = (
-                f"{target_api_base_url.rstrip('/')}"
-                f"{self._build_route(middle_route, 'chat/completions')}"
-            )
-            log(f"转发请求到: {target_url}")
-
             is_stream = request_data.get("stream", False)
             log(f"流模式: {is_stream}")
 
-            response_from_target = http_client.post(
-                target_url,
-                json=request_data,
-                headers=forward_headers,
-                stream=is_stream,
-                timeout=300,
+            api_endpoints: tuple[ProxyApiEndpoint, ...]
+            if isinstance(proxy_config, ProxyConfig):
+                api_endpoints = proxy_config.api_endpoints
+            else:
+                api_endpoints = (
+                    ProxyApiEndpoint(
+                        api_url=target_api_base_url,
+                        api_key="",
+                        target_model_id=target_model_id,
+                    ),
+                )
+
+            enable_routing = (
+                isinstance(proxy_config, ProxyConfig)
+                and bool(proxy_config.enable_429_failover)
+                and len(api_endpoints) > 1
             )
-            response_from_target.raise_for_status()
-            if debug_mode:
-                log(f"上游响应状态码: {response_from_target.status_code}")
-                log(f"上游 Content-Type: {response_from_target.headers.get('content-type')}")
+            start_index = endpoint_cursor % len(api_endpoints)
+
+            response_from_target = None
+            endpoint_order = [
+                (start_index + offset) % len(api_endpoints) for offset in range(len(api_endpoints))
+            ]
+
+            def endpoint_key(endpoint: ProxyApiEndpoint) -> str:
+                return (
+                    f"{endpoint.api_url}|{endpoint.api_key}|"
+                    f"{endpoint.target_model_id}|{endpoint.middle_route}"
+                )
+
+            def cooldown_remaining_seconds(key: str) -> float:
+                now = time.monotonic()
+                with self._config_lock:
+                    until = float(self._endpoint_429_until.get(key, 0.0))
+                    if until <= now:
+                        self._endpoint_429_until.pop(key, None)
+                        return 0.0
+                    return until - now
+
+            if enable_routing:
+                available: list[int] = []
+                for idx in endpoint_order:
+                    remaining = cooldown_remaining_seconds(endpoint_key(api_endpoints[idx]))
+                    if remaining <= 0:
+                        available.append(idx)
+                if available:
+                    endpoint_order = available
+                else:
+                    min_idx = endpoint_order[0]
+                    min_remaining = cooldown_remaining_seconds(
+                        endpoint_key(api_endpoints[min_idx])
+                    )
+                    for idx in endpoint_order[1:]:
+                        remaining = cooldown_remaining_seconds(endpoint_key(api_endpoints[idx]))
+                        if remaining < min_remaining:
+                            min_idx = idx
+                            min_remaining = remaining
+                    endpoint_order = [min_idx]
+                    log(
+                        "所有节点处于 429 冷却中"
+                        f"（节点={min_idx}，剩余={min_remaining:.1f}s）"
+                    )
+
+            for attempt, endpoint_index in enumerate(endpoint_order):
+                endpoint = api_endpoints[endpoint_index]
+                next_cursor = (endpoint_index + 1) % len(api_endpoints)
+                target_url = (
+                    f"{endpoint.api_url.rstrip('/')}"
+                    f"{self._build_route(endpoint.middle_route, 'chat/completions')}"
+                )
+
+                if endpoint.target_model_id:
+                    log(f"替换模型名: {original_model} -> {endpoint.target_model_id}")
+                    request_data["model"] = endpoint.target_model_id
+                else:
+                    # 如果端点没有指定特定模型，使用默认目标模型
+                    log(f"替换模型名: {original_model} -> {target_model_id}")
+                    request_data["model"] = target_model_id
+
+                current_request_data = dict(request_data)
+
+                # 仅作兼容，后续移除
+                if "siliconflow.cn" in target_url or "siliconflow.com" in target_url:
+                    thinking_obj = current_request_data.get("thinking")
+                    if thinking_obj is not None:
+                        log(f"适配 SiliconFlow 参数，thinking={json.dumps(thinking_obj)}")
+                        if isinstance(thinking_obj, dict):
+                            thinking_map = cast(dict[str, Any], thinking_obj)
+                            t_type = thinking_map.get("type")
+                            t_budget = thinking_map.get("budget_tokens") or thinking_map.get(
+                                "budget"
+                            )
+                            if isinstance(t_type, str) and t_type:
+                                current_request_data["enable_thinking"] = t_type != "disabled"
+                            if isinstance(t_budget, (int, float)):
+                                current_request_data["thinking_budget"] = int(t_budget)
+                        elif isinstance(thinking_obj, str):
+                            current_request_data["enable_thinking"] = thinking_obj != "disabled"
+                        current_request_data.pop("thinking", None)
+
+                log(f"转发请求到: {target_url}")
+
+                target_api_key = endpoint.api_key
+                if not target_api_key and isinstance(proxy_config, ProxyConfig):
+                    target_api_key = proxy_config.api_key
+                forward_headers = auth.build_forward_headers(
+                    auth_header,
+                    target_api_key,
+                    log_func=log,
+                )
+
+                try:
+                    response_from_target = http_client.post(
+                        target_url,
+                        json=current_request_data,
+                        headers=forward_headers,
+                        stream=is_stream,
+                        timeout=300,
+                    )
+                except requests.exceptions.RequestException as request_exc:
+                    log(f"上游请求异常: {request_exc}")
+                    if enable_routing:
+                        self._set_endpoint_cursor(next_cursor)
+                    if enable_routing and attempt < len(endpoint_order) - 1:
+                        log(
+                            f"切换到下一个节点 {endpoint_index} -> {endpoint_order[attempt + 1]}"
+                        )
+                        continue
+                    raise
+
+                if response_from_target.status_code == HTTP_STATUS_TOO_MANY_REQUESTS:
+                    retry_after_seconds: float | None = None
+                    retry_after = response_from_target.headers.get("retry-after")
+                    retry_after_text = retry_after if retry_after else "-"
+                    if retry_after and retry_after.isdigit():
+                        retry_after_seconds = float(int(retry_after))
+                    if retry_after_seconds is None:
+                        retry_after_seconds = (
+                            float(proxy_config.failover_429_cooldown_seconds)
+                            if isinstance(proxy_config, ProxyConfig)
+                            else 60.0
+                        )
+                    key = endpoint_key(endpoint)
+                    if enable_routing:
+                        with self._config_lock:
+                            self._endpoint_429_until[key] = (
+                                time.monotonic() + retry_after_seconds
+                            )
+                    log(
+                        "上游触发 429"
+                        f"（节点={endpoint_index}，总节点={len(api_endpoints)}，retry-after={retry_after_text}）"
+                    )
+                    if enable_routing:
+                        self._set_endpoint_cursor(next_cursor)
+                    if enable_routing and attempt < len(endpoint_order) - 1:
+                        log(f"切换到下一个节点 {endpoint_index} -> {endpoint_order[attempt + 1]}")
+                        with contextlib.suppress(Exception):
+                            response_from_target.close()
+                        response_from_target = None
+                        continue
+
+                failover_status_codes = {400, 401, 403, 404, 408, 500, 502, 503, 504}
+                if (
+                    enable_routing
+                    and response_from_target.status_code in failover_status_codes
+                    and attempt < len(endpoint_order) - 1
+                ):
+                    raw_error_text = response_from_target.text
+                    log(
+                        "上游原始错误响应: "
+                        f"status={response_from_target.status_code}, body={raw_error_text}"
+                    )
+                    self._set_endpoint_cursor(next_cursor)
+                    log(
+                        f"上游返回错误状态码: {response_from_target.status_code}，尝试切换节点"
+                    )
+                    log(
+                        f"切换到下一个节点 {endpoint_index} -> {endpoint_order[attempt + 1]}"
+                    )
+                    with contextlib.suppress(Exception):
+                        response_from_target.close()
+                    response_from_target = None
+                    continue
+
+                response_from_target.raise_for_status()
+                # 只有请求成功才更新 cursor，确保下一次请求从下一个节点开始
+                if enable_routing:
+                    self._set_endpoint_cursor(next_cursor)
+
+                with self._config_lock:
+                    self._endpoint_429_until.pop(endpoint_key(endpoint), None)
+                if debug_mode:
+                    log(f"上游响应状态码: {response_from_target.status_code}")
+                    log(f"上游 Content-Type: {response_from_target.headers.get('content-type')}")
+                break
+
+            if response_from_target is None:
+                raise requests.exceptions.RequestException("No available target API endpoint")
 
             if is_stream:
                 log("返回流式响应")
@@ -749,6 +936,13 @@ class ProxyApp:
         except requests.exceptions.HTTPError as e:
             error_msg = f"目标 API HTTP 错误: {e.response.status_code} - {e.response.text}"
             log(error_msg)
+            if e.response.status_code == HTTP_STATUS_BAD_REQUEST:
+                with contextlib.suppress(Exception):
+                    request_dump = json.dumps(request_data, indent=2, ensure_ascii=False)
+                    log(f"--- 触发 400 错误的请求参数 ---\\n{request_dump}")
+            with contextlib.suppress(Exception):
+                if e.response is not None:
+                    e.response.close()
             release_transport()
             return jsonify(
                 {"error": f"Target API error: {e.response.status_code}", "details": e.response.text}
