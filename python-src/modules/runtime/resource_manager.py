@@ -15,10 +15,8 @@ from platformdirs import user_data_dir
 
 # 资源路径开关（显眼开关）
 # - MTGA_RESOURCE_DIR=... 指定资源目录（最高优先级）
-# - MTGA_PATH_STRICT=1 找不到资源目录就报错，禁止回退旧逻辑
-# - 统一由 .env 提供（若未设置则按空/False 处理）
+# - 未设置时按“包资源 -> 本地 modules/resources -> 运行时回退目录”自动探测
 RESOURCE_DIR = os.environ.get("MTGA_RESOURCE_DIR", "").strip()
-RESOURCE_STRICT = os.environ.get("MTGA_PATH_STRICT") == "1"
 
 
 def safe_print(message: object) -> None:
@@ -99,9 +97,6 @@ def get_program_resource_dir() -> str:
     resource_dir = override_dir or packaged_dir or local_dir
     if resource_dir:
         return resource_dir
-
-    if RESOURCE_STRICT:
-        raise RuntimeError("资源目录未找到（MTGA_PATH_STRICT=1）")
 
     if runtime == "dev":
         # 开发环境使用项目根目录

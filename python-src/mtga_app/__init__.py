@@ -20,16 +20,6 @@ MTGA_PLATFORM = "tauri"
 os.environ.setdefault("MTGA_PLATFORM", MTGA_PLATFORM)
 
 
-def find_repo_root(start: Path) -> Path:
-    p = start
-    while True:
-        if (p / "modules").exists() and (p / "mtga-tauri").exists():
-            return p
-        if p.parent == p:
-            raise RuntimeError("Repo root not found (expected modules/ and mtga-tauri/).")
-        p = p.parent
-
-
 def _resolve_boot_log_path() -> Path:
     try:
         user_dir = user_data_dir("MTGA", appauthor=False, roaming=os.name == "nt")
@@ -81,7 +71,7 @@ _boot_log("mtga_app init start")
 
 
 # 统一 .env 入口（显眼开关）
-# - MTGA_ENV_FILE=... 指定 env 文件路径（默认使用 mtga-tauri/.env）
+# - MTGA_ENV_FILE=... 指定 env 文件路径（默认使用项目根 .env）
 # - 已存在的环境变量优先，不会被 .env 覆盖
 TAURI_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = Path(os.environ.get("MTGA_ENV_FILE", str(TAURI_PROJECT_ROOT / ".env")))
@@ -125,48 +115,12 @@ def _load_tauri_config(path: Path) -> dict[str, Any] | None:
         return None
 
 
-# 模块来源控制（显眼开关）
-# - MTGA_MODULES_SOURCE=auto|local|root
-#   auto(默认): 优先 python-src/modules，找不到再回退仓库根
-#   local: 强制使用 python-src/modules
-#   root: 强制使用仓库根 modules
-# - MTGA_PATH_STRICT=1
-#   仅在 local/auto 时生效：要求 python-src/modules 必须存在，否则直接报错
-MODULES_SOURCE = os.environ.get("MTGA_MODULES_SOURCE", "").strip().lower()
-if not MODULES_SOURCE:
-    raise RuntimeError("MTGA_MODULES_SOURCE 未设置（请在 .env 中配置）")
-
-_strict_raw = os.environ.get("MTGA_PATH_STRICT")
-if _strict_raw is None:
-    raise RuntimeError("MTGA_PATH_STRICT 未设置（请在 .env 中配置）")
-if _strict_raw not in {"0", "1"}:
-    raise RuntimeError("MTGA_PATH_STRICT 仅支持 0/1")
-STRICT_MODE = _strict_raw == "1"
+# 当前仓库固定从 python-src/modules 导入 modules 包。
 LOCAL_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_MODULES = LOCAL_ROOT / "modules"
-
-
-def _resolve_modules_root() -> Path:
-    if MODULES_SOURCE in {"local", "python-src"}:
-        if not LOCAL_MODULES.exists():
-            raise RuntimeError("MTGA_MODULES_SOURCE=local 但未找到 python-src/modules")
-        return LOCAL_ROOT
-
-    if MODULES_SOURCE in {"root", "repo", "repo-root"}:
-        return find_repo_root(Path(__file__).resolve())
-
-    if LOCAL_MODULES.exists():
-        return LOCAL_ROOT
-
-    if STRICT_MODE:
-        raise RuntimeError("MTGA_PATH_STRICT=1 但未找到 python-src/modules")
-    return find_repo_root(Path(__file__).resolve())
-
-
-modules_root = _resolve_modules_root()
-if STRICT_MODE and modules_root != LOCAL_ROOT:
-    raise RuntimeError("MTGA_PATH_STRICT=1 不允许回退到仓库根 modules")
-sys.path.insert(0, str(modules_root))
+if not LOCAL_MODULES.exists():
+    raise RuntimeError("未找到 python-src/modules")
+sys.path.insert(0, str(LOCAL_ROOT))
 
 try:
     from modules.platform.platform_context import get_platform
@@ -178,12 +132,8 @@ except Exception as exc:
     raise
 
 
-# 迁移期：仍需仓库根用于版本号读取
-try:
-    repo_root = find_repo_root(Path(__file__).resolve())
-except RuntimeError:
-    repo_root = TAURI_PROJECT_ROOT
-REPO_ROOT = repo_root
+# 仓库根仍用于版本号读取。
+REPO_ROOT = TAURI_PROJECT_ROOT
 
 from anyio.from_thread import start_blocking_portal
 from pydantic import BaseModel
