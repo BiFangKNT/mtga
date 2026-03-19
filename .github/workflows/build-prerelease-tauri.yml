@@ -281,13 +281,6 @@ jobs:
           curl -L "$ASSET_URL" -o /tmp/python-standalone.tar.gz
           tar -xzf /tmp/python-standalone.tar.gz -C "$PYEMBED_DIR"
 
-      - name: 🧾 写入 pyembed .env
-        run: |
-          set -euo pipefail
-          ENV_DIR="src-tauri/pyembed/python/lib/python3.13"
-          mkdir -p "$ENV_DIR"
-          cp .env.example "$ENV_DIR/.env"
-
       - name: 🛠️ 安装 Xcode Command Line Tools
         run: |
           sudo xcode-select --install || true
@@ -487,12 +480,6 @@ jobs:
           Write-Host "⬇️ 下载: $assetUrl"
           Invoke-WebRequest -Uri $assetUrl -OutFile $archivePath
           tar -xzf $archivePath -C $pyembedDir
-
-      - name: 🧾 写入 pyembed .env
-        run: |
-          $envDir = "src-tauri/pyembed/python/Lib"
-          New-Item -ItemType Directory -Path $envDir -Force | Out-Null
-          Copy-Item -Path ".env.example" -Destination (Join-Path $envDir ".env") -Force
 
       - name: 🧩 安装 pytauri 依赖
         run: |

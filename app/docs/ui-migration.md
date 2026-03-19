@@ -311,14 +311,18 @@ export PYTAURI_STANDALONE="1"
 uv pip install --exact --python "./pyembed/python/bin/python3" --reinstall-package mtga-app "../python-src"
 ```
 
-### 3) 放置 .env（必需）
+### 3) 放置 .env（可选）
 
-后端强依赖 `.env`（`MTGA_MODULES_SOURCE` / `MTGA_PATH_STRICT` 必填），需保证嵌入解释器可读取：
+默认无需提供必填环境变量；如需覆盖自动探测到的资源目录，可放置 `.env` 并确保嵌入解释器可读取：
 
 - Windows：`mtga-tauri/src-tauri/pyembed/python/Lib/.env`
 - macOS：`mtga-tauri/src-tauri/pyembed/python/lib/python3.13/.env`（按实际版本调整）
 
-或在启动器中设置 `MTGA_ENV_FILE` 指向 `.env` 绝对路径。
+当前仅保留可选项：
+
+- `MTGA_RESOURCE_DIR`：覆盖默认资源目录探测
+
+也可以在启动器中设置 `MTGA_ENV_FILE` 指向 `.env` 绝对路径。
 
 ### 4) 配置 tauri-cli（仅打包用）
 
@@ -451,13 +455,10 @@ $dialog.Save((Join-Path $iconsDir "wix-dialog.bmp"), [System.Drawing.Imaging.Ima
 ## Tauri 后端模块/资源对齐（关键约定）
 
 - 采用“复制方案”：`mtga-tauri/python-src/modules` 作为 Tauri 侧核心逻辑来源，仓库根 `modules` 仅供旧 GUI 使用。
-- `mtga-tauri/.env` 为唯一配置入口（支持 `MTGA_ENV_FILE` 覆盖路径），必须设置：
-  - `MTGA_MODULES_SOURCE`（auto/local/root）
-  - `MTGA_PATH_STRICT`（0/1）
-  - `MTGA_RESOURCE_DIR`（可空）
-- `mtga-tauri/python-src/mtga_app/__init__.py` 会最早加载 `mtga-tauri/.env`，并据此决定 `modules` 的导入来源。
+- `mtga-tauri/.env` 为可选配置入口（支持 `MTGA_ENV_FILE` 覆盖路径）；默认无需配置，当前仅保留 `MTGA_RESOURCE_DIR` 作为资源目录覆盖项。
+- `mtga-tauri/python-src/mtga_app/__init__.py` 会最早加载 `mtga-tauri/.env`，当前固定从 `python-src/modules` 导入 `modules` 包。
 - 开发期从 `python-src` 启动时需要设置 `MTGA_SRC_TAURI_DIR` 指向 `src-tauri`（用于定位 `tauri.conf.json`）。
 - 资源目录约定：`mtga-tauri/python-src/modules/resources/{ca,openssl}`；`ResourceManager` 优先用包资源，
-  其次本地 `mtga-tauri/python-src/modules/resources`，严格模式可禁止回退。
+  其次本地 `mtga-tauri/python-src/modules/resources`，必要时可用 `MTGA_RESOURCE_DIR` 覆盖。
 - 软件图标由 Tauri 处理（`mtga-tauri/src-tauri/icons` + `mtga-tauri/tauri.conf.json`），不进入 Python 资源。
 - `mtga-tauri/python-src/pyproject.toml` 已声明 `modules` 包资源（`resources/ca`、`resources/openssl`）。
