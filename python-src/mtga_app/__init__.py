@@ -99,7 +99,16 @@ def _load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def _sanitize_sslkeylogfile() -> None:
+    if os.name != "nt":
+        return
+    removed = os.environ.pop("SSLKEYLOGFILE", None)
+    if removed:
+        _boot_log("Removed SSLKEYLOGFILE to avoid Windows OpenSSL_Applink crash")
+
+
 _load_env_file(ENV_FILE)
+_sanitize_sslkeylogfile()
 
 
 def _load_tauri_config(path: Path) -> dict[str, Any] | None:
