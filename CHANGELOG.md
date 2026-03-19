@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## v2.3.3 - 2026-03-19
+
+
+
+
+
+
+
+
+
+### :bug: 修复
+
+- 在Windows上移除SSLKEYLOGFILE环境变量以避免OpenSSL_Applink崩溃 ([0b64307](https://github.com/BiFangKNT/mtga/commit/0b6430720e04ddddad87eacabc483eb29284e0fe))
+
+
+
+
+
+
+
+## v2.3.3-beta.1 - 2026-03-17
+
+
+
+
+
+### :sparkles: 新功能
+
+- 使用 cryptography 库替代 OpenSSL 进行证书解析 ([444cfc1](https://github.com/BiFangKNT/mtga/commit/444cfc1524359b932e2f9993dec35561111deabb))
+
+
+
+
+
+
+
+
+
+
+
+
 ## v2.3.2 - 2026-03-14
 
 
