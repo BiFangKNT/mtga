@@ -1,0 +1,25 @@
+PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+
+prefix_rule(
+    pattern = [PWSH, "-Command", "pnpm release:push"],
+    decision = "forbidden",
+    justification = "release:push 仍然手动执行",
+)
+
+prefix_rule(
+    pattern = [PWSH, "-Command", "pnpm tauri:bundle:win"],
+    decision = "forbidden",
+    justification = "tauri:bundle:win 仍然手动执行",
+)
+
+prefix_rule(
+    pattern = [PWSH, "-Command", "pnpm gitflow:setup"],
+    decision = "forbidden",
+    justification = "gitflow:setup 仍然手动执行",
+)
+
+prefix_rule(
+    pattern = [PWSH, "-Command", "uv git:sync"],
+    decision = "forbidden",
+    justification = "git:sync 仍然手动执行",
+)
