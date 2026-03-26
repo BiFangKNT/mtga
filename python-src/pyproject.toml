@@ -13,6 +13,7 @@ dependencies = [
     "platformdirs>=4.3.0",
     "PyYAML",
     "xxhash>=3.5.0",
+    "litellm>=1.82.6,<2",
 ]
 
 [build-system]

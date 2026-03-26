@@ -10,7 +10,7 @@
 
 MTGA 是一个基于本地代理的 IDE 固定模型服务商解决方案，适用于 Windows 和 macOS。
 
-**注意：本项目目前只支持 openai 格式的 api ，请确认。其他格式可以转为 openai 格式后再使用。**
+**注意：从 `v2.4.0` 起，MTGA 下游统一暴露 OpenAI Chat Completions API；后端通过 LiteLLM 转发到 `openai_chat_completion`、`openai_response`、Anthropic、Gemini 等上游。上游类型通过配置组里的“提供商”字段显式指定；其中 `openai_response` 会由 MTGA 在代理层完成 chat-completions 与 responses 之间的转换。限制见 [docs/provider-support.md](docs/provider-support.md)。**
 
  <details>
   <summary>你什么也看不见~~</summary>

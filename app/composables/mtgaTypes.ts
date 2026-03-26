@@ -1,11 +1,13 @@
+export type ProviderId = "openai_chat_completion" | "openai_response" | "anthropic" | "gemini";
+
 export type ConfigGroup = {
   name?: string;
+  provider?: ProviderId;
   api_url: string;
   model_id: string;
   api_key: string;
   middle_route?: string;
-  target_model_id?: string;
-  mapped_model_id?: string;
+  model_discovery_strategy?: string;
 };
 
 export type ConfigPayload = {

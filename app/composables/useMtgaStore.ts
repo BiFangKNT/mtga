@@ -664,6 +664,7 @@ export const useMtgaStore = () => {
   };
 
   const fetchConfigGroupModels = async (payload: {
+    provider?: string;
     api_url: string;
     api_key?: string;
     middle_route?: string;

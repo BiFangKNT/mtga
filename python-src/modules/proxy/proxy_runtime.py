@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler
+from werkzeug.serving import ThreadedWSGIServer, WSGIRequestHandler
 
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
@@ -17,7 +17,7 @@ from modules.runtime.thread_manager import ThreadManager
 type LogFunc = Callable[[str], None]
 
 
-class StoppableWSGIServer(BaseWSGIServer):
+class StoppableWSGIServer(ThreadedWSGIServer):
     """可停止的 WSGI 服务器"""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

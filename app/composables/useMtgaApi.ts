@@ -66,6 +66,7 @@ export const useMtgaApi = () => {
   const configGroupTest = (payload: { index: number; mode?: "chat" | "models" }) =>
     safeInvoke<InvokeResult>("config_group_test", payload);
   const configGroupModels = (payload: {
+    provider?: string;
     api_url: string;
     api_key?: string;
     middle_route?: string;

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { ConfigGroup } from "~/composables/mtgaTypes";
+import type { ConfigGroup, ProviderId } from "~/composables/mtgaTypes";
 
 const store = useMtgaStore();
 const configGroups = store.configGroups;
 const currentIndex = store.currentConfigIndex;
 
 const DEFAULT_MIDDLE_ROUTE = "/v1";
+const GEMINI_DEFAULT_MIDDLE_ROUTE = "/v1beta";
 
 const editorOpen = ref(false);
 const editorMode = ref<"add" | "edit">("add");
@@ -28,11 +29,38 @@ const reorderInProgress = ref(false);
 
 const form = reactive({
   name: "",
+  provider: "openai_chat_completion" as ProviderId,
   api_url: "",
   model_id: "",
   api_key: "",
   middle_route: "",
 });
+
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  openai_chat_completion: "OpenAI Chat Completion",
+  openai_response: "OpenAI Response",
+  anthropic: "Anthropic",
+  gemini: "Gemini",
+};
+
+const normalizeProvider = (provider?: string): ProviderId => {
+  if (
+    provider === "openai_chat_completion" ||
+    provider === "openai_response" ||
+    provider === "anthropic" ||
+    provider === "gemini"
+  ) {
+    return provider;
+  }
+  return "openai_chat_completion";
+};
+
+const getProviderLabel = (provider?: string) => PROVIDER_LABELS[normalizeProvider(provider)];
+
+const getDefaultMiddleRoute = (provider: ProviderId) =>
+  provider === "gemini" ? GEMINI_DEFAULT_MIDDLE_ROUTE : DEFAULT_MIDDLE_ROUTE;
+
+const supportsModelDiscovery = (_provider: ProviderId) => true;
 
 const testTooltip = [
   "测试选中配置组的实际对话功能",
@@ -100,10 +128,10 @@ const panelActionBusy = computed(
     reorderInProgress.value,
 );
 
-const normalizeMiddleRoute = (value: string) => {
+const normalizeMiddleRoute = (value: string, provider: ProviderId = form.provider) => {
   let raw = value.trim();
   if (!raw) {
-    raw = DEFAULT_MIDDLE_ROUTE;
+    raw = getDefaultMiddleRoute(provider);
   }
   if (!raw.startsWith("/")) {
     raw = `/${raw}`;
@@ -117,6 +145,28 @@ const normalizeMiddleRoute = (value: string) => {
   return raw;
 };
 
+const isProviderDefaultMiddleRoute = (value: string, provider: ProviderId) =>
+  normalizeMiddleRoute(value, provider) === getDefaultMiddleRoute(provider);
+
+watch(
+  () => form.provider,
+  (provider, previousProvider) => {
+    if (!middleRouteEnabled.value || !previousProvider) {
+      return;
+    }
+
+    const rawMiddleRoute = form.middle_route.trim();
+    if (!rawMiddleRoute) {
+      form.middle_route = getDefaultMiddleRoute(provider);
+      return;
+    }
+
+    if (isProviderDefaultMiddleRoute(rawMiddleRoute, previousProvider)) {
+      form.middle_route = getDefaultMiddleRoute(provider);
+    }
+  },
+);
+
 const getDisplayName = (group: ConfigGroup, index: number) =>
   group.name?.trim() || `配置组 ${index + 1}`;
 
@@ -128,9 +178,6 @@ const getDisplayName = (group: ConfigGroup, index: number) =>
  * 3. 显示的总长度（星号+明文）与实际长度一致
  */
 const getApiKeyDisplay = (group: ConfigGroup) => {
-  if ("target_model_id" in group) {
-    return group.target_model_id || "(无)";
-  }
   const apiKey = group.api_key || "";
   if (!apiKey) {
     return "(无)";
@@ -182,6 +229,7 @@ const requestTest = async () => {
 
 const resetForm = () => {
   form.name = "";
+  form.provider = "openai_chat_completion";
   form.api_url = "";
   form.model_id = "";
   form.api_key = "";
@@ -209,6 +257,7 @@ const openEdit = () => {
     return;
   }
   form.name = group.name || "";
+  form.provider = normalizeProvider(group.provider);
   form.api_url = group.api_url || "";
   form.model_id = group.model_id || "";
   form.api_key = group.api_key || "";
@@ -223,12 +272,49 @@ const closeEditor = () => {
   editorOpen.value = false;
 };
 
+const shouldPreserveModelDiscoveryStrategy = (
+  existingGroup: ConfigGroup | undefined,
+  payload: ConfigGroup,
+) => {
+  if (!existingGroup?.model_discovery_strategy) {
+    return false;
+  }
+  return (
+    normalizeProvider(existingGroup.provider) === normalizeProvider(payload.provider) &&
+    (existingGroup.api_url || "").trim() === payload.api_url &&
+    (existingGroup.api_key || "").trim() === payload.api_key &&
+    normalizeMiddleRoute(
+      existingGroup.middle_route || "",
+      normalizeProvider(existingGroup.provider),
+    ) === normalizeMiddleRoute(payload.middle_route || "", normalizeProvider(payload.provider))
+  );
+};
+
+const hasDuplicateConfigGroup = (payload: ConfigGroup, ignoredIndex: number | null = null) =>
+  configGroups.value.some((group, index) => {
+    if (ignoredIndex !== null && index === ignoredIndex) {
+      return false;
+    }
+    return (
+      normalizeProvider(group.provider) === normalizeProvider(payload.provider) &&
+      (group.api_url || "").trim() === payload.api_url &&
+      (group.api_key || "").trim() === payload.api_key &&
+      normalizeMiddleRoute(group.middle_route || "", normalizeProvider(group.provider)) ===
+        normalizeMiddleRoute(payload.middle_route || "", normalizeProvider(payload.provider))
+    );
+  });
+
 const handleSave = async () => {
   if (saveInProgress.value) {
     return;
   }
+  const existingGroup =
+    editorMode.value === "edit" && hasSelection.value
+      ? configGroups.value[selectedIndex.value]
+      : undefined;
   const payload: ConfigGroup = {
     name: form.name.trim(),
+    provider: form.provider,
     api_url: form.api_url.trim(),
     model_id: form.model_id.trim(),
     api_key: form.api_key.trim(),
@@ -241,7 +327,23 @@ const handleSave = async () => {
   }
 
   if (middleRouteEnabled.value && form.middle_route.trim()) {
-    payload.middle_route = normalizeMiddleRoute(form.middle_route);
+    payload.middle_route = normalizeMiddleRoute(form.middle_route, form.provider);
+  } else {
+    delete payload.middle_route;
+  }
+
+  if (shouldPreserveModelDiscoveryStrategy(existingGroup, payload)) {
+    payload.model_discovery_strategy = existingGroup?.model_discovery_strategy;
+  } else {
+    delete payload.model_discovery_strategy;
+  }
+
+  const editingIndex =
+    editorMode.value === "edit" && hasSelection.value ? selectedIndex.value : null;
+  if (hasDuplicateConfigGroup(payload, editingIndex)) {
+    formError.value = "相同 provider、API URL、API Key 和中间路由的配置组已存在";
+    store.appendLog("错误: 相同 provider、API URL、API Key 和中间路由的配置组已存在");
+    return;
   }
 
   if (editorMode.value === "add") {
@@ -279,12 +381,19 @@ const handleFetchModels = async () => {
     store.appendLog("获取模型列表失败: API URL为空");
     return;
   }
+  if (!supportsModelDiscovery(form.provider)) {
+    store.appendLog("当前提供商不支持通过 /models 自动发现模型，请直接手填实际模型ID");
+    return;
+  }
   modelLoading.value = true;
   const models = await store.fetchConfigGroupModels({
+    provider: form.provider,
     api_url: apiUrl,
     api_key: form.api_key.trim(),
     model_id: form.model_id.trim(),
-    middle_route: middleRouteEnabled.value ? normalizeMiddleRoute(form.middle_route) : "",
+    middle_route: middleRouteEnabled.value
+      ? normalizeMiddleRoute(form.middle_route, form.provider)
+      : "",
   });
   if (models !== null) {
     availableModels.value = models;
@@ -441,6 +550,7 @@ const moveDown = async () => {
           <thead class="sticky top-0 z-10 bg-slate-50/70 backdrop-blur-md">
             <tr style="height: var(--head-h)">
               <th class="w-16 text-center border-b border-slate-200/60">序号</th>
+              <th class="min-w-[110px] border-b border-slate-200/60">提供商</th>
               <th class="min-w-[140px] border-b border-slate-200/60">API URL</th>
               <th class="min-w-[120px] border-b border-slate-200/60">实际模型ID</th>
               <th class="min-w-[160px] border-b border-slate-200/60">API Key</th>
@@ -467,6 +577,12 @@ const moveDown = async () => {
                 {{ index + 1 }}
               </td>
               <td
+                class="truncate max-w-[120px] text-slate-700 transition-all"
+                :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
+              >
+                {{ getProviderLabel(group.provider) }}
+              </td>
+              <td
                 class="truncate max-w-[200px] text-slate-700 transition-all"
                 :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
               >
@@ -488,7 +604,7 @@ const moveDown = async () => {
           </tbody>
           <tbody v-else>
             <tr>
-              <td colspan="4" class="py-6 text-center text-sm text-slate-400">暂无配置组</td>
+              <td colspan="5" class="py-6 text-center text-sm text-slate-400">暂无配置组</td>
             </tr>
           </tbody>
         </table>
@@ -529,6 +645,7 @@ const moveDown = async () => {
   <ConfigGroupEditorDialog
     v-model:open="editorOpen"
     v-model:name="form.name"
+    v-model:provider="form.provider"
     v-model:api-url="form.api_url"
     v-model:model-id="form.model_id"
     v-model:api-key="form.api_key"
@@ -536,7 +653,7 @@ const moveDown = async () => {
     v-model:middle-route-enabled="middleRouteEnabled"
     :mode="editorMode"
     :form-error="formError"
-    :default-middle-route="DEFAULT_MIDDLE_ROUTE"
+    :default-middle-route="getDefaultMiddleRoute(form.provider)"
     :available-models="availableModels"
     :model-loading="modelLoading"
     :saving="saveInProgress"

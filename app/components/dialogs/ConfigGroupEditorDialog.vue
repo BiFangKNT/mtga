@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import type { ProviderId } from "~/composables/mtgaTypes";
+
 const props = withDefaults(
   defineProps<{
     open?: boolean;
     mode?: "add" | "edit";
     name?: string;
+    provider?: ProviderId;
     apiUrl?: string;
     modelId?: string;
     apiKey?: string;
@@ -19,6 +22,7 @@ const props = withDefaults(
     open: false,
     mode: "add",
     name: "",
+    provider: "openai_chat_completion",
     apiUrl: "",
     modelId: "",
     apiKey: "",
@@ -35,6 +39,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (event: "update:open", value: boolean): void;
   (event: "update:name", value: string): void;
+  (event: "update:provider", value: ProviderId): void;
   (event: "update:apiUrl", value: string): void;
   (event: "update:modelId", value: string): void;
   (event: "update:apiKey", value: string): void;
@@ -53,6 +58,11 @@ const openModel = computed({
 const nameModel = computed({
   get: () => props.name,
   set: (value: string) => emit("update:name", value),
+});
+
+const providerModel = computed({
+  get: () => props.provider,
+  set: (value: ProviderId) => emit("update:provider", value),
 });
 
 const apiUrlModel = computed({
@@ -99,6 +109,23 @@ const handleSave = () => {
 const handleFetchModels = () => {
   emit("fetch-models");
 };
+
+const providerOptions: { label: string; value: ProviderId }[] = [
+  { label: "OpenAI Chat Completion", value: "openai_chat_completion" },
+  { label: "OpenAI Response", value: "openai_response" },
+  { label: "Anthropic", value: "anthropic" },
+  { label: "Gemini", value: "gemini" },
+];
+
+const getModelPlaceholder = (provider: ProviderId) => {
+  if (provider === "anthropic") {
+    return "例如：claude-3-7-sonnet-latest";
+  }
+  if (provider === "gemini") {
+    return "例如：gemini-2.5-pro";
+  }
+  return "例如：gpt-5";
+};
 </script>
 
 <template>
@@ -123,6 +150,8 @@ const handleFetchModels = () => {
         icon="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
       />
 
+      <MtgaSelect v-model="providerModel" label="提供商" required :options="providerOptions" />
+
       <MtgaInput
         v-model="apiUrlModel"
         label="API URL"
@@ -141,7 +170,9 @@ const handleFetchModels = () => {
             />
             <span class="label-text text-xs font-medium text-slate-500">修改中间路由</span>
           </label>
-          <span v-if="middleRouteEnabledModel" class="text-[10px] text-slate-400">通常为 /v1</span>
+          <span v-if="middleRouteEnabledModel" class="text-[10px] text-slate-400">
+            通常为 {{ props.defaultMiddleRoute }}
+          </span>
         </div>
         <MtgaInput
           v-if="middleRouteEnabledModel"
@@ -158,7 +189,7 @@ const handleFetchModels = () => {
         show-dropdown
         :loading="props.modelLoading"
         :options="props.availableModels"
-        placeholder="例如：gpt-5"
+        :placeholder="getModelPlaceholder(props.provider)"
         icon="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"
         @dropdown="handleFetchModels"
       />
