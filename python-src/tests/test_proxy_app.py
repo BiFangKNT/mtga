@@ -32,6 +32,7 @@ def _build_proxy_config(
     provider: str = GEMINI_PROVIDER,
     target_api_base_url: str = "https://gemini.example.com",
     target_model_id: str = "gemini-2.5-pro",
+    api_key: str = "upstream-key",
 ) -> ProxyConfig:
     return ProxyConfig(
         provider=provider,
@@ -42,7 +43,7 @@ def _build_proxy_config(
         stream_mode=None,
         debug_mode=debug_mode,
         disable_ssl_strict_mode=False,
-        api_key="upstream-key",
+        api_key=api_key,
         mtga_auth_key="mtga-auth",
     )
 
@@ -63,6 +64,80 @@ class DummyAsyncClosableStream:
 
 
 class ProxyAppGeminiTests(unittest.TestCase):
+    def test_mtga_auth_header_is_not_reused_as_upstream_api_key(self) -> None:
+        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-auth-boundary-")
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        logs: list[str] = []
+        with patch(
+            "modules.proxy.proxy_app.build_proxy_config",
+            return_value=_build_proxy_config(debug_mode=False, api_key=""),
+        ):
+            app_layer = ProxyApp(
+                log_func=logs.append,
+                resource_manager=resource_manager,  # type: ignore[arg-type]
+            )
+        self.addCleanup(app_layer.close)
+
+        captured_fallback_api_key: dict[str, str] = {}
+        route = UpstreamRoute(
+            provider=GEMINI_PROVIDER,
+            request_api=CHAT_COMPLETIONS_REQUEST_API,
+            litellm_model="gemini/gemini-2.5-pro",
+            base_url="https://gemini.example.com/v1",
+            api_key="",
+            middle_route_applied=True,
+            middle_route_ignored=False,
+        )
+
+        def fake_build_route(
+            proxy_config: ProxyConfig,
+            *,
+            fallback_api_key: str = "",
+        ) -> UpstreamRoute:
+            _ = proxy_config
+            captured_fallback_api_key["value"] = fallback_api_key
+            return route
+
+        transport = app_layer.transport
+        with patch.object(
+            transport.adapter,
+            "build_route",
+            side_effect=fake_build_route,
+        ), patch.object(
+            transport.adapter,
+            "create_chat_completion",
+            return_value={
+                "id": "chatcmpl_123",
+                "object": "chat.completion",
+                "created": 123,
+                "model": "gemini-2.5-pro",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        ):
+            client = app_layer.app.test_client()
+            response = client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer mtga-auth"},
+                json={
+                    "model": "mapped-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured_fallback_api_key["value"], "")
+        self.assertTrue(any("下游 Authorization 仅用于 MTGA 鉴权" in item for item in logs))
+
     def test_developer_message_enters_system_prompt_override_chain(self) -> None:
         temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-developer-")
         resource_manager = DummyResourceManager(

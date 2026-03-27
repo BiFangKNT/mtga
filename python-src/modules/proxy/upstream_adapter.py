@@ -13,6 +13,7 @@ from litellm.exceptions import APIConnectionError
 from modules.proxy.proxy_config import (
     ANTHROPIC_PROVIDER,
     DEFAULT_MIDDLE_ROUTE,
+    GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     GEMINI_PROVIDER,
     OPENAI_CHAT_COMPLETION_PROVIDER,
     OPENAI_PROVIDER_IDS,
@@ -78,6 +79,7 @@ class UpstreamRoute:
     middle_route_applied: bool
     middle_route_ignored: bool
     litellm_base_url: str = ""
+    model_discovery_strategy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +230,7 @@ def build_upstream_route(
         middle_route_applied=True,
         middle_route_ignored=False,
         litellm_base_url=litellm_base_url,
+        model_discovery_strategy=proxy_config.model_discovery_strategy,
     )
 
 
@@ -458,12 +461,24 @@ class LiteLLMUpstreamAdapter:
         return shared_kwargs
 
     @staticmethod
+    def _resolve_gemini_auth_header(route: UpstreamRoute) -> tuple[str, str] | None:
+        if route.provider != GEMINI_PROVIDER or not route.api_key:
+            return None
+        if (
+            route.model_discovery_strategy
+            == GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY
+        ):
+            return "x-goog-api-key", route.api_key
+        return "Authorization", f"Bearer {route.api_key}"
+
+    @staticmethod
     def _merge_provider_extra_headers(
         route: UpstreamRoute,
         call_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """为兼容代理补充 provider 级别的额外请求头。"""
-        if route.provider != GEMINI_PROVIDER or not route.api_key:
+        auth_header = LiteLLMUpstreamAdapter._resolve_gemini_auth_header(route)
+        if auth_header is None:
             return call_kwargs
 
         extra_headers_obj = call_kwargs.get("extra_headers")
@@ -472,7 +487,8 @@ class LiteLLMUpstreamAdapter:
             if isinstance(extra_headers_obj, dict)
             else {}
         )
-        extra_headers.setdefault("Authorization", f"Bearer {route.api_key}")
+        header_name, header_value = auth_header
+        extra_headers.setdefault(header_name, header_value)
         call_kwargs["extra_headers"] = extra_headers
         return call_kwargs
 

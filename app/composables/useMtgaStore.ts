@@ -4,6 +4,7 @@ import { isBundledRuntime, isTauriRuntime } from "./runtime";
 import type {
   AppInfo,
   ConfigGroup,
+  ConfigGroupModelsResult,
   ConfigPayload,
   InvokeResult,
   LogEventPayload,
@@ -456,6 +457,14 @@ export const useMtgaStore = () => {
     );
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
+    if (Array.isArray(result.warnings)) {
+      result.warnings.forEach((warning) => {
+        const text = coerceText(warning).trim();
+        if (text) {
+          appendLog(text);
+        }
+      });
+    }
     return true;
   };
 
@@ -669,13 +678,19 @@ export const useMtgaStore = () => {
     api_key?: string;
     middle_route?: string;
     model_id?: string;
-  }) => {
+  }): Promise<ConfigGroupModelsResult | null> => {
     const result = await api.configGroupModels(payload);
     const ok = applyInvokeResult(result, "获取模型列表");
     if (!ok || !result) {
       return null;
     }
-    return normalizeModelList(result.details?.["models"]);
+    const strategyIdRaw = result.details?.["strategy_id"];
+    const strategyId =
+      typeof strategyIdRaw === "string" && strategyIdRaw.trim() ? strategyIdRaw.trim() : null;
+    return {
+      models: normalizeModelList(result.details?.["models"]),
+      strategyId,
+    };
   };
 
   const runUserDataOpenDir = async () => {

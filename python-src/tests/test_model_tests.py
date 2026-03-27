@@ -10,6 +10,7 @@ from modules.proxy.proxy_config import (
     ANTHROPIC_NATIVE_MODEL_DISCOVERY,
     ANTHROPIC_PROVIDER,
     GEMINI_NATIVE_BEARER_MODEL_DISCOVERY,
+    GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     GEMINI_PROVIDER,
 )
 from modules.proxy.upstream_adapter import CHAT_COMPLETIONS_REQUEST_API, UpstreamRoute
@@ -20,6 +21,7 @@ def _build_config_group(
     provider: str,
     model_id: str,
     middle_route: str | None = "/v1",
+    model_discovery_strategy: str | None = None,
 ) -> dict[str, str]:
     config_group = {
         "provider": provider,
@@ -29,6 +31,8 @@ def _build_config_group(
     }
     if middle_route is not None:
         config_group["middle_route"] = middle_route
+    if model_discovery_strategy is not None:
+        config_group["model_discovery_strategy"] = model_discovery_strategy
     return config_group
 
 
@@ -91,6 +95,56 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
                 self.assertTrue(any(f"provider={provider}" in item for item in logs))
                 self.assertTrue(any("✅ 模型测活成功" in item for item in logs))
                 adapter.close.assert_called_once()
+
+    def test_gemini_generation_test_preserves_cached_model_discovery_strategy(self) -> None:
+        logs: list[str] = []
+        adapter = MagicMock()
+        adapter.build_route.return_value = UpstreamRoute(
+            provider=GEMINI_PROVIDER,
+            request_api=CHAT_COMPLETIONS_REQUEST_API,
+            litellm_model="gemini/gemini-2.5-pro",
+            base_url="https://provider.example.com",
+            api_key="test-key",
+            middle_route_applied=False,
+            middle_route_ignored=False,
+            model_discovery_strategy=GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+        )
+        adapter.create_chat_completion.return_value = {
+            "id": "chatcmpl_123",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "gemini-2.5-pro",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 3},
+        }
+
+        with patch(
+            "modules.actions.model_tests.LiteLLMUpstreamAdapter",
+            return_value=adapter,
+        ):
+            model_tests._run_generation_test_with_litellm(
+                _build_config_group(
+                    provider=GEMINI_PROVIDER,
+                    model_id="gemini-2.5-pro",
+                    middle_route=None,
+                    model_discovery_strategy=GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+                ),
+                logs.append,
+            )
+
+        adapter.build_route.assert_called_once()
+        proxy_config = adapter.build_route.call_args.args[0]
+        self.assertEqual(
+            proxy_config.model_discovery_strategy,
+            GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+        )
+        adapter.close.assert_called_once()
 
 
 class ModelDiscoveryTests(unittest.TestCase):
@@ -356,6 +410,54 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             get_mock.call_args_list[2].args[0],
             "https://provider.example.com/v1/models",
+        )
+
+    def test_fetch_model_list_gemini_openai_fallback_rewrites_prefixed_v1beta_to_v1(
+        self,
+    ) -> None:
+        logs: list[str] = []
+        upstream_503_a = MagicMock()
+        upstream_503_a.status_code = 503
+        upstream_503_a.text = '{"error":"service unavailable"}'
+        upstream_503_b = MagicMock()
+        upstream_503_b.status_code = 503
+        upstream_503_b.text = '{"error":"service unavailable"}'
+        success = MagicMock()
+        success.status_code = 200
+        success.json.return_value = {
+            "data": [
+                {"id": "gemini-2.5-pro"},
+                {"id": "gemini-2.5-flash"},
+            ]
+        }
+
+        with patch(
+            "modules.actions.model_tests.requests.get",
+            side_effect=[upstream_503_a, upstream_503_b, success],
+        ) as get_mock:
+            result = model_tests.fetch_model_list_result(
+                _build_config_group(
+                    provider=GEMINI_PROVIDER,
+                    model_id="gemini-2.5-pro",
+                    middle_route="/proxy/google/v1beta",
+                ),
+                log_func=logs.append,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.model_ids, ["gemini-2.5-flash", "gemini-2.5-pro"])
+        self.assertEqual(get_mock.call_count, 3)
+        self.assertEqual(
+            get_mock.call_args_list[0].args[0],
+            "https://provider.example.com/proxy/google/v1beta/models",
+        )
+        self.assertEqual(
+            get_mock.call_args_list[1].args[0],
+            "https://provider.example.com/proxy/google/v1beta/models",
+        )
+        self.assertEqual(
+            get_mock.call_args_list[2].args[0],
+            "https://provider.example.com/proxy/google/v1/models",
         )
 
     def test_fetch_model_list_uses_explicit_gemini_custom_prefix_as_is(self) -> None:

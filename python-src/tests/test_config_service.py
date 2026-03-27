@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from modules.services.config_service import _normalize_config_group
+from modules.services.config_service import (
+    LEGACY_GROUP_MAPPED_MODEL_ID_WARNING,
+    _collect_config_warnings,
+    _normalize_config_group,
+)
 
 
 class ConfigGroupNormalizationTests(unittest.TestCase):
@@ -51,6 +55,42 @@ class ConfigGroupNormalizationTests(unittest.TestCase):
                 "model_discovery_strategy": "gemini_native_bearer",
             },
         )
+
+    def test_collect_config_warnings_reports_legacy_group_mapped_model_id(self) -> None:
+        warnings = _collect_config_warnings(
+            {
+                "config_groups": [
+                    {
+                        "provider": "openai_chat_completion",
+                        "api_url": "https://api.openai.com",
+                        "model_id": "gpt-4o-mini",
+                        "mapped_model_id": "legacy-group-model",
+                        "api_key": "test-key",
+                    }
+                ],
+                "current_config_index": 0,
+            }
+        )
+
+        self.assertEqual(warnings, [LEGACY_GROUP_MAPPED_MODEL_ID_WARNING])
+
+    def test_collect_config_warnings_is_empty_for_current_schema(self) -> None:
+        warnings = _collect_config_warnings(
+            {
+                "config_groups": [
+                    {
+                        "provider": "openai_chat_completion",
+                        "api_url": "https://api.openai.com",
+                        "model_id": "gpt-4o-mini",
+                        "api_key": "test-key",
+                    }
+                ],
+                "mapped_model_id": "gpt-5",
+                "current_config_index": 0,
+            }
+        )
+
+        self.assertEqual(warnings, [])
 
 
 if __name__ == "__main__":

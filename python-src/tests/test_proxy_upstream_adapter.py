@@ -13,6 +13,7 @@ import litellm
 from litellm import APIConnectionError, RateLimitError
 
 from modules.proxy.proxy_config import (
+    GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     OPENAI_CHAT_COMPLETION_PROVIDER,
     OPENAI_RESPONSE_PROVIDER,
     ProxyConfig,
@@ -93,7 +94,7 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertIsNotNone(proxy_config)
         assert proxy_config is not None
-        self.assertEqual(proxy_config.custom_model_id, "CUSTOM_MODEL_ID")
+        self.assertEqual(proxy_config.custom_model_id, "")
         self.assertEqual(proxy_config.target_model_id, "gpt-4o-mini")
 
     def test_openai_chat_completion_route_keeps_middle_route(self) -> None:
@@ -169,6 +170,32 @@ class UpstreamRouteTests(unittest.TestCase):
         )
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
+
+    def test_build_proxy_config_preserves_model_discovery_strategy(self) -> None:
+        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-config-gemini-strategy-")
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+
+        proxy_config = build_runtime_proxy_config(
+            {
+                "provider": GEMINI_PROVIDER,
+                "api_url": "https://provider.example.com",
+                "model_id": "gemini-2.5-pro",
+                "api_key": "test-key",
+                "model_discovery_strategy": GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+            },
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+            log_func=lambda _message: None,
+        )
+
+        self.assertIsNotNone(proxy_config)
+        assert proxy_config is not None
+        self.assertEqual(
+            proxy_config.model_discovery_strategy,
+            GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+        )
 
     def test_missing_provider_defaults_to_openai_chat_completion(self) -> None:
         route = build_upstream_route(
@@ -771,6 +798,42 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(
             call_kwargs["extra_headers"],
             {"Authorization": "Bearer test-key"},
+        )
+
+    def test_gemini_x_goog_strategy_uses_x_goog_api_key_header(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            ProxyConfig(
+                provider=GEMINI_PROVIDER,
+                target_api_base_url="https://gemini-proxy.example.com",
+                middle_route="",
+                custom_model_id="gpt-5",
+                target_model_id="gemini-2.5-pro",
+                stream_mode=None,
+                debug_mode=False,
+                disable_ssl_strict_mode=False,
+                api_key="test-key",
+                mtga_auth_key="mtga-auth",
+                model_discovery_strategy=GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ) as completion_mock:
+            adapter.create_chat_completion(
+                route=route,
+                request_data={"messages": [{"role": "user", "content": "你好"}]},
+            )
+
+        call_kwargs = completion_mock.call_args.kwargs
+        self.assertEqual(
+            call_kwargs["extra_headers"],
+            {"x-goog-api-key": "test-key"},
         )
 
     def test_gemini_explicit_v1_middle_route_is_preserved(self) -> None:

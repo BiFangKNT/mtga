@@ -154,12 +154,17 @@ def _build_openai_compatible_middle_route(
     provider: str,
 ) -> str:
     normalized_provider = normalize_provider(provider)
-    if (
-        normalized_provider == GEMINI_PROVIDER
-        and normalize_middle_route(raw_middle_route, provider=normalized_provider)
-        == GEMINI_DEFAULT_MIDDLE_ROUTE
-    ):
-        return DEFAULT_MIDDLE_ROUTE
+    normalized_middle_route = normalize_middle_route(
+        raw_middle_route,
+        provider=normalized_provider,
+    )
+    if normalized_provider == GEMINI_PROVIDER:
+        if normalized_middle_route == GEMINI_DEFAULT_MIDDLE_ROUTE:
+            return DEFAULT_MIDDLE_ROUTE
+        if normalized_middle_route.endswith(GEMINI_DEFAULT_MIDDLE_ROUTE):
+            prefix = normalized_middle_route[: -len(GEMINI_DEFAULT_MIDDLE_ROUTE)]
+            if prefix:
+                return f"{prefix}{DEFAULT_MIDDLE_ROUTE}"
     return normalize_middle_route(
         raw_middle_route,
         provider=OPENAI_CHAT_COMPLETION_PROVIDER,
@@ -395,6 +400,11 @@ def _coerce_payload_dict(payload: Any) -> dict[str, Any] | None:
 def _build_generation_test_proxy_config(config_group: dict[str, Any]) -> ProxyConfig:
     provider = normalize_provider(config_group.get("provider"))
     model_id = (config_group.get("model_id") or "").strip()
+    model_discovery_strategy = normalize_model_discovery_strategy(
+        config_group.get("model_discovery_strategy")
+        if isinstance(config_group.get("model_discovery_strategy"), str)
+        else None
+    )
     return ProxyConfig(
         provider=provider,
         target_api_base_url=(config_group.get("api_url") or "").rstrip("/"),
@@ -409,6 +419,7 @@ def _build_generation_test_proxy_config(config_group: dict[str, Any]) -> ProxyCo
         disable_ssl_strict_mode=bool(config_group.get("disable_ssl_strict_mode", False)),
         api_key=(config_group.get("api_key") or ""),
         mtga_auth_key="",
+        model_discovery_strategy=model_discovery_strategy,
     )
 
 

@@ -88,16 +88,18 @@ def _persist_model_discovery_strategy_at_index(
         log_func("缓存模型发现策略失败")
 
 
-def _build_model_discovery_cache_scope(group: dict[str, Any]) -> tuple[str, str, str]:
+def _build_model_discovery_cache_scope(group: dict[str, Any]) -> tuple[str, str, str, str]:
     provider_obj = group.get("provider")
     provider = normalize_provider(provider_obj if isinstance(provider_obj, str) else None)
     api_url_obj = group.get("api_url")
-    api_url = api_url_obj.strip() if isinstance(api_url_obj, str) else ""
+    api_url = api_url_obj.strip().rstrip("/") if isinstance(api_url_obj, str) else ""
+    api_key_obj = group.get("api_key")
+    api_key = api_key_obj.strip() if isinstance(api_key_obj, str) else ""
     middle_route = normalize_middle_route(
         group.get("middle_route"),
         provider=provider,
     )
-    return provider, api_url, middle_route
+    return provider, api_url, api_key, middle_route
 
 
 def _apply_model_discovery_strategy_to_scope(
@@ -210,7 +212,10 @@ def register_model_test_commands(commands: Commands) -> None:
                 strategy_id=discovery_result.strategy_id,
                 log_func=log_func,
             )
-        result = OperationResult.success(models=discovery_result.model_ids)
+        result = OperationResult.success(
+            models=discovery_result.model_ids,
+            strategy_id=discovery_result.strategy_id,
+        )
         return build_result_payload(result, logs, "模型列表获取完成")
 
     _ = (config_group_test, config_group_models)

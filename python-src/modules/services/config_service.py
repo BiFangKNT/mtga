@@ -13,6 +13,14 @@ from modules.proxy.proxy_config import (
 )
 
 DEFAULT_PROVIDER = OPENAI_CHAT_COMPLETION_PROVIDER
+# Breaking change:
+# `config_groups[*].mapped_model_id` 已经不符合当前“一份全局映射模型ID + 多个配置组”的语义。
+# 新版本会在读取/保存时直接忽略该字段，并通过 warning 提示用户转到全局配置维护。
+LEGACY_GROUP_MAPPED_MODEL_ID_KEY = "mapped_model_id"
+LEGACY_GROUP_MAPPED_MODEL_ID_WARNING = (
+    "⚠️ 检测到已废弃字段 config_groups[*].mapped_model_id，已自动忽略；"
+    "请在“全局配置”中维护映射模型ID。"
+)
 CONFIG_GROUP_ALLOWED_KEYS = frozenset(
     {
         "name",
@@ -34,6 +42,7 @@ def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
     normalized: dict[str, Any] = {}
     for raw_key, value in raw_group_map.items():
         key = str(raw_key)
+        # 有意不再保留 legacy `mapped_model_id`，保存时也会随当前 schema 一并清理掉。
         if key in CONFIG_GROUP_ALLOWED_KEYS:
             normalized[key] = value
     provider = normalized.get("provider")
@@ -43,6 +52,24 @@ def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
         strategy if isinstance(strategy, str) else None
     )
     return normalized
+
+
+def _collect_config_warnings(raw_config: Any) -> list[str]:
+    if not isinstance(raw_config, dict):
+        return []
+
+    raw_config_map = cast(dict[object, Any], raw_config)
+    raw_groups = raw_config_map.get("config_groups")
+    if not isinstance(raw_groups, list):
+        return []
+
+    for raw_group in cast(list[Any], raw_groups):
+        if not isinstance(raw_group, dict):
+            continue
+        raw_group_map = cast(dict[object, Any], raw_group)
+        if LEGACY_GROUP_MAPPED_MODEL_ID_KEY in raw_group_map:
+            return [LEGACY_GROUP_MAPPED_MODEL_ID_WARNING]
+    return []
 
 
 @dataclass(frozen=True)
@@ -68,6 +95,16 @@ class ConfigStore:
         except Exception:
             pass
         return [], 0
+
+    def load_config_warnings(self) -> list[str]:
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                    return _collect_config_warnings(config)
+        except Exception:
+            pass
+        return []
 
     def load_global_config(self) -> tuple[str, str]:
         try:

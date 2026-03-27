@@ -730,12 +730,8 @@ class ProxyApp:
             fallback_api_key = (proxy_config.api_key or "").strip()
             if fallback_api_key:
                 log("使用配置组中的 API key")
-            elif auth_header:
-                fallback_api_key = (
-                    auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
-                ).strip()
-                if fallback_api_key:
-                    log("配置组未设置 API key，回退使用请求 Authorization")
+            else:
+                log("配置组未设置 API key；下游 Authorization 仅用于 MTGA 鉴权，不会透传到上游")
 
             route = transport.adapter.build_route(
                 proxy_config,

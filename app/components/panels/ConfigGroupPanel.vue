@@ -14,6 +14,8 @@ const formError = ref("");
 const middleRouteEnabled = ref(false);
 const availableModels = ref<string[]>([]);
 const modelLoading = ref(false);
+const formModelDiscoveryStrategy = ref("");
+const formModelDiscoveryScope = ref("");
 
 const confirmOpen = ref(false);
 const confirmTitle = ref("确认删除");
@@ -56,6 +58,8 @@ const normalizeProvider = (provider?: string): ProviderId => {
 };
 
 const getProviderLabel = (provider?: string) => PROVIDER_LABELS[normalizeProvider(provider)];
+
+const normalizeApiUrl = (value: string) => value.trim().replace(/\/+$/, "");
 
 const getDefaultMiddleRoute = (provider: ProviderId) =>
   provider === "gemini" ? GEMINI_DEFAULT_MIDDLE_ROUTE : DEFAULT_MIDDLE_ROUTE;
@@ -143,6 +147,40 @@ const normalizeMiddleRoute = (value: string, provider: ProviderId = form.provide
     }
   }
   return raw;
+};
+
+const buildModelDiscoveryScope = (payload: {
+  provider?: string;
+  api_url: string;
+  api_key?: string;
+  middle_route?: string;
+}) => {
+  const provider = normalizeProvider(payload.provider);
+  return JSON.stringify([
+    provider,
+    normalizeApiUrl(payload.api_url),
+    (payload.api_key || "").trim(),
+    normalizeMiddleRoute(payload.middle_route || "", provider),
+  ]);
+};
+
+const setFormModelDiscoveryState = (
+  strategyId: string | null | undefined,
+  payload?: {
+    provider?: string;
+    api_url: string;
+    api_key?: string;
+    middle_route?: string;
+  },
+) => {
+  const normalizedStrategyId = (strategyId || "").trim();
+  if (!normalizedStrategyId || !payload) {
+    formModelDiscoveryStrategy.value = "";
+    formModelDiscoveryScope.value = "";
+    return;
+  }
+  formModelDiscoveryStrategy.value = normalizedStrategyId;
+  formModelDiscoveryScope.value = buildModelDiscoveryScope(payload);
 };
 
 const isProviderDefaultMiddleRoute = (value: string, provider: ProviderId) =>
@@ -238,6 +276,7 @@ const resetForm = () => {
   formError.value = "";
   availableModels.value = [];
   modelLoading.value = false;
+  setFormModelDiscoveryState(undefined);
 };
 
 const openAdd = () => {
@@ -265,6 +304,12 @@ const openEdit = () => {
   middleRouteEnabled.value = Boolean(group.middle_route);
   formError.value = "";
   availableModels.value = [];
+  setFormModelDiscoveryState(group.model_discovery_strategy, {
+    provider: group.provider,
+    api_url: group.api_url || "",
+    api_key: group.api_key || "",
+    middle_route: group.middle_route || "",
+  });
   editorOpen.value = true;
 };
 
@@ -272,32 +317,16 @@ const closeEditor = () => {
   editorOpen.value = false;
 };
 
-const shouldPreserveModelDiscoveryStrategy = (
-  existingGroup: ConfigGroup | undefined,
-  payload: ConfigGroup,
-) => {
-  if (!existingGroup?.model_discovery_strategy) {
-    return false;
-  }
-  return (
-    normalizeProvider(existingGroup.provider) === normalizeProvider(payload.provider) &&
-    (existingGroup.api_url || "").trim() === payload.api_url &&
-    (existingGroup.api_key || "").trim() === payload.api_key &&
-    normalizeMiddleRoute(
-      existingGroup.middle_route || "",
-      normalizeProvider(existingGroup.provider),
-    ) === normalizeMiddleRoute(payload.middle_route || "", normalizeProvider(payload.provider))
-  );
-};
-
 const hasDuplicateConfigGroup = (payload: ConfigGroup, ignoredIndex: number | null = null) =>
+  // TODO: 后续收口为“一个上游配置组 + 组内多模型”后，这里改成只阻止同上游重复建组，
+  // 并把新增模型引导到现有组内维护。当前 review 可暂时忽略“同上游不同 model_id”场景。
   configGroups.value.some((group, index) => {
     if (ignoredIndex !== null && index === ignoredIndex) {
       return false;
     }
     return (
       normalizeProvider(group.provider) === normalizeProvider(payload.provider) &&
-      (group.api_url || "").trim() === payload.api_url &&
+      normalizeApiUrl(group.api_url || "") === normalizeApiUrl(payload.api_url) &&
       (group.api_key || "").trim() === payload.api_key &&
       normalizeMiddleRoute(group.middle_route || "", normalizeProvider(group.provider)) ===
         normalizeMiddleRoute(payload.middle_route || "", normalizeProvider(payload.provider))
@@ -308,14 +337,10 @@ const handleSave = async () => {
   if (saveInProgress.value) {
     return;
   }
-  const existingGroup =
-    editorMode.value === "edit" && hasSelection.value
-      ? configGroups.value[selectedIndex.value]
-      : undefined;
   const payload: ConfigGroup = {
     name: form.name.trim(),
     provider: form.provider,
-    api_url: form.api_url.trim(),
+    api_url: normalizeApiUrl(form.api_url),
     model_id: form.model_id.trim(),
     api_key: form.api_key.trim(),
   };
@@ -332,8 +357,11 @@ const handleSave = async () => {
     delete payload.middle_route;
   }
 
-  if (shouldPreserveModelDiscoveryStrategy(existingGroup, payload)) {
-    payload.model_discovery_strategy = existingGroup?.model_discovery_strategy;
+  if (
+    formModelDiscoveryStrategy.value &&
+    formModelDiscoveryScope.value === buildModelDiscoveryScope(payload)
+  ) {
+    payload.model_discovery_strategy = formModelDiscoveryStrategy.value;
   } else {
     delete payload.model_discovery_strategy;
   }
@@ -386,7 +414,7 @@ const handleFetchModels = async () => {
     return;
   }
   modelLoading.value = true;
-  const models = await store.fetchConfigGroupModels({
+  const requestPayload = {
     provider: form.provider,
     api_url: apiUrl,
     api_key: form.api_key.trim(),
@@ -394,9 +422,11 @@ const handleFetchModels = async () => {
     middle_route: middleRouteEnabled.value
       ? normalizeMiddleRoute(form.middle_route, form.provider)
       : "",
-  });
-  if (models !== null) {
-    availableModels.value = models;
+  };
+  const result = await store.fetchConfigGroupModels(requestPayload);
+  if (result !== null) {
+    availableModels.value = result.models;
+    setFormModelDiscoveryState(result.strategyId, requestPayload);
   }
   modelLoading.value = false;
 };

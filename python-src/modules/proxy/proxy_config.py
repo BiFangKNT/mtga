@@ -51,6 +51,7 @@ class ProxyConfig:
     disable_ssl_strict_mode: bool
     api_key: str
     mtga_auth_key: str
+    model_discovery_strategy: str | None = None
 
 
 def load_global_config(
@@ -67,8 +68,10 @@ def load_global_config(
 
 
 def _resolve_custom_model_id(*, global_config: dict[str, Any]) -> str:
+    # 有意不再回退到 legacy group 级 mapped_model_id，也不再使用占位兜底。
+    # 当前语义要求映射模型ID只由全局配置提供；缺失时交给上层全局配置校验链路处理。
     global_mapped_model_id = (global_config.get("mapped_model_id") or "").strip()
-    return global_mapped_model_id or "CUSTOM_MODEL_ID"
+    return global_mapped_model_id
 
 
 def _resolve_target_model_id(*, raw_config: dict[str, Any], custom_model_id: str) -> str:
@@ -137,6 +140,11 @@ def build_proxy_config(
         custom_model_id=custom_model_id,
     )
     provider = normalize_provider(raw_config.get("provider"))
+    model_discovery_strategy = normalize_model_discovery_strategy(
+        raw_config.get("model_discovery_strategy")
+        if isinstance(raw_config.get("model_discovery_strategy"), str)
+        else None
+    )
     middle_route = normalize_middle_route(
         raw_config.get("middle_route"),
         provider=provider,
@@ -153,6 +161,7 @@ def build_proxy_config(
         disable_ssl_strict_mode=bool(raw_config.get("disable_ssl_strict_mode", False)),
         api_key=(raw_config.get("api_key") or ""),
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
+        model_discovery_strategy=model_discovery_strategy,
     )
 
 

@@ -15,6 +15,12 @@ export type ConfigPayload = {
   current_config_index: number;
   mapped_model_id: string;
   mtga_auth_key: string;
+  warnings?: string[];
+};
+
+export type ConfigGroupModelsResult = {
+  models: string[];
+  strategyId: string | null;
 };
 
 export type AppInfo = {

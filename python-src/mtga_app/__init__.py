@@ -240,11 +240,13 @@ async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     config_groups, current_index = config_store.load_config_groups()
     mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    warnings = config_store.load_config_warnings()
     return {
         "config_groups": config_groups,
         "current_config_index": current_index,
         "mapped_model_id": mapped_model_id,
         "mtga_auth_key": mtga_auth_key,
+        "warnings": warnings,
     }
 
 
