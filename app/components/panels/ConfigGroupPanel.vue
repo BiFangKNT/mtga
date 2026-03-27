@@ -318,8 +318,7 @@ const closeEditor = () => {
 };
 
 const hasDuplicateConfigGroup = (payload: ConfigGroup, ignoredIndex: number | null = null) =>
-  // TODO: 后续收口为“一个上游配置组 + 组内多模型”后，这里改成只阻止同上游重复建组，
-  // 并把新增模型引导到现有组内维护。当前 review 可暂时忽略“同上游不同 model_id”场景。
+  // v2.4.0 仍保留“同一 upstream 下允许配置多个不同实际模型”的现有语义。
   configGroups.value.some((group, index) => {
     if (ignoredIndex !== null && index === ignoredIndex) {
       return false;
@@ -327,6 +326,7 @@ const hasDuplicateConfigGroup = (payload: ConfigGroup, ignoredIndex: number | nu
     return (
       normalizeProvider(group.provider) === normalizeProvider(payload.provider) &&
       normalizeApiUrl(group.api_url || "") === normalizeApiUrl(payload.api_url) &&
+      (group.model_id || "").trim() === payload.model_id &&
       (group.api_key || "").trim() === payload.api_key &&
       normalizeMiddleRoute(group.middle_route || "", normalizeProvider(group.provider)) ===
         normalizeMiddleRoute(payload.middle_route || "", normalizeProvider(payload.provider))
@@ -369,8 +369,8 @@ const handleSave = async () => {
   const editingIndex =
     editorMode.value === "edit" && hasSelection.value ? selectedIndex.value : null;
   if (hasDuplicateConfigGroup(payload, editingIndex)) {
-    formError.value = "相同 provider、API URL、API Key 和中间路由的配置组已存在";
-    store.appendLog("错误: 相同 provider、API URL、API Key 和中间路由的配置组已存在");
+    formError.value = "相同 provider、API URL、实际模型ID、API Key 和中间路由的配置组已存在";
+    store.appendLog("错误: 相同 provider、API URL、实际模型ID、API Key 和中间路由的配置组已存在");
     return;
   }
 

@@ -68,8 +68,9 @@ def load_global_config(
 
 
 def _resolve_custom_model_id(*, global_config: dict[str, Any]) -> str:
-    # 有意不再回退到 legacy group 级 mapped_model_id，也不再使用占位兜底。
-    # 当前语义要求映射模型ID只由全局配置提供；缺失时交给上层全局配置校验链路处理。
+    # 有意不兼容 legacy group 级 mapped_model_id：
+    # 当前版本不会自动迁移或回退读取旧字段，映射模型ID必须只由全局配置提供。
+    # 若全局字段缺失，交给上层全局配置校验链路直接报错，而不是继续兜底启动。
     global_mapped_model_id = (global_config.get("mapped_model_id") or "").strip()
     return global_mapped_model_id
 

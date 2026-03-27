@@ -15,6 +15,7 @@ from litellm import APIConnectionError, RateLimitError
 from modules.proxy.proxy_config import (
     GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     OPENAI_CHAT_COMPLETION_PROVIDER,
+    OPENAI_COMPATIBLE_MODEL_DISCOVERY,
     OPENAI_RESPONSE_PROVIDER,
     ProxyConfig,
     normalize_provider,
@@ -51,13 +52,14 @@ class DummyModelResponse:
         return dict(self._payload)
 
 
-def _build_proxy_config(
+def _build_proxy_config(  # noqa: PLR0913
     *,
     provider: str = OPENAI_CHAT_COMPLETION_PROVIDER,
     target_api_base_url: str,
     target_model_id: str,
     middle_route: str | None = None,
     api_key: str = "test-key",
+    model_discovery_strategy: str | None = None,
 ) -> ProxyConfig:
     return ProxyConfig(
         provider=provider,
@@ -70,6 +72,7 @@ def _build_proxy_config(
         disable_ssl_strict_mode=False,
         api_key=api_key,
         mtga_auth_key="mtga-auth",
+        model_discovery_strategy=model_discovery_strategy,
     )
 
 
@@ -151,6 +154,25 @@ class UpstreamRouteTests(unittest.TestCase):
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
+    def test_anthropic_openai_compatible_strategy_uses_openai_route(self) -> None:
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=ANTHROPIC_PROVIDER,
+                target_api_base_url="https://provider.example.com",
+                target_model_id="claude-3-7-sonnet-latest",
+                middle_route="/proxy/v1",
+                model_discovery_strategy=OPENAI_COMPATIBLE_MODEL_DISCOVERY,
+            )
+        )
+
+        self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
+        self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
+        self.assertEqual(route.litellm_model, "claude-3-7-sonnet-latest")
+        self.assertEqual(route.base_url, "https://provider.example.com/proxy/v1")
+        self.assertEqual(route.litellm_base_url, "https://provider.example.com/proxy/v1")
+        self.assertTrue(route.middle_route_applied)
+        self.assertFalse(route.middle_route_ignored)
+
     def test_gemini_route_uses_explicit_provider(self) -> None:
         route = build_upstream_route(
             _build_proxy_config(
@@ -168,6 +190,25 @@ class UpstreamRouteTests(unittest.TestCase):
             route.litellm_base_url,
             "https://generativelanguage.googleapis.com/v1beta",
         )
+        self.assertTrue(route.middle_route_applied)
+        self.assertFalse(route.middle_route_ignored)
+
+    def test_gemini_openai_compatible_strategy_rewrites_v1beta_to_v1(self) -> None:
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=GEMINI_PROVIDER,
+                target_api_base_url="https://provider.example.com",
+                target_model_id="gemini-2.5-pro",
+                middle_route="/proxy/google/v1beta",
+                model_discovery_strategy=OPENAI_COMPATIBLE_MODEL_DISCOVERY,
+            )
+        )
+
+        self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
+        self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
+        self.assertEqual(route.litellm_model, "gemini-2.5-pro")
+        self.assertEqual(route.base_url, "https://provider.example.com/proxy/google/v1")
+        self.assertEqual(route.litellm_base_url, "https://provider.example.com/proxy/google/v1")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 

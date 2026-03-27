@@ -13,9 +13,11 @@ from litellm.exceptions import APIConnectionError
 from modules.proxy.proxy_config import (
     ANTHROPIC_PROVIDER,
     DEFAULT_MIDDLE_ROUTE,
+    GEMINI_DEFAULT_MIDDLE_ROUTE,
     GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     GEMINI_PROVIDER,
     OPENAI_CHAT_COMPLETION_PROVIDER,
+    OPENAI_COMPATIBLE_MODEL_DISCOVERY,
     OPENAI_PROVIDER_IDS,
     OPENAI_RESPONSE_PROVIDER,
     SUPPORTED_PROVIDER_IDS,
@@ -196,33 +198,44 @@ def build_upstream_route(
         raise ValueError("目标模型 ID 不能为空")
 
     provider = normalize_provider(proxy_config.provider)
-    if provider == OPENAI_CHAT_COMPLETION_PROVIDER:
+    if _uses_openai_compatible_runtime_route(
+        provider=provider,
+        model_discovery_strategy=proxy_config.model_discovery_strategy,
+    ):
+        effective_provider = OPENAI_CHAT_COMPLETION_PROVIDER
+        middle_route = _build_openai_compatible_middle_route(
+            proxy_config.middle_route,
+            provider=provider,
+        )
+    else:
+        effective_provider = provider
+        middle_route = normalize_middle_route(
+            proxy_config.middle_route,
+            provider=provider,
+        )
+
+    if effective_provider == OPENAI_CHAT_COMPLETION_PROVIDER:
         request_api = CHAT_COMPLETIONS_REQUEST_API
         litellm_model = target_model_id
-    else:
+    elif effective_provider == OPENAI_RESPONSE_PROVIDER:
         request_api = RESPONSES_REQUEST_API
         litellm_model = target_model_id
-        if provider not in OPENAI_PROVIDER_IDS:
-            request_api = CHAT_COMPLETIONS_REQUEST_API
-            litellm_model = f"{provider}/{target_model_id}"
-
-    middle_route = normalize_middle_route(
-        proxy_config.middle_route,
-        provider=provider,
-    )
+    else:
+        request_api = CHAT_COMPLETIONS_REQUEST_API
+        litellm_model = f"{effective_provider}/{target_model_id}"
     base_url = _build_chat_base_url(
         target_api_base_url=proxy_config.target_api_base_url,
         middle_route=middle_route,
     )
     litellm_base_url = _build_litellm_base_url(
-        provider=provider,
+        provider=effective_provider,
         chat_base_url=base_url,
         target_api_base_url=proxy_config.target_api_base_url,
         middle_route=middle_route,
     )
 
     return UpstreamRoute(
-        provider=provider,
+        provider=effective_provider,
         request_api=request_api,
         litellm_model=litellm_model,
         base_url=base_url,
@@ -231,6 +244,40 @@ def build_upstream_route(
         middle_route_ignored=False,
         litellm_base_url=litellm_base_url,
         model_discovery_strategy=proxy_config.model_discovery_strategy,
+    )
+
+
+def _uses_openai_compatible_runtime_route(
+    *,
+    provider: str,
+    model_discovery_strategy: str | None,
+) -> bool:
+    return (
+        provider in {ANTHROPIC_PROVIDER, GEMINI_PROVIDER}
+        and model_discovery_strategy == OPENAI_COMPATIBLE_MODEL_DISCOVERY
+    )
+
+
+def _build_openai_compatible_middle_route(
+    raw_middle_route: str | None,
+    *,
+    provider: str,
+) -> str:
+    normalized_provider = normalize_provider(provider)
+    normalized_middle_route = normalize_middle_route(
+        raw_middle_route,
+        provider=normalized_provider,
+    )
+    if normalized_provider == GEMINI_PROVIDER:
+        if normalized_middle_route == GEMINI_DEFAULT_MIDDLE_ROUTE:
+            return DEFAULT_MIDDLE_ROUTE
+        if normalized_middle_route.endswith(GEMINI_DEFAULT_MIDDLE_ROUTE):
+            prefix = normalized_middle_route[: -len(GEMINI_DEFAULT_MIDDLE_ROUTE)]
+            if prefix:
+                return f"{prefix}{DEFAULT_MIDDLE_ROUTE}"
+    return normalize_middle_route(
+        raw_middle_route,
+        provider=OPENAI_CHAT_COMPLETION_PROVIDER,
     )
 
 

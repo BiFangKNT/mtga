@@ -15,11 +15,12 @@ from modules.proxy.proxy_config import (
 DEFAULT_PROVIDER = OPENAI_CHAT_COMPLETION_PROVIDER
 # Breaking change:
 # `config_groups[*].mapped_model_id` 已经不符合当前“一份全局映射模型ID + 多个配置组”的语义。
-# 新版本会在读取/保存时直接忽略该字段，并通过 warning 提示用户转到全局配置维护。
+# 新版本不会自动迁移该字段；读取时会直接忽略，保存时会按当前 schema 清理掉。
+# 代理启动也不会再使用它兜底，用户必须改为在全局配置维护 `mapped_model_id`。
 LEGACY_GROUP_MAPPED_MODEL_ID_KEY = "mapped_model_id"
 LEGACY_GROUP_MAPPED_MODEL_ID_WARNING = (
-    "⚠️ 检测到已废弃字段 config_groups[*].mapped_model_id，已自动忽略；"
-    "请在“全局配置”中维护映射模型ID。"
+    "⚠️ 检测到不再受支持的字段 config_groups[*].mapped_model_id；"
+    "当前版本不会自动迁移或继续使用该字段，请在“全局配置”中填写映射模型ID。"
 )
 CONFIG_GROUP_ALLOWED_KEYS = frozenset(
     {
@@ -42,7 +43,8 @@ def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
     normalized: dict[str, Any] = {}
     for raw_key, value in raw_group_map.items():
         key = str(raw_key)
-        # 有意不再保留 legacy `mapped_model_id`，保存时也会随当前 schema 一并清理掉。
+        # 有意不兼容 legacy `mapped_model_id`：
+        # 当前版本不会自动迁移它，也不会在运行时继续读取；一旦保存就按新 schema 清理。
         if key in CONFIG_GROUP_ALLOWED_KEYS:
             normalized[key] = value
     provider = normalized.get("provider")
