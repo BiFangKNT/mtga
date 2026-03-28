@@ -45,7 +45,7 @@
     "@tauri-apps/plugin-dialog": "~2.4.2",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "dompurify": "^3.3.1",
-    "nuxt": "^4.2.2",
+    "nuxt": "^4.4.2",
     "tauri-plugin-pytauri-api": "^0.8.0",
     "vue": "^3.5.26",
     "vue-router": "^4.6.4"
