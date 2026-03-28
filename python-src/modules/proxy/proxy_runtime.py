@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import os
+import socket
 import ssl
 import threading
 from collections.abc import Callable
@@ -20,9 +23,30 @@ type LogFunc = Callable[[str], None]
 class StoppableWSGIServer(ThreadedWSGIServer):
     """可停止的 WSGI 服务器"""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        dual_stack: bool = False,
+        **kwargs: Any,
+    ) -> None:
         self._stop_event = threading.Event()
+        self._dual_stack_requested = dual_stack
+        self._dual_stack_enabled = False
         super().__init__(*args, **kwargs)
+
+    def server_bind(self) -> None:
+        if self._dual_stack_requested and self.address_family == socket.AF_INET6:
+            if not (
+                hasattr(socket, "IPPROTO_IPV6")
+                and hasattr(socket, "IPV6_V6ONLY")
+            ):
+                raise RuntimeError("当前环境不支持 dual-stack IPv6 socket 配置")
+            try:
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            except OSError as exc:
+                raise RuntimeError(f"设置 dual-stack socket 失败: {exc}") from exc
+            self._dual_stack_enabled = True
+        super().server_bind()
 
     def server_close(self) -> None:
         stop_event = getattr(self, "_stop_event", None)
@@ -45,6 +69,15 @@ class RuntimeState:
     server_thread: threading.Thread | None = None
     server_task_id: str | None = None
     running: bool = False
+    listen_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class ListenerSetupResult:
+    server: StoppableWSGIServer
+    host: str
+    mode: str
+    fallback_reason: str | None = None
 
 
 class ProxyRuntime:
@@ -79,6 +112,79 @@ class ProxyRuntime:
         if active_tasks:
             self._log(f"{prefix} active_tasks={active_tasks}")
 
+    @staticmethod
+    def _format_listener_endpoint(host: str, port: int) -> str:
+        if ":" in host:
+            return f"[{host}]:{port}"
+        return f"{host}:{port}"
+
+    def _create_server_instance(
+        self,
+        *,
+        host: str,
+        port: int,
+        ssl_context: ssl.SSLContext,
+        dual_stack: bool = False,
+    ) -> StoppableWSGIServer:
+        stderr_buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr_buffer):
+                server = StoppableWSGIServer(
+                    host,
+                    port,
+                    self._app,
+                    ssl_context=ssl_context,
+                    dual_stack=dual_stack,
+                )
+        except SystemExit as exc:
+            detail = stderr_buffer.getvalue().strip()
+            reason = detail or f"SystemExit({exc.code})"
+            endpoint = self._format_listener_endpoint(host, port)
+            raise RuntimeError(f"监听 {endpoint} 失败: {reason}") from exc
+
+        server.RequestHandlerClass = WSGIRequestHandler
+        return server
+
+    def _create_server_with_fallback(
+        self,
+        *,
+        host: str,
+        port: int,
+        ssl_context: ssl.SSLContext,
+    ) -> ListenerSetupResult:
+        if host == "0.0.0.0" and socket.has_ipv6:
+            try:
+                server = self._create_server_instance(
+                    host="::",
+                    port=port,
+                    ssl_context=ssl_context,
+                    dual_stack=True,
+                )
+            except Exception as exc:
+                fallback_reason = str(exc)
+                self._log(f"dual-stack 监听不可用，将回退到 IPv4: {fallback_reason}")
+            else:
+                return ListenerSetupResult(
+                    server=server,
+                    host="::",
+                    mode="dual_stack",
+                )
+        else:
+            fallback_reason = None
+
+        listen_mode = "ipv6_only" if ":" in host else "ipv4_only"
+        server = self._create_server_instance(
+            host=host,
+            port=port,
+            ssl_context=ssl_context,
+        )
+        return ListenerSetupResult(
+            server=server,
+            host=host,
+            mode=listen_mode,
+            fallback_reason=fallback_reason,
+        )
+
     def start(  # noqa: PLR0911, PLR0912, PLR0913, PLR0915
         self,
         *,
@@ -112,7 +218,8 @@ class ProxyRuntime:
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ssl_context.load_cert_chain(cert_file, key_file)
 
-            self._log(f"启动代理服务器，监听 https://{host}:{port}")
+            endpoint = self._format_listener_endpoint(host, port)
+            self._log(f"启动代理服务器，目标监听地址 https://{endpoint}")
             self._log(f"目标 API 地址: {target_api_base_url}")
             self._log(f"自定义模型 ID: {custom_model_id}")
             self._log(f"实际模型 ID: {target_model_id}")
@@ -133,15 +240,24 @@ class ProxyRuntime:
                     )
 
             try:
-                self._state.server = StoppableWSGIServer(
-                    host,
-                    port,
-                    self._app,
+                listener_setup = self._create_server_with_fallback(
+                    host=host,
+                    port=port,
                     ssl_context=ssl_context,
                 )
-                self._state.server.RequestHandlerClass = WSGIRequestHandler
+                self._state.server = listener_setup.server
+                self._state.listen_mode = listener_setup.mode
+                if listener_setup.mode == "dual_stack":
+                    self._log(f"监听模式: dual_stack (https://[::]:{port}，同时接受 IPv4/IPv6)")
+                else:
+                    fallback_endpoint = self._format_listener_endpoint(
+                        listener_setup.host,
+                        port,
+                    )
+                    self._log(f"监听模式: {listener_setup.mode} (https://{fallback_endpoint})")
                 self._log("服务器实例创建成功")
             except Exception as exc:
+                self._state.listen_mode = None
                 self._log(f"创建服务器实例失败: {exc}")
                 return OperationResult.failure("创建服务器实例失败", code=ErrorCode.UNKNOWN)
 
@@ -238,6 +354,7 @@ class ProxyRuntime:
         if wait_finished:
             self._state.server = None
             self._state.server_thread = None
+            self._state.listen_mode = None
 
         if clean_stop:
             self._log("代理服务器已完全停止")
