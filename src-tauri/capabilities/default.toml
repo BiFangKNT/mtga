@@ -5,6 +5,5 @@ windows = ["main", "splash"]
 permissions = [
     "core:default",
     "pytauri:default", # need for pytauri ipc
-    "dialog:default",
     "shell:default"
 ]

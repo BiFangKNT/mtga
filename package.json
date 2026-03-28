@@ -42,13 +42,10 @@
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.16",
     "@tauri-apps/api": "^2.4.0",
-    "@tauri-apps/plugin-dialog": "~2.4.2",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "dompurify": "^3.3.1",
     "nuxt": "^4.4.2",
-    "tauri-plugin-pytauri-api": "^0.8.0",
-    "vue": "^3.5.26",
-    "vue-router": "^4.6.4"
+    "tauri-plugin-pytauri-api": "^0.8.0"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.1.0",
