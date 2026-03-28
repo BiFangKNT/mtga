@@ -365,10 +365,16 @@ class LiteLLMUpstreamAdapter:
     ) -> None:
         self._disable_ssl_strict_mode = disable_ssl_strict_mode
         self._log = log_func
-        apply_litellm_compat_patches(log_func=self._log)
 
     def close(self) -> None:
         return
+
+    def _apply_route_compat_patches(self, route: UpstreamRoute) -> None:
+        if route.provider != GEMINI_PROVIDER:
+            return
+        if _litellm_compat_patch_state["applied"]:
+            return
+        apply_litellm_compat_patches(log_func=self._log)
 
     @staticmethod
     def _coerce_payload_dict(payload: Any) -> dict[str, Any] | None:
@@ -573,6 +579,7 @@ class LiteLLMUpstreamAdapter:
         route: UpstreamRoute,
         request_data: dict[str, Any],
     ) -> Any:
+        self._apply_route_compat_patches(route)
         call_kwargs = self._normalize_provider_chat_request(
             route=route,
             request_data=request_data,

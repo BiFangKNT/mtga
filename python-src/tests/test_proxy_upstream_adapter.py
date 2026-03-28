@@ -516,7 +516,7 @@ class ProxyTransportTests(unittest.TestCase):
 
 
 class LiteLLMUpstreamAdapterTests(unittest.TestCase):
-    def test_adapter_init_applies_litellm_compat_patches(self) -> None:
+    def test_adapter_init_does_not_apply_litellm_compat_patches(self) -> None:
         with patch(
             "modules.proxy.upstream_adapter.apply_litellm_compat_patches"
         ) as compat_patch_mock:
@@ -525,7 +525,65 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
                 log_func=lambda _message: None,
             )
 
-        compat_patch_mock.assert_called_once()
+        compat_patch_mock.assert_not_called()
+
+    def test_openai_request_does_not_apply_gemini_compat_patches(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-4o-mini",
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.apply_litellm_compat_patches"
+        ) as compat_patch_mock, patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ):
+            adapter.create_chat_completion(
+                route=route,
+                request_data={"messages": [{"role": "user", "content": "你好"}]},
+            )
+
+        compat_patch_mock.assert_not_called()
+
+    def test_gemini_request_applies_litellm_compat_patches(self) -> None:
+        def log_func(_message: str) -> None:
+            return
+
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=log_func,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=GEMINI_PROVIDER,
+                target_api_base_url="https://gemini-proxy.example.com",
+                target_model_id="gemini-2.5-pro",
+            )
+        )
+
+        with patch.dict(
+            "modules.proxy.upstream_adapter._litellm_compat_patch_state",
+            {"applied": False},
+        ), patch(
+            "modules.proxy.upstream_adapter.apply_litellm_compat_patches"
+        ) as compat_patch_mock, patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ):
+            adapter.create_chat_completion(
+                route=route,
+                request_data={"messages": [{"role": "user", "content": "你好"}]},
+            )
+
+        compat_patch_mock.assert_called_once_with(log_func=log_func)
 
     def test_gemini_empty_block_reason_is_sanitized(self) -> None:
         payload = {
