@@ -724,6 +724,39 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             {"vendor_context": {"mode": "strict"}},
         )
 
+    def test_openai_chat_completion_keeps_allowed_unsupported_standard_param(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["stream"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ) as completion_mock:
+            adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "allowed_openai_params": ["temperature"],
+                    "temperature": 0,
+                },
+            )
+
+        call_kwargs = completion_mock.call_args.kwargs
+        self.assertEqual(call_kwargs["allowed_openai_params"], ["temperature"])
+        self.assertEqual(call_kwargs["temperature"], 0)
+
     def test_openai_response_uses_completion_bridge_with_base_url(self) -> None:
         adapter = LiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
@@ -751,6 +784,52 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertNotIn("api_base", call_kwargs)
         self.assertEqual(call_kwargs["custom_llm_provider"], "openai")
         self.assertEqual(call_kwargs["model"], "responses/gpt-5")
+
+    def test_openai_response_drops_unsupported_standard_params_before_litellm(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_RESPONSE_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["reasoning_effort", "stream"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ) as completion_mock:
+            adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "temperature": 0,
+                    "service_tier": "priority",
+                    "store": True,
+                    "reasoning_effort": "medium",
+                },
+            )
+
+        call_kwargs = completion_mock.call_args.kwargs
+        self.assertEqual(call_kwargs["model"], "responses/gpt-5")
+        self.assertEqual(call_kwargs["reasoning_effort"], "medium")
+        self.assertNotIn("temperature", call_kwargs)
+        self.assertNotIn("service_tier", call_kwargs)
+        self.assertNotIn("store", call_kwargs)
+        self.assertIn(
+            (
+                "provider=openai_response request_api=responses model=gpt-5 "
+                "已忽略不兼容参数: service_tier, store, temperature"
+            ),
+            logs,
+        )
 
     def test_anthropic_uses_custom_base_url_without_openai_provider_override(self) -> None:
         adapter = LiteLLMUpstreamAdapter(

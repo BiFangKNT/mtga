@@ -68,6 +68,9 @@ OPENAI_CHAT_COMPLETION_STANDARD_PARAMS: frozenset[str] = frozenset(
     }
 )
 NON_OPENAI_REQUIRED_CHAT_PARAMS: frozenset[str] = frozenset({"messages", "model"})
+OPENAI_COMPATIBLE_META_PARAMS: frozenset[str] = frozenset(
+    {"messages", "model", "extra_body", "allowed_openai_params"}
+)
 _litellm_compat_patch_state = {"applied": False}
 
 
@@ -402,7 +405,7 @@ class LiteLLMUpstreamAdapter:
             if isinstance(extra_body_obj, dict)
             else {}
         )
-        top_level_params = set(OPENAI_CHAT_COMPLETION_STANDARD_PARAMS)
+        top_level_params = set(OPENAI_COMPATIBLE_META_PARAMS)
         supported_params = self._get_supported_openai_params(
             route,
             custom_llm_provider="openai",
@@ -414,6 +417,12 @@ class LiteLLMUpstreamAdapter:
             for allowed_param in cast(list[object], allowed_openai_params_obj):
                 if isinstance(allowed_param, str) and allowed_param.strip():
                     top_level_params.add(allowed_param)
+        if supported_params is not None:
+            self._drop_unsupported_standard_params(
+                route=route,
+                call_kwargs=call_kwargs,
+                allowed_params=top_level_params,
+            )
 
         passthrough_keys = [
             key
@@ -444,19 +453,45 @@ class LiteLLMUpstreamAdapter:
         if supported_params is None:
             return call_kwargs
 
+        self._drop_unsupported_standard_params(
+            route=route,
+            call_kwargs=call_kwargs,
+            allowed_params=NON_OPENAI_REQUIRED_CHAT_PARAMS | supported_params,
+        )
+        return call_kwargs
+
+    def _drop_unsupported_standard_params(
+        self,
+        *,
+        route: UpstreamRoute,
+        call_kwargs: dict[str, Any],
+        allowed_params: set[str] | frozenset[str],
+    ) -> None:
         dropped_params = [
             key
             for key in list(call_kwargs)
-            if key in OPENAI_CHAT_COMPLETION_STANDARD_PARAMS
-            and key not in NON_OPENAI_REQUIRED_CHAT_PARAMS
-            and key not in supported_params
+            if key in OPENAI_CHAT_COMPLETION_STANDARD_PARAMS and key not in allowed_params
         ]
         for key in dropped_params:
             call_kwargs.pop(key, None)
         if dropped_params:
             dropped_list = ", ".join(sorted(dropped_params))
-            self._log(f"{route.provider} 已忽略不兼容参数: {dropped_list}")
-        return call_kwargs
+            self._log(
+                f"{self._format_route_log_context(route)} 已忽略不兼容参数: {dropped_list}"
+            )
+
+    @staticmethod
+    def _format_route_log_context(
+        route: UpstreamRoute,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> str:
+        return (
+            f"provider={provider or route.provider} "
+            f"request_api={route.request_api} "
+            f"model={model or route.litellm_model}"
+        )
 
     def _get_supported_openai_params(
         self,
@@ -480,7 +515,14 @@ class LiteLLMUpstreamAdapter:
                 custom_llm_provider=effective_provider,
             )
         except Exception as exc:  # noqa: BLE001
-            self._log(f"获取 {effective_provider} 支持参数失败，保留原请求: {exc}")
+            route_log_context = self._format_route_log_context(
+                route,
+                provider=effective_provider,
+                model=provider_model,
+            )
+            self._log(
+                f"{route_log_context} 获取支持参数失败，保留原请求: {exc}"
+            )
             return None
         if not isinstance(supported_params, list):
             return None
