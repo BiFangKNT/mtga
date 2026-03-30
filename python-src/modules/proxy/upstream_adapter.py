@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
+import httpx
 import litellm
 from litellm.exceptions import APIConnectionError
 
@@ -31,6 +32,7 @@ type RequestApi = Literal["chat_completions", "responses"]
 
 CHAT_COMPLETIONS_REQUEST_API: RequestApi = "chat_completions"
 RESPONSES_REQUEST_API: RequestApi = "responses"
+LITELLM_CONNECT_RETRY_COUNT = 2
 OPENAI_CHAT_COMPLETION_STANDARD_PARAMS: frozenset[str] = frozenset(
     {
         "model",
@@ -493,6 +495,66 @@ class LiteLLMUpstreamAdapter:
             f"model={model or route.litellm_model}"
         )
 
+    @staticmethod
+    def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+        seen: set[int] = set()
+        pending: list[BaseException] = [exc]
+        chain: list[BaseException] = []
+        while pending:
+            current = pending.pop()
+            current_id = id(current)
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            chain.append(current)
+            cause = getattr(current, "__cause__", None)
+            context = getattr(current, "__context__", None)
+            if isinstance(cause, BaseException):
+                pending.append(cause)
+            if isinstance(context, BaseException):
+                pending.append(context)
+        return chain
+
+    @classmethod
+    def _is_connect_stage_retryable(cls, exc: Exception) -> bool:
+        connect_stage_errors = (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ProxyError,
+        )
+        return any(
+            isinstance(candidate, connect_stage_errors)
+            for candidate in cls._iter_exception_chain(exc)
+        )
+
+    def _call_completion_with_connect_retries(
+        self,
+        *,
+        route: UpstreamRoute,
+        call_kwargs: dict[str, Any],
+        completion_func: Callable[..., Any],
+    ) -> Any:
+        route_log_context = self._format_route_log_context(route)
+        total_attempts = LITELLM_CONNECT_RETRY_COUNT + 1
+        for attempt in range(1, total_attempts + 1):
+            try:
+                # 这里只覆盖拿到上游响应对象前、且异常链明确表明卡在建连阶段的失败，
+                # 避免把可能已被上游受理的 POST 请求透明重放。
+                return completion_func(**call_kwargs)
+            except Exception as exc:  # noqa: BLE001
+                if not self._is_connect_stage_retryable(exc):
+                    raise
+                if attempt >= total_attempts:
+                    self._log(
+                        f"{route_log_context} 建连阶段故障重试已耗尽: "
+                        f"attempt={attempt}/{total_attempts} error={exc}"
+                    )
+                    raise
+                self._log(
+                    f"{route_log_context} 遇到建连阶段故障，准备重试: "
+                    f"attempt={attempt + 1}/{total_attempts} error={exc}"
+                )
+
     def _get_supported_openai_params(
         self,
         route: UpstreamRoute,
@@ -632,9 +694,16 @@ class LiteLLMUpstreamAdapter:
             self._disable_ssl_strict_mode
         )
         call_kwargs = self._merge_provider_extra_headers(route, call_kwargs)
+        # 关闭 LiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
+        call_kwargs["max_retries"] = 0
+        call_kwargs["num_retries"] = 0
         litellm_sdk = cast(Any, litellm)
         completion_func = cast(Callable[..., Any], litellm_sdk.completion)
-        return completion_func(**call_kwargs)
+        return self._call_completion_with_connect_retries(
+            route=route,
+            call_kwargs=call_kwargs,
+            completion_func=completion_func,
+        )
 
 
 __all__ = [

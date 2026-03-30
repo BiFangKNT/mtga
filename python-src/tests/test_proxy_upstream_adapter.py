@@ -11,6 +11,7 @@ from unittest.mock import patch
 import httpx
 import litellm
 from litellm import APIConnectionError, RateLimitError
+from litellm.exceptions import BadRequestError
 
 from modules.proxy.proxy_config import (
     GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
@@ -784,6 +785,134 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertNotIn("api_base", call_kwargs)
         self.assertEqual(call_kwargs["custom_llm_provider"], "openai")
         self.assertEqual(call_kwargs["model"], "responses/gpt-5")
+        self.assertEqual(call_kwargs["max_retries"], 0)
+        self.assertEqual(call_kwargs["num_retries"], 0)
+
+    def test_openai_chat_completion_retries_connection_error_before_success(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-4o-mini",
+            )
+        )
+
+        request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+        transient_error = APIConnectionError(
+            "connect failed",
+            llm_provider="openai",
+            model="gpt-4o-mini",
+            request=request,
+        )
+        transient_error.__cause__ = httpx.ConnectError(
+            "connect failed",
+            request=request,
+        )
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                transient_error,
+                {"id": "chatcmpl_123", "choices": []},
+            ],
+        ) as completion_mock:
+            response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                },
+            )
+
+        self.assertEqual(response["id"], "chatcmpl_123")
+        self.assertEqual(completion_mock.call_count, 2)
+        call_kwargs = completion_mock.call_args.kwargs
+        self.assertEqual(call_kwargs["max_retries"], 0)
+        self.assertEqual(call_kwargs["num_retries"], 0)
+        self.assertIn(
+            (
+                "provider=openai_chat_completion request_api=chat_completions "
+                "model=gpt-4o-mini 遇到建连阶段故障，准备重试: attempt=2/3 "
+                "error=litellm.APIConnectionError: connect failed"
+            ),
+            logs,
+        )
+
+    def test_openai_chat_completion_does_not_retry_read_timeout_error(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-4o-mini",
+            )
+        )
+
+        request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+        timeout_error = APIConnectionError(
+            "read timeout",
+            llm_provider="openai",
+            model="gpt-4o-mini",
+            request=request,
+        )
+        timeout_error.__cause__ = httpx.ReadTimeout(
+            "read timeout",
+            request=request,
+        )
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=timeout_error,
+        ) as completion_mock, self.assertRaises(APIConnectionError):
+            adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                },
+            )
+
+        self.assertEqual(completion_mock.call_count, 1)
+        self.assertEqual(logs, [])
+
+    def test_openai_chat_completion_does_not_retry_bad_request_error(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-4o-mini",
+            )
+        )
+
+        request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+        response = httpx.Response(400, request=request, text="invalid request")
+        bad_request_error = BadRequestError(
+            "invalid request",
+            model="gpt-4o-mini",
+            llm_provider="openai",
+            response=response,
+        )
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=bad_request_error,
+        ) as completion_mock, self.assertRaises(BadRequestError):
+            adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                },
+            )
+
+        self.assertEqual(completion_mock.call_count, 1)
 
     def test_openai_response_drops_unsupported_standard_params_before_litellm(self) -> None:
         logs: list[str] = []
