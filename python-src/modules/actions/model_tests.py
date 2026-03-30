@@ -445,7 +445,6 @@ def _run_generation_test_with_litellm(
             "model": model_id,
             "messages": [{"role": "user", "content": "1"}],
             "max_tokens": 1,
-            "temperature": 0,
         }
         log_func(
             "正在测活模型: "
