@@ -615,12 +615,59 @@ jobs:
           echo "TARGET_COMMIT=$TARGET_COMMIT" >> "$GITHUB_ENV"
           echo "CHANGELOG_RANGE=$CHANGELOG_RANGE" >> "$GITHUB_ENV"
 
+      - name: 🧩 计算 git-cliff 参数
+        run: |
+          set -euo pipefail
+          START_COMMIT_INPUT="${{ github.event.inputs.start_commit || '' }}"
+
+          build_ignore_tags_arg() {
+            local tag_pattern="$1"
+            local excluded_tag="$2"
+            local ignore_pattern=""
+
+            mapfile -t matched_tags < <(
+              {
+                while read -r commit; do
+                  git tag --points-at "$commit"
+                done < <(git rev-list "$CHANGELOG_RANGE")
+              } | grep -E "$tag_pattern" | grep -Fvx "$excluded_tag" | sort -u || true
+            )
+
+            if [ "${#matched_tags[@]}" -eq 0 ]; then
+              return 0
+            fi
+
+            ignore_pattern=$(
+              printf '%s\n' "${matched_tags[@]}" \
+                | sed -E 's/[][(){}.^$*+?|\\]/\\&/g' \
+                | paste -sd'|' -
+            )
+
+            if [ -n "$ignore_pattern" ]; then
+              printf ' --ignore-tags ^(%s)$' "$ignore_pattern"
+            fi
+          }
+
+          RANGE_TAG_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$'
+          if [ "$RELEASE_TYPE" = "release" ]; then
+            # 正式版保留范围内全部提交，但只输出当前正式版这一节。
+            IGNORE_TAGS_ARG=$(build_ignore_tags_arg "$RANGE_TAG_PATTERN" "$TAG_NAME")
+            echo "GIT_CLIFF_ARGS=--tag ${TAG_NAME}${IGNORE_TAGS_ARG} --strip all ${CHANGELOG_RANGE}" >> "$GITHUB_ENV"
+          elif [ -n "$START_COMMIT_INPUT" ]; then
+            # 手动重跑预发布且指定起点时，保留范围内全部提交，但只输出当前预发布这一节。
+            IGNORE_TAGS_ARG=$(build_ignore_tags_arg "$RANGE_TAG_PATTERN" "$TAG_NAME")
+            echo "GIT_CLIFF_ARGS=--tag ${TAG_NAME}${IGNORE_TAGS_ARG} --strip all ${CHANGELOG_RANGE}" >> "$GITHUB_ENV"
+          else
+            # 预发布只生成当前 tag 自己的说明，避免把同版本旧后缀版一起带上。
+            echo "GIT_CLIFF_ARGS=--current --tag ${TAG_NAME} --strip all" >> "$GITHUB_ENV"
+          fi
+
       - name: 📝 使用 git-cliff 生成发布说明
         uses: orhun/git-cliff-action@v4
         with:
           version: latest
           config: cliff.toml
-          args: --tag "${{ env.TAG_NAME }}" --strip all "${{ env.CHANGELOG_RANGE }}"
+          args: ${{ env.GIT_CLIFF_ARGS }}
         env:
           OUTPUT: release_notes.md
           GITHUB_REPO: ${{ github.repository }}
@@ -669,19 +716,20 @@ jobs:
 
           rewrite_changelog() {
             if [ -f CHANGELOG.md ]; then
-              # 幂等：重跑同一 TAG 时先移除已有同版本章节，再 prepend 最新内容
+              # 幂等：重跑当前正式版时先移除同版本章节，并清理历史预发布章节。
               awk -v tag="$TAG_NAME" '
-                BEGIN { skip = 0 }
-                NR <= 2 { next }
-                {
-                  if ($1 == "##") {
-                    if (skip == 1 && $2 != tag) {
-                      skip = 0
-                    }
-                    if ($2 == tag) {
-                      skip = 1
-                      next
-                    }
+                  BEGIN { skip = 0 }
+                  NR <= 2 { next }
+                  {
+                    if ($1 == "##") {
+                      if (skip == 1) {
+                        skip = 0
+                      }
+                      # CHANGELOG 只保留正式版章节；重跑当前版本时也先移除旧章节。
+                      if ($2 == tag || $2 ~ /^v[0-9]+\.[0-9]+\.[0-9]+-/) {
+                        skip = 1
+                        next
+                      }
                   }
                   if (skip == 0) {
                     print
