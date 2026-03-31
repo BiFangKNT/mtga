@@ -1,18 +1,11 @@
 [changelog]
 body = """
 ## {{ version | default(value="Unreleased") }} - {{ timestamp | date(format="%Y-%m-%d") }}
-
-{% set grouped = commits | group_by(attribute="group") %}
-{% for group in [":sparkles: 新功能", ":bug: 修复", ":art: 界面样式"] %}
-{% set items = grouped | get(key=group, default=[]) %}
-{% if items %}
+{% set grouped = commits | group_by(attribute="group") %}{% for group in [":sparkles: 新功能", ":bug: 修复", ":art: 界面样式"] %}{% set items = grouped | get(key=group, default=[]) %}{% if items %}
 ### {{ group }}
 {% for commit in items %}
 - {{ commit.message | split(pat="\n") | first | trim }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/commit/{{ commit.id }}))
-{% endfor %}
-{% endif %}
-
-{% endfor %}
+{% endfor %}{% endif %}{% endfor %}
 """
 trim = true
 
