@@ -18,14 +18,6 @@
 
 
 
-
-
-## v2.3.3-beta.1 - 2026-03-17
-
-
-
-
-
 ### :sparkles: 新功能
 
 - 使用 cryptography 库替代 OpenSSL 进行证书解析 ([444cfc1](https://github.com/BiFangKNT/mtga/commit/444cfc1524359b932e2f9993dec35561111deabb))
