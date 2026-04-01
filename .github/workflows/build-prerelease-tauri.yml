@@ -644,7 +644,9 @@ jobs:
             )
 
             if [ -n "$ignore_pattern" ]; then
-              printf ' --ignore-tags ^(%s)$' "$ignore_pattern"
+              local shell_escaped_pattern
+              printf -v shell_escaped_pattern '%q' "^(${ignore_pattern})$"
+              printf ' --ignore-tags %s' "$shell_escaped_pattern"
             fi
           }
 
