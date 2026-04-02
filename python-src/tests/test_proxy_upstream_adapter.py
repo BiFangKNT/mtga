@@ -1359,6 +1359,9 @@ class UpstreamErrorTests(unittest.TestCase):
 
         self.assertEqual(info.status_code, 503)
         self.assertIn("Error contacting target API", info.response_body["error"])
+        self.assertEqual(info.detail_text, "connect failed")
+        self.assertIsNone(info.raw_response_text)
+        self.assertIsNone(info.parsed_response_body)
 
     def test_http_status_error_keeps_upstream_status_code(self) -> None:
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -1374,7 +1377,87 @@ class UpstreamErrorTests(unittest.TestCase):
 
         self.assertEqual(info.status_code, 429)
         self.assertEqual(info.response_body["error"], "Target API error: 429")
-        self.assertIn("too many requests", info.response_body["details"])
+        self.assertEqual(info.response_body["details"], "too many requests")
+        self.assertEqual(info.detail_text, "too many requests")
+        self.assertIsNone(info.raw_response_text)
+        self.assertIsNone(info.parsed_response_body)
+
+    def test_http_status_error_parses_response_body_from_raw_response_text(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        body = {
+            "error": {
+                "code": None,
+                "message": "'type' must be in [\"enabled\", \"disabled\", \"auto\"]",
+                "param": None,
+                "type": "invalid_request_error",
+            },
+            "request_id": "b9393430-b194-9b50-bd81-f969ab0d3028",
+        }
+        response = httpx.Response(400, request=request, json=body)
+        error = BadRequestError(
+            "OpenAIException - 'type' must be in [\"enabled\", \"disabled\", \"auto\"]",
+            model="gpt-5",
+            llm_provider="openai",
+            response=response,
+            body=body,
+        )
+
+        info = normalize_upstream_error(error)
+
+        self.assertEqual(info.status_code, 400)
+        self.assertEqual(info.response_body, body)
+        self.assertEqual(info.parsed_response_body, body)
+        self.assertIsNotNone(info.raw_response_text)
+        self.assertEqual(json.loads(info.raw_response_text or ""), body)
+        self.assertEqual(info.detail_text, info.raw_response_text)
+        self.assertIn(
+            "\"request_id\":\"b9393430-b194-9b50-bd81-f969ab0d3028\"",
+            info.log_message,
+        )
+
+    def test_http_status_error_restores_fallback_body_without_raw_response_text(self) -> None:
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            headers={"x-request-id": "3f07cdeb-9258-4033-9845-db9df91f8d39"},
+        )
+        inner_error = {
+            "code": None,
+            "message": "'type' must be in [\"enabled\", \"disabled\", \"auto\"]",
+            "param": None,
+            "type": "invalid_request_error",
+        }
+        error = BadRequestError(
+            "OpenAIException - 'type' must be in [\"enabled\", \"disabled\", \"auto\"]",
+            model="gpt-5",
+            llm_provider="openai",
+            response=response,
+            body=inner_error,
+        )
+
+        info = normalize_upstream_error(error)
+
+        self.assertIsNone(info.raw_response_text)
+        self.assertIsNone(info.parsed_response_body)
+        self.assertEqual(
+            info.response_body,
+            {
+                "error": inner_error,
+                "request_id": "3f07cdeb-9258-4033-9845-db9df91f8d39",
+            },
+        )
+        self.assertEqual(
+            info.detail_text,
+            json.dumps(
+                {
+                    "error": inner_error,
+                    "request_id": "3f07cdeb-9258-4033-9845-db9df91f8d39",
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
 
 
 if __name__ == "__main__":

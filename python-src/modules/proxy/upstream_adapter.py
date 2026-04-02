@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import ssl
 from collections.abc import Callable
@@ -92,8 +93,11 @@ class UpstreamRoute:
 @dataclass(frozen=True)
 class UpstreamErrorInfo:
     status_code: int
-    response_body: dict[str, Any]
+    response_body: Any
     log_message: str
+    detail_text: str
+    raw_response_text: str | None = None
+    parsed_response_body: dict[str, Any] | list[Any] | None = None
 
 
 def _coerce_mapping_payload(payload: Any) -> dict[str, Any] | None:
@@ -106,6 +110,137 @@ def _coerce_mapping_payload(payload: Any) -> dict[str, Any] | None:
         if isinstance(dumped, dict):
             return cast(dict[str, Any], dumped)
 
+    return None
+
+
+def _parse_json_payload_text(text: str) -> dict[str, Any] | list[Any] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    payload_dict = _coerce_mapping_payload(parsed)
+    if payload_dict is not None:
+        return payload_dict
+    if isinstance(parsed, list):
+        return list(cast(list[Any], parsed))
+    return None
+
+
+def _coerce_json_payload(payload: Any) -> dict[str, Any] | list[Any] | None:
+    payload_dict = _coerce_mapping_payload(payload)
+    if payload_dict is not None:
+        return payload_dict
+    if isinstance(payload, list):
+        return list(cast(list[Any], payload))
+    return None
+
+
+def _serialize_json_payload(payload: dict[str, Any] | list[Any]) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _unwrap_exception_message(message: str) -> str:
+    normalized = message.strip()
+    if normalized.startswith("litellm.") and ": " in normalized:
+        normalized = normalized.split(": ", 1)[1].strip()
+    if normalized.startswith("OpenAIException - "):
+        normalized = normalized.removeprefix("OpenAIException - ").strip()
+    return normalized
+
+
+def _extract_raw_response_text(exc: Exception) -> str | None:
+    response = getattr(exc, "response", None)
+    response_text = getattr(response, "text", None)
+    if isinstance(response_text, str):
+        stripped = response_text.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _extract_upstream_request_id(exc: Exception) -> str | None:
+    request_id = getattr(exc, "request_id", None)
+    if isinstance(request_id, str) and request_id.strip():
+        return request_id.strip()
+
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+
+    header_get = getattr(headers, "get", None)
+    if not callable(header_get):
+        return None
+
+    for key in ("x-request-id", "request-id"):
+        header_value = header_get(key)
+        if isinstance(header_value, str) and header_value.strip():
+            return header_value.strip()
+    return None
+
+
+def _attach_request_id(
+    payload: dict[str, Any] | list[Any],
+    exc: Exception,
+) -> dict[str, Any] | list[Any]:
+    if not isinstance(payload, dict):
+        return payload
+    if payload.get("request_id"):
+        return payload
+
+    request_id = _extract_upstream_request_id(exc)
+    if not request_id:
+        return payload
+
+    payload_with_request_id = dict(payload)
+    payload_with_request_id["request_id"] = request_id
+    return payload_with_request_id
+
+
+def _looks_like_openai_error_object(payload: dict[str, Any]) -> bool:
+    payload_keys = set(payload)
+    if "error" in payload_keys:
+        return False
+    if "message" not in payload_keys or "type" not in payload_keys:
+        return False
+    return payload_keys.issubset({"message", "type", "code", "param"})
+
+
+def _restore_error_root_payload(
+    payload: dict[str, Any] | list[Any],
+    exc: Exception,
+) -> dict[str, Any] | list[Any]:
+    if not isinstance(payload, dict):
+        return payload
+    if not _looks_like_openai_error_object(payload):
+        return _attach_request_id(payload, exc)
+
+    restored_payload: dict[str, Any] = {"error": dict(payload)}
+    request_id = _extract_upstream_request_id(exc)
+    if request_id:
+        restored_payload["request_id"] = request_id
+    return restored_payload
+
+
+def _extract_fallback_response_body(exc: Exception) -> dict[str, Any] | list[Any] | None:
+    body = getattr(exc, "body", None)
+    if isinstance(body, str):
+        parsed_body = _parse_json_payload_text(body)
+        if parsed_body is not None:
+            return _restore_error_root_payload(parsed_body, exc)
+        return None
+
+    coerced_body = _coerce_json_payload(body)
+    if coerced_body is not None:
+        return _restore_error_root_payload(coerced_body, exc)
     return None
 
 
@@ -312,32 +447,52 @@ def _build_litellm_base_url(
     return chat_base_url
 
 
-def _extract_exception_detail(exc: Exception) -> str:
-    response = getattr(exc, "response", None)
-    response_text = getattr(response, "text", None)
-    if isinstance(response_text, str) and response_text.strip():
-        return response_text.strip()
-
+def _extract_exception_detail(
+    exc: Exception,
+    *,
+    raw_response_text: str | None,
+    fallback_response_body: dict[str, Any] | list[Any] | None,
+) -> str:
+    if raw_response_text is not None:
+        return raw_response_text
+    if fallback_response_body is not None:
+        return _serialize_json_payload(fallback_response_body)
     body = getattr(exc, "body", None)
     if isinstance(body, str) and body.strip():
         return body.strip()
 
     message = getattr(exc, "message", None)
     if isinstance(message, str) and message.strip():
-        return message.strip()
+        return _unwrap_exception_message(message)
 
-    detail = str(exc).strip()
+    detail = _unwrap_exception_message(str(exc))
     return detail or exc.__class__.__name__
 
 
 def normalize_upstream_error(exc: Exception) -> UpstreamErrorInfo:
-    detail = _extract_exception_detail(exc)
+    raw_response_text = _extract_raw_response_text(exc)
+    parsed_response_body = (
+        _parse_json_payload_text(raw_response_text)
+        if raw_response_text is not None
+        else None
+    )
+    fallback_response_body = (
+        None if raw_response_text is not None else _extract_fallback_response_body(exc)
+    )
+    detail = _extract_exception_detail(
+        exc,
+        raw_response_text=raw_response_text,
+        fallback_response_body=fallback_response_body,
+    )
 
     if isinstance(exc, APIConnectionError):
         return UpstreamErrorInfo(
             status_code=503,
             response_body={"error": f"Error contacting target API: {detail}"},
             log_message=f"连接目标 API 时出错: {detail}",
+            detail_text=detail,
+            raw_response_text=raw_response_text,
+            parsed_response_body=parsed_response_body,
         )
 
     status_code_obj = getattr(exc, "status_code", None)
@@ -345,17 +500,27 @@ def normalize_upstream_error(exc: Exception) -> UpstreamErrorInfo:
     if status_code is not None:
         return UpstreamErrorInfo(
             status_code=status_code,
-            response_body={
+            response_body=parsed_response_body
+            if parsed_response_body is not None
+            else fallback_response_body
+            if fallback_response_body is not None
+            else {
                 "error": f"Target API error: {status_code}",
                 "details": detail,
             },
             log_message=f"目标 API HTTP 错误: {status_code} - {detail}",
+            detail_text=detail,
+            raw_response_text=raw_response_text,
+            parsed_response_body=parsed_response_body,
         )
 
     return UpstreamErrorInfo(
         status_code=500,
         response_body={"error": "An internal server error occurred"},
         log_message=f"发生意外错误: {detail}",
+        detail_text=detail,
+        raw_response_text=raw_response_text,
+        parsed_response_body=parsed_response_body,
     )
 
 

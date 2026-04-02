@@ -473,10 +473,7 @@ def _run_generation_test_with_litellm(
     except Exception as exc:  # noqa: BLE001
         error_info = normalize_upstream_error(exc)
         log_func(f"❌ 模型测活失败: HTTP {error_info.status_code}")
-        detail_obj = error_info.response_body.get("details")
-        if not isinstance(detail_obj, str):
-            detail_obj = error_info.response_body.get("error")
-        detail = detail_obj if isinstance(detail_obj, str) else None
+        detail = error_info.detail_text.strip() if error_info.detail_text.strip() else None
         if isinstance(detail, str):
             log_func(f"   错误信息: {detail[:200]}")
     finally:

@@ -19,8 +19,50 @@ const clearConfirmOpen = ref(false);
 
 const logCount = computed(() => props.logs?.length ?? 0);
 
+const tryFormatJsonText = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed === null || typeof parsed !== "object") {
+      return null;
+    }
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return null;
+  }
+};
+
+const formatLogEntry = (entry: string) => {
+  const directJson = tryFormatJsonText(entry);
+  if (directJson) {
+    return directJson;
+  }
+
+  const jsonStartMatches = Array.from(entry.matchAll(/{/g));
+  for (const match of jsonStartMatches) {
+    const startIndex = match.index;
+    if (typeof startIndex !== "number") {
+      continue;
+    }
+    const prefix = entry.slice(0, startIndex).trimEnd();
+    const suffix = entry.slice(startIndex);
+    const formattedJson = tryFormatJsonText(suffix);
+    if (!formattedJson) {
+      continue;
+    }
+    return prefix ? `${prefix}\n${formattedJson}` : formattedJson;
+  }
+
+  return entry;
+};
+
 const formattedLogs = computed(() =>
-  props.logs && props.logs.length ? props.logs.join("\n") : props.emptyText,
+  props.logs && props.logs.length
+    ? props.logs.map((entry) => formatLogEntry(entry)).join("\n")
+    : props.emptyText,
 );
 
 const requestClearLogs = () => {
