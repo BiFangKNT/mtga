@@ -27,6 +27,10 @@
     - `-d, --dev-branch`（兼容 `--DevBranch`）
 - `prettier-check-locations.mjs`
   - 定位 Prettier 不一致位置，按 `file:line:column: message` 输出，便于编辑器问题匹配器跳转。
+- `prune-pyembed.mjs`
+  - 裁剪 `src-tauri/pyembed/python` 内确定无运行时用途的内容。
+  - 当前会清理：`pip`、CLI 包装脚本、`ensurepip`、`idlelib`、`tkinter/tcl`、`turtledemo`、`__pycache__`、`.pyc/.pyo`、以及 `modules/resources/openssl`。
+  - 支持 `--dry-run` 仅预览待删除项，不写入文件。
 - `rs-check.mjs`
   - Rust 检查入口，模式：`dev`（默认）与 `gate`。
   - `dev`：要求本地 pyembed Python 存在，并设置 `PYO3_PYTHON` 后执行 `cargo fmt` + `cargo check -p mtga-tauri`。
@@ -39,6 +43,15 @@
 - `pnpm py:gate`
 - `pnpm rs:gate`
 - `pnpm rs:check`
+- `pnpm pyembed:prune`
+- `pnpm pyembed:prune:dry-run`
 - `pnpm gitflow:setup`
 - `pnpm release:push`
 - `pnpm release:push -- -v 2.0.0-beta.10 -r origin -m tauri -d dev`
+
+## 本地 Tauri 打包
+
+- `pnpm tauri:bundle:win`
+- `pnpm tauri:bundle:mac`
+
+以上本地 bundle 脚本会先执行 `pnpm pyembed:prune`，再进入 Tauri 构建；CI 使用的 `*:ci` 脚本当前不受影响。
