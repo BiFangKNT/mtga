@@ -18,12 +18,12 @@ class AppBootstrapResult:
 
 
 def build_app_bootstrap(
-    *, project_root: Path, get_user_data_dir: Callable[[], str]
+    *, project_root: Path, get_log_path: Callable[[str], str]
 ) -> AppBootstrapResult:
     app_context = bootstrap.build_app_context()
     metadata = app_metadata.DEFAULT_METADATA
     error_log_path = logging_service.setup_error_logging(
-        get_user_data_dir=get_user_data_dir,
+        get_log_path=get_log_path,
         error_log_filename=metadata.error_log_filename,
     )
     log_error = logging_service.log_error

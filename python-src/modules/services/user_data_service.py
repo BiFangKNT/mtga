@@ -9,6 +9,7 @@ from datetime import datetime
 
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
+from modules.runtime.resource_manager import LOGS_DIR_NAME
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ def backup_user_data(
 
     items_to_backup = _collect_user_items(
         user_data_dir,
-        exclude_names={"backups", error_log_filename},
+        exclude_names={"backups", LOGS_DIR_NAME, error_log_filename},
     )
 
     if not items_to_backup:
@@ -95,7 +96,7 @@ def clear_user_data(
 ) -> ClearResult:
     items_to_remove = _collect_user_items(
         user_data_dir,
-        exclude_names={"backups", error_log_filename},
+        exclude_names={"backups", LOGS_DIR_NAME, error_log_filename},
     )
     if not items_to_remove:
         return ClearResult(0, 0)

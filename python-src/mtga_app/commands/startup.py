@@ -7,7 +7,12 @@ from pytauri import Commands
 
 from modules.hosts import hosts_state
 from modules.runtime.operation_result import OperationResult
-from modules.runtime.resource_manager import ResourceManager, get_packaging_runtime
+from modules.runtime.resource_manager import (
+    ResourceManager,
+    get_legacy_user_data_dir,
+    get_packaging_runtime,
+    has_legacy_user_data_dir,
+)
 from modules.services import environment_service, startup_context
 
 from .common import build_result_payload, collect_logs
@@ -65,6 +70,8 @@ def register_startup_commands(commands: Commands) -> None:
             env_ok=env_ok,
             env_message=env_message,
             runtime=runtime,
+            legacy_user_data_dir_detected=has_legacy_user_data_dir(),
+            legacy_user_data_dir=get_legacy_user_data_dir(),
             allow_unsafe_hosts_flag=hosts_state.ALLOW_UNSAFE_HOSTS_FLAG,
             hosts_modify_blocked=block_state.blocked,
             hosts_modify_block_status=block_status,

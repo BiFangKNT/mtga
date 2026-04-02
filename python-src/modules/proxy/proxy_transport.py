@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from modules.proxy.upstream_adapter import LiteLLMUpstreamAdapter
-from modules.runtime.resource_manager import ResourceManager, is_packaged
+from modules.runtime.resource_manager import ResourceManager
 
 type LogFunc = Callable[[str], None]
 
@@ -41,12 +41,7 @@ class ProxyTransport:
             self._adapter.close()
 
     def prepare_sse_log_path(self) -> str:
-        base_dir = (
-            self._resource_manager.user_data_dir
-            if is_packaged()
-            else self._resource_manager.program_resource_dir
-        )
-        log_dir = os.path.join(base_dir, "logs")
+        log_dir = os.path.join(self._resource_manager.user_data_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         filename = f"sse_{timestamp}_{int(time.time() * 1000)}.log"

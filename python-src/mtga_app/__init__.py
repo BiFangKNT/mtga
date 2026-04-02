@@ -16,18 +16,20 @@ from typing import Any, cast
 
 from platformdirs import user_data_dir
 
+from modules.runtime.resource_manager import get_log_path
+
 MTGA_PLATFORM = "tauri"
 os.environ.setdefault("MTGA_PLATFORM", MTGA_PLATFORM)
 
 
 def _resolve_boot_log_path() -> Path:
     try:
-        user_dir = user_data_dir("MTGA", appauthor=False, roaming=os.name == "nt")
+        return Path(get_log_path("mtga_tauri_boot.log"))
     except Exception:
-        user_dir = os.path.expanduser("~")
-    with suppress(Exception):
-        os.makedirs(user_dir, exist_ok=True)
-    return Path(user_dir) / "mtga_tauri_boot.log"
+        fallback_dir = os.path.join(os.path.expanduser("~"), ".mtga", "logs")
+        with suppress(Exception):
+            os.makedirs(fallback_dir, exist_ok=True)
+        return Path(fallback_dir) / "mtga_tauri_boot.log"
 
 
 _BOOT_LOG_PATH = _resolve_boot_log_path()

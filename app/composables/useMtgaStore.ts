@@ -536,6 +536,13 @@ export const useMtgaStore = () => {
       appendLog("      2. 检查 Trae 的代理设置。\n" + "⚠️".repeat(21));
     }
 
+    if (details["legacy_user_data_dir_detected"] === true) {
+      const legacyDir = coerceText(details["legacy_user_data_dir"]);
+      appendLog(
+        `⚠️ 检测到旧版用户数据目录${legacyDir ? `：${legacyDir}` : ""}。当前版本已不再使用该目录，如需保留旧配置、证书或备份，请手动迁移到新的用户数据目录。`,
+      );
+    }
+
     appendLog("MTGA 已启动");
     appendLog("请选择操作或直接使用一键启动...");
   };

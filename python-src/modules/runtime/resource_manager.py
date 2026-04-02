@@ -17,6 +17,8 @@ from platformdirs import user_data_dir
 # - MTGA_RESOURCE_DIR=... 指定资源目录（最高优先级）
 # - 未设置时按“包资源 -> 本地 modules/resources -> 运行时回退目录”自动探测
 RESOURCE_DIR = os.environ.get("MTGA_RESOURCE_DIR", "").strip()
+LOGS_DIR_NAME = "logs"
+LEGACY_USER_DATA_DIR_NAME = ".mtga"
 
 
 def safe_print(message: object) -> None:
@@ -61,13 +63,26 @@ def get_user_data_dir() -> str:
     roaming = os.name == "nt"
     platform_dir = user_data_dir(app_name, appauthor=False, roaming=roaming)
 
-    # 历史兼容：旧版在 macOS/Linux 使用 ~/.mtga
-    legacy_dir = os.path.join(os.path.expanduser("~"), ".mtga")
-    user_dir = legacy_dir if os.name != "nt" and os.path.isdir(legacy_dir) else platform_dir
+    os.makedirs(platform_dir, exist_ok=True)
+    return platform_dir
 
-    # 确保目录存在
-    os.makedirs(user_dir, exist_ok=True)
-    return user_dir
+
+def get_legacy_user_data_dir() -> str:
+    """获取历史遗留用户数据目录路径。"""
+    return os.path.join(os.path.expanduser("~"), LEGACY_USER_DATA_DIR_NAME)
+
+
+def has_legacy_user_data_dir() -> bool:
+    """检测是否存在仍可能包含旧数据的历史目录。"""
+    if os.name == "nt":
+        return False
+    legacy_dir = get_legacy_user_data_dir()
+    if not os.path.isdir(legacy_dir):
+        return False
+    try:
+        return len(os.listdir(legacy_dir)) > 0
+    except Exception:
+        return True
 
 
 def _get_packaged_resource_dir() -> str | None:
@@ -138,6 +153,18 @@ def get_user_data_path(relative_path: str) -> str:
     """
     user_dir = get_user_data_dir()
     return os.path.join(user_dir, relative_path)
+
+
+def get_logs_dir() -> str:
+    """获取日志目录路径（用户数据目录/logs）。"""
+    logs_dir = get_user_data_path(LOGS_DIR_NAME)
+    os.makedirs(logs_dir, exist_ok=True)
+    return logs_dir
+
+
+def get_log_path(filename: str) -> str:
+    """获取日志文件路径（用户数据目录/logs）。"""
+    return os.path.join(get_logs_dir(), filename)
 
 
 def get_ca_path() -> str:
@@ -261,6 +288,14 @@ class ResourceManager:
     def get_hosts_backup_file(self) -> str:
         """获取 hosts 备份文件路径"""
         return get_user_data_path("hosts.backup")
+
+    def get_logs_dir(self) -> str:
+        """获取日志目录路径"""
+        return get_logs_dir()
+
+    def get_log_file(self, filename: str) -> str:
+        """获取日志文件路径"""
+        return get_log_path(filename)
 
     def check_resources(self) -> list[str]:
         """检查必要资源是否存在"""

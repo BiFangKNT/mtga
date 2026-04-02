@@ -10,14 +10,13 @@ from typing import Any
 
 def setup_error_logging(
     *,
-    get_user_data_dir: Callable[[], str],
+    get_log_path: Callable[[str], str],
     error_log_filename: str,
     logger_name: str = "mtga_gui",
 ) -> str:
-    """配置全局日志，将 ERROR 级别写入用户数据目录并带时间戳。"""
-    user_dir = get_user_data_dir()
-    log_path = os.path.join(user_dir, error_log_filename)
-    os.makedirs(user_dir, exist_ok=True)
+    """配置全局日志，将 ERROR 级别写入用户日志目录并带时间戳。"""
+    log_path = get_log_path(error_log_filename)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
