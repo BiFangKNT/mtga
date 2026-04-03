@@ -314,6 +314,10 @@ jobs:
           exit 1
         working-directory: .
 
+      - name: ✂️ 裁剪 pyembed 运行时
+        run: pnpm pyembed:prune
+        working-directory: .
+
       - name: 🧱 打包 Tauri
         run: pnpm tauri:bundle:mac:ci
         working-directory: .
@@ -500,6 +504,10 @@ jobs:
             }
           }
           throw "❌ 安装 pytauri 依赖失败（重试 3 次后仍失败）"
+        working-directory: .
+
+      - name: ✂️ 裁剪 pyembed 运行时
+        run: pnpm pyembed:prune
         working-directory: .
 
       - name: 🧱 打包 Tauri
