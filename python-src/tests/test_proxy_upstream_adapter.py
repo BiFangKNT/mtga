@@ -77,6 +77,31 @@ def _build_proxy_config(  # noqa: PLR0913
     )
 
 
+def _build_bad_request_error(
+    *,
+    message: str,
+    body: dict[str, Any] | None = None,
+    model: str = "gpt-5",
+) -> BadRequestError:
+    request = httpx.Request("POST", "https://example.com/v1/chat/completions")
+    response_body = body or {
+        "error": {
+            "code": None,
+            "message": message,
+            "param": None,
+            "type": "invalid_request_error",
+        }
+    }
+    response = httpx.Response(400, request=request, json=response_body)
+    return BadRequestError(
+        f"OpenAIException - {message}",
+        model=model,
+        llm_provider="openai",
+        response=response,
+        body=response_body,
+    )
+
+
 class UpstreamRouteTests(unittest.TestCase):
     def test_build_proxy_config_ignores_legacy_group_mapped_model_id(self) -> None:
         temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-config-")
@@ -913,6 +938,606 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             )
 
         self.assertEqual(completion_mock.call_count, 1)
+
+    def test_openai_chat_completion_retries_by_dropping_only_nested_extra_body_field(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="Qwen/Qwen3.5-27B",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="Unsupported parameter: 'thinking.budget_tokens'",
+            body={
+                "error": {
+                    "code": None,
+                    "message": "Unsupported parameter: 'thinking.budget_tokens'",
+                    "param": "thinking",
+                    "type": "invalid_request_error",
+                }
+            },
+            model="Qwen/Qwen3.5-27B",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["verbosity"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_retry_1", "choices": []},
+                {"id": "chatcmpl_retry_2", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "extra_body": {"return_reasoning": True},
+                    "thinking": {"type": "enabled", "budget_tokens": 1024},
+                    "verbosity": "high",
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "extra_body": {"return_reasoning": True},
+                    "thinking": {"type": "enabled", "budget_tokens": 1024},
+                    "verbosity": "high",
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_retry_1")
+        self.assertEqual(second_response["id"], "chatcmpl_retry_2")
+        self.assertEqual(completion_mock.call_count, 3)
+
+        first_attempt_kwargs = completion_mock.call_args_list[0].kwargs
+        retry_attempt_kwargs = completion_mock.call_args_list[1].kwargs
+        cached_attempt_kwargs = completion_mock.call_args_list[2].kwargs
+
+        self.assertEqual(
+            first_attempt_kwargs["extra_body"],
+            {
+                "return_reasoning": True,
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+            },
+        )
+        self.assertEqual(
+            retry_attempt_kwargs["extra_body"],
+            {
+                "return_reasoning": True,
+                "thinking": {"type": "enabled"},
+            },
+        )
+        self.assertEqual(
+            cached_attempt_kwargs["extra_body"],
+            {
+                "return_reasoning": True,
+                "thinking": {"type": "enabled"},
+            },
+        )
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=Qwen/Qwen3.5-27B 上游拒绝参数，自动剔除后重试: "
+                "extra_body.thinking.budget_tokens | error=Unsupported parameter: "
+                "'thinking.budget_tokens'"
+            ),
+            logs,
+        )
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=Qwen/Qwen3.5-27B 命中上游不兼容参数缓存，已跳过: "
+                "extra_body.thinking.budget_tokens"
+            ),
+            logs,
+        )
+
+    def test_openai_chat_completion_retries_inferred_nested_field_without_caching(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="Qwen/Qwen3.5-27B",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="'type' must be in [\"enabled\", \"disabled\", \"auto\"]",
+            model="Qwen/Qwen3.5-27B",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["verbosity"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_retry_1", "choices": []},
+                bad_request_error,
+                {"id": "chatcmpl_retry_2", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "extra_body": {"return_reasoning": True},
+                    "thinking": {"type": "enabled"},
+                    "verbosity": "high",
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "extra_body": {"return_reasoning": True},
+                    "thinking": {"type": "enabled"},
+                    "verbosity": "high",
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_retry_1")
+        self.assertEqual(second_response["id"], "chatcmpl_retry_2")
+        self.assertEqual(completion_mock.call_count, 4)
+        first_attempt_kwargs = completion_mock.call_args_list[0].kwargs
+        retry_attempt_kwargs = completion_mock.call_args_list[1].kwargs
+        second_attempt_kwargs = completion_mock.call_args_list[2].kwargs
+        second_retry_attempt_kwargs = completion_mock.call_args_list[3].kwargs
+        self.assertEqual(
+            first_attempt_kwargs["extra_body"],
+            {
+                "return_reasoning": True,
+                "thinking": {"type": "enabled"},
+            },
+        )
+        self.assertEqual(
+            retry_attempt_kwargs["extra_body"],
+            {"return_reasoning": True},
+        )
+        self.assertEqual(
+            second_attempt_kwargs["extra_body"],
+            {
+                "return_reasoning": True,
+                "thinking": {"type": "enabled"},
+            },
+        )
+        self.assertEqual(
+            second_retry_attempt_kwargs["extra_body"],
+            {"return_reasoning": True},
+        )
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=Qwen/Qwen3.5-27B 根据上游报错临时剔除参数后重试（本次不缓存）: "
+                "extra_body.thinking.type | error='type' must be in "
+                "[\"enabled\", \"disabled\", \"auto\"]"
+            ),
+            logs,
+        )
+        self.assertFalse(
+            any("命中上游不兼容参数缓存" in log for log in logs)
+        )
+
+    def test_openai_chat_completion_retries_by_dropping_explicit_unsupported_param(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="Unsupported parameter: 'verbosity'",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["verbosity"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_verbosity_retry", "choices": []},
+            ],
+        ) as completion_mock:
+            response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "verbosity": "high",
+                },
+            )
+
+        self.assertEqual(response["id"], "chatcmpl_verbosity_retry")
+        self.assertEqual(completion_mock.call_count, 2)
+        first_attempt_kwargs = completion_mock.call_args_list[0].kwargs
+        retry_attempt_kwargs = completion_mock.call_args_list[1].kwargs
+        self.assertEqual(first_attempt_kwargs["verbosity"], "high")
+        self.assertNotIn("verbosity", retry_attempt_kwargs)
+
+    def test_openai_chat_completion_retries_scalar_invalid_value_without_caching(
+        self,
+    ) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="Invalid value for 'temperature': expected a number between 0 and 2",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_temperature_retry", "choices": []},
+                bad_request_error,
+                {"id": "chatcmpl_temperature_retry_2", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "temperature": 9,
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "temperature": 9,
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_temperature_retry")
+        self.assertEqual(second_response["id"], "chatcmpl_temperature_retry_2")
+        self.assertEqual(completion_mock.call_count, 4)
+        self.assertEqual(completion_mock.call_args_list[0].kwargs["temperature"], 9)
+        self.assertNotIn("temperature", completion_mock.call_args_list[1].kwargs)
+        self.assertEqual(completion_mock.call_args_list[2].kwargs["temperature"], 9)
+        self.assertNotIn("temperature", completion_mock.call_args_list[3].kwargs)
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=gpt-5 根据上游报错临时剔除参数后重试（本次不缓存）: "
+                "temperature | error=Invalid value for 'temperature': "
+                "expected a number between 0 and 2"
+            ),
+            logs,
+        )
+        self.assertFalse(any("命中上游不兼容参数缓存" in log for log in logs))
+
+    def test_openai_chat_completion_retries_explicit_nested_invalid_value_without_caching(
+        self,
+    ) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="Invalid value for 'response_format.strict': expected a boolean",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["response_format"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_response_format_retry", "choices": []},
+                bad_request_error,
+                {"id": "chatcmpl_response_format_retry_2", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "response_format": {
+                        "type": "json_schema",
+                        "strict": "wrong",
+                    },
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "response_format": {
+                        "type": "json_schema",
+                        "strict": "wrong",
+                    },
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_response_format_retry")
+        self.assertEqual(second_response["id"], "chatcmpl_response_format_retry_2")
+        self.assertEqual(completion_mock.call_count, 4)
+        self.assertEqual(
+            completion_mock.call_args_list[0].kwargs["response_format"],
+            {
+                "type": "json_schema",
+                "strict": "wrong",
+            },
+        )
+        self.assertEqual(
+            completion_mock.call_args_list[1].kwargs["response_format"],
+            {"type": "json_schema"},
+        )
+        self.assertEqual(
+            completion_mock.call_args_list[2].kwargs["response_format"],
+            {
+                "type": "json_schema",
+                "strict": "wrong",
+            },
+        )
+        self.assertEqual(
+            completion_mock.call_args_list[3].kwargs["response_format"],
+            {"type": "json_schema"},
+        )
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=gpt-5 根据上游报错临时剔除参数后重试（本次不缓存）: "
+                "response_format.strict | error=Invalid value for "
+                "'response_format.strict': expected a boolean"
+            ),
+            logs,
+        )
+        self.assertFalse(any("命中上游不兼容参数缓存" in log for log in logs))
+
+    def test_openai_chat_completion_cache_is_scoped_by_model(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route_gpt5 = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+        route_gpt4o = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-4o-mini",
+            )
+        )
+        bad_request_error_gpt5 = _build_bad_request_error(
+            message="Unsupported parameter: 'verbosity'",
+            model="gpt-5",
+        )
+        bad_request_error_gpt4o = _build_bad_request_error(
+            message="Unsupported parameter: 'verbosity'",
+            model="gpt-4o-mini",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["verbosity"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error_gpt5,
+                {"id": "chatcmpl_gpt5", "choices": []},
+                bad_request_error_gpt4o,
+                {"id": "chatcmpl_gpt4o", "choices": []},
+            ],
+        ) as completion_mock:
+            response_gpt5 = adapter.create_chat_completion(
+                route=route_gpt5,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "verbosity": "high",
+                },
+            )
+            response_gpt4o = adapter.create_chat_completion(
+                route=route_gpt4o,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "verbosity": "high",
+                },
+            )
+
+        self.assertEqual(response_gpt5["id"], "chatcmpl_gpt5")
+        self.assertEqual(response_gpt4o["id"], "chatcmpl_gpt4o")
+        self.assertEqual(completion_mock.call_count, 4)
+        self.assertEqual(completion_mock.call_args_list[0].kwargs["verbosity"], "high")
+        self.assertNotIn("verbosity", completion_mock.call_args_list[1].kwargs)
+        self.assertEqual(completion_mock.call_args_list[2].kwargs["verbosity"], "high")
+        self.assertNotIn("verbosity", completion_mock.call_args_list[3].kwargs)
+        self.assertFalse(
+            any("命中上游不兼容参数缓存" in log for log in logs)
+        )
+
+    def test_openai_chat_completion_cache_is_scoped_by_api_key(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route_key_a = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+                api_key="key-a",
+            )
+        )
+        route_key_b = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+                api_key="key-b",
+            )
+        )
+        bad_request_error = _build_bad_request_error(
+            message="Unsupported parameter: 'verbosity'",
+            model="gpt-5",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["verbosity"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error,
+                {"id": "chatcmpl_key_a_retry", "choices": []},
+                {"id": "chatcmpl_key_b_first_try", "choices": []},
+            ],
+        ) as completion_mock:
+            response_key_a = adapter.create_chat_completion(
+                route=route_key_a,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "verbosity": "high",
+                },
+            )
+            response_key_b = adapter.create_chat_completion(
+                route=route_key_b,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "verbosity": "high",
+                },
+            )
+
+        self.assertEqual(response_key_a["id"], "chatcmpl_key_a_retry")
+        self.assertEqual(response_key_b["id"], "chatcmpl_key_b_first_try")
+        self.assertEqual(completion_mock.call_count, 3)
+        self.assertEqual(completion_mock.call_args_list[0].kwargs["verbosity"], "high")
+        self.assertNotIn("verbosity", completion_mock.call_args_list[1].kwargs)
+        self.assertEqual(completion_mock.call_args_list[2].kwargs["verbosity"], "high")
+        self.assertFalse(
+            any("命中上游不兼容参数缓存" in log for log in logs)
+        )
+
+    def test_openai_chat_completion_persists_learned_rules_after_fallback_success(
+        self,
+    ) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+            )
+        )
+        bad_request_error_foo = _build_bad_request_error(
+            message="Unsupported parameter: 'foo'",
+            model="gpt-5",
+        )
+        bad_request_error_bar = _build_bad_request_error(
+            message="Unsupported parameter: 'bar'",
+            model="gpt-5",
+        )
+        bad_request_error_baz = _build_bad_request_error(
+            message="Unsupported parameter: 'baz'",
+            model="gpt-5",
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=[],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                bad_request_error_foo,
+                bad_request_error_bar,
+                bad_request_error_baz,
+                {"id": "chatcmpl_fallback_success", "choices": []},
+                {"id": "chatcmpl_cached_success", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "foo": 1,
+                    "bar": 2,
+                    "baz": 3,
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "foo": 1,
+                    "bar": 2,
+                    "baz": 3,
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_fallback_success")
+        self.assertEqual(second_response["id"], "chatcmpl_cached_success")
+        self.assertEqual(completion_mock.call_count, 5)
+        self.assertEqual(
+            completion_mock.call_args_list[0].kwargs["extra_body"],
+            {"foo": 1, "bar": 2, "baz": 3},
+        )
+        self.assertEqual(
+            completion_mock.call_args_list[1].kwargs["extra_body"],
+            {"bar": 2, "baz": 3},
+        )
+        self.assertEqual(
+            completion_mock.call_args_list[2].kwargs["extra_body"],
+            {"baz": 3},
+        )
+        self.assertNotIn("extra_body", completion_mock.call_args_list[3].kwargs)
+        self.assertNotIn("extra_body", completion_mock.call_args_list[4].kwargs)
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
+                "model=gpt-5 命中上游不兼容参数缓存，已跳过: "
+                "extra_body.bar, extra_body.baz, extra_body.foo"
+            ),
+            logs,
+        )
 
     def test_openai_response_drops_unsupported_standard_params_before_litellm(self) -> None:
         logs: list[str] = []

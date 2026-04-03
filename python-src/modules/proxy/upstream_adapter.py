@@ -27,6 +27,12 @@ from modules.proxy.proxy_config import (
     normalize_middle_route,
     normalize_provider,
 )
+from modules.proxy.upstream_param_self_heal import (
+    TEMPORARY_SELF_HEAL_WARNING_PREFIX,
+    UnsupportedParamRule,
+    UpstreamParamSelfHealController,
+    extract_invalid_request_error_signal,
+)
 
 type LogFunc = Callable[[str], None]
 type RequestApi = Literal["chat_completions", "responses"]
@@ -34,6 +40,7 @@ type RequestApi = Literal["chat_completions", "responses"]
 CHAT_COMPLETIONS_REQUEST_API: RequestApi = "chat_completions"
 RESPONSES_REQUEST_API: RequestApi = "responses"
 LITELLM_CONNECT_RETRY_COUNT = 2
+UPSTREAM_PARAM_SELF_HEAL_MAX_ATTEMPTS = 3
 OPENAI_CHAT_COMPLETION_STANDARD_PARAMS: frozenset[str] = frozenset(
     {
         "model",
@@ -535,6 +542,7 @@ class LiteLLMUpstreamAdapter:
     ) -> None:
         self._disable_ssl_strict_mode = disable_ssl_strict_mode
         self._log = log_func
+        self._param_self_heal = UpstreamParamSelfHealController()
 
     def close(self) -> None:
         return
@@ -720,6 +728,102 @@ class LiteLLMUpstreamAdapter:
                     f"attempt={attempt + 1}/{total_attempts} error={exc}"
                 )
 
+    def _call_completion_with_param_self_heal(
+        self,
+        *,
+        route: UpstreamRoute,
+        call_kwargs: dict[str, Any],
+        completion_func: Callable[..., Any],
+    ) -> Any:
+        route_log_context = self._format_route_log_context(route)
+        cache_key = self._param_self_heal.build_cache_key(
+            provider=route.provider,
+            request_api=route.request_api,
+            base_url=route.litellm_base_url or route.base_url,
+            model=route.litellm_model,
+            api_key=route.api_key,
+        )
+        effective_call_kwargs, cached_rules = self._param_self_heal.apply_cached_rules(
+            cache_key=cache_key,
+            call_kwargs=call_kwargs,
+        )
+        if cached_rules:
+            cached_rule_labels = ", ".join(rule.label for rule in cached_rules)
+            self._log(
+                f"{TEMPORARY_SELF_HEAL_WARNING_PREFIX} "
+                f"{route_log_context} 命中上游不兼容参数缓存，已跳过: "
+                f"{cached_rule_labels}"
+            )
+
+        learned_rules: set[UnsupportedParamRule] = set()
+        skipped_rules = set(cached_rules)
+        current_call_kwargs = effective_call_kwargs
+        for _attempt in range(UPSTREAM_PARAM_SELF_HEAL_MAX_ATTEMPTS):
+            try:
+                response = self._call_completion_with_connect_retries(
+                    route=route,
+                    call_kwargs=current_call_kwargs,
+                    completion_func=completion_func,
+                )
+            except Exception as exc:  # noqa: BLE001
+                invalid_request_signal = extract_invalid_request_error_signal(exc)
+                if invalid_request_signal is None:
+                    raise
+                selection = self._param_self_heal.select_rule(
+                    call_kwargs=current_call_kwargs,
+                    message=invalid_request_signal.message,
+                    param=invalid_request_signal.param,
+                    skipped_rules=skipped_rules,
+                )
+                if selection is None:
+                    raise
+
+                next_call_kwargs, changed = self._param_self_heal.apply_rule(
+                    call_kwargs=current_call_kwargs,
+                    rule=selection.rule,
+                )
+                if not changed:
+                    raise
+
+                skipped_rules.add(selection.rule)
+                if selection.cacheable:
+                    learned_rules.add(selection.rule)
+                retry_action = (
+                    "上游拒绝参数，自动剔除后重试"
+                    if selection.cacheable
+                    else "根据上游报错临时剔除参数后重试（本次不缓存）"
+                )
+                self._log(
+                    f"{TEMPORARY_SELF_HEAL_WARNING_PREFIX} "
+                    f"{route_log_context} "
+                    f"{retry_action}: "
+                    f"{selection.rule.label}"
+                    + (
+                        f" | error={invalid_request_signal.message}"
+                        if invalid_request_signal.message
+                        else ""
+                    )
+                )
+                current_call_kwargs = next_call_kwargs
+                continue
+
+            self._param_self_heal.remember_rules(
+                cache_key=cache_key,
+                rules=learned_rules,
+            )
+            return response
+
+        response = self._call_completion_with_connect_retries(
+            route=route,
+            call_kwargs=current_call_kwargs,
+            completion_func=completion_func,
+        )
+        self._param_self_heal.remember_rules(
+            cache_key=cache_key,
+            rules=learned_rules,
+        )
+        return response
+
     def _get_supported_openai_params(
         self,
         route: UpstreamRoute,
@@ -864,7 +968,7 @@ class LiteLLMUpstreamAdapter:
         call_kwargs["num_retries"] = 0
         litellm_sdk = cast(Any, litellm)
         completion_func = cast(Callable[..., Any], litellm_sdk.completion)
-        return self._call_completion_with_connect_retries(
+        return self._call_completion_with_param_self_heal(
             route=route,
             call_kwargs=call_kwargs,
             completion_func=completion_func,
