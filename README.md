@@ -37,6 +37,7 @@ MTGA 是一个基于本地代理的 IDE 固定模型服务商解决方案，适�
   - [😎 保持更新](#-保持更新)
   - [贡献](#贡献)
   - [架构与依赖约束](#架构与依赖约束)
+  - [友链](#友链)
   - [引用](#引用)
   - [Star History](#star-history)
 
@@ -202,6 +203,10 @@ MTGA 是一个基于本地代理的 IDE 固定模型服务商解决方案，适�
 - UI -> actions -> services -> 领域模块（cert/hosts/network/proxy/update）-> runtime/platform
 - UI 不得直接依赖领域模块，所有操作通过 actions/services 统一编排。
 - 平台相关逻辑放在 `modules/platform`。
+
+## 友链
+
+[![友链 linux.do](https://img.shields.io/badge/LINUX--DO-Community-blue.svg?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI%2BPGNsaXBQYXRoIGlkPSJhIj48Y2lyY2xlIGN4PSI2MCIgY3k9IjYwIiByPSI0NyIvPjwvY2xpcFBhdGg%2BPGNpcmNsZSBmaWxsPSIjZjBmMGYwIiBjeD0iNjAiIGN5PSI2MCIgcj0iNTAiLz48cmVjdCBmaWxsPSIjMWMxYzFlIiBjbGlwLXBhdGg9InVybCgjYSkiIHg9IjEwIiB5PSIxMCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIzMCIvPjxyZWN0IGZpbGw9IiNmMGYwZjAiIGNsaXAtcGF0aD0idXJsKCNhKSIgeD0iMTAiIHk9IjQwIiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjQwIi8%2BPHJlY3QgZmlsbD0iI2ZmYjAwMyIgY2xpcC1wYXRoPSJ1cmwoI2EpIiB4PSIxMCIgeT0iODAiIHdpZHRoPSIxMDAiIGhlaWdodD0iMzAiLz48L3N2Zz4%3D&style=flat)](https://linux.do/)
 
 ## 引用
 
