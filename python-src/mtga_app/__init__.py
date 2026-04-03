@@ -22,14 +22,11 @@ MTGA_PLATFORM = "tauri"
 os.environ.setdefault("MTGA_PLATFORM", MTGA_PLATFORM)
 
 
-def _resolve_boot_log_path() -> Path:
+def _resolve_boot_log_path() -> Path | None:
     try:
         return Path(get_log_path("mtga_tauri_boot.log"))
     except Exception:
-        fallback_dir = os.path.join(os.path.expanduser("~"), ".mtga", "logs")
-        with suppress(Exception):
-            os.makedirs(fallback_dir, exist_ok=True)
-        return Path(fallback_dir) / "mtga_tauri_boot.log"
+        return None
 
 
 _BOOT_LOG_PATH = _resolve_boot_log_path()
@@ -37,6 +34,8 @@ _INVOKE_LOCK = Lock()
 
 
 def _boot_log(message: str) -> None:
+    if _BOOT_LOG_PATH is None:
+        return
     try:
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S ")
         with _BOOT_LOG_PATH.open("a", encoding="utf-8") as fh:

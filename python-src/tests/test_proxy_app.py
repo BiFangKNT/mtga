@@ -260,7 +260,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertIn('"model": "gemini-2.5-pro"', response_text)
         self.assertNotIn('"model": "gemini/gemini-2.5-pro"', response_text)
 
-        log_files = list(Path(temp_dir, "logs").glob("sse_*.log"))
+        log_files = list(Path(temp_dir, "logs", "SSE").glob("sse_*.log"))
         self.assertEqual(len(log_files), 1)
         self.assertGreater(log_files[0].stat().st_size, 0)
         self.assertTrue(
@@ -361,7 +361,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertIn('"model": "gemini-2.5-pro"', response_text)
         self.assertNotIn('"model": "gemini/gemini-2.5-pro"', response_text)
 
-        log_files = list(Path(temp_dir, "logs").glob("sse_*.log"))
+        log_files = list(Path(temp_dir, "logs", "SSE").glob("sse_*.log"))
         self.assertEqual(len(log_files), 1)
         self.assertGreater(log_files[0].stat().st_size, 0)
         self.assertTrue(any("返回流式响应" in item for item in logs))

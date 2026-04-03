@@ -41,7 +41,7 @@ class ProxyTransport:
             self._adapter.close()
 
     def prepare_sse_log_path(self) -> str:
-        log_dir = os.path.join(self._resource_manager.user_data_dir, "logs")
+        log_dir = os.path.join(self._resource_manager.user_data_dir, "logs", "SSE")
         os.makedirs(log_dir, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         filename = f"sse_{timestamp}_{int(time.time() * 1000)}.log"

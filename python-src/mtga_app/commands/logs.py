@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -31,14 +30,11 @@ class FrontendReportPayload(BaseModel):
     extra: dict[str, Any] | None = None
 
 
-def _resolve_frontend_log_path() -> Path:
+def _resolve_frontend_log_path() -> Path | None:
     try:
         return Path(get_log_path("mtga_frontend.log"))
     except Exception:
-        fallback_dir = Path(os.path.expanduser("~")) / ".mtga" / "logs"
-        with suppress(Exception):
-            fallback_dir.mkdir(parents=True, exist_ok=True)
-        return fallback_dir / "mtga_frontend.log"
+        return None
 
 
 _FRONTEND_LOG_PATH = _resolve_frontend_log_path()
@@ -56,6 +52,8 @@ def _trim_text(value: str | None, limit: int = 4000) -> str | None:
 
 
 def _append_frontend_log(message: str) -> None:
+    if _FRONTEND_LOG_PATH is None:
+        return
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S ")
     with suppress(Exception), _FRONTEND_LOG_PATH.open("a", encoding="utf-8") as fh:
         fh.write(f"{timestamp}{message}\n")
