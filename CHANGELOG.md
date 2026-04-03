@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## v2.4.0 - 2026-04-03
+
+### :sparkles: 新功能
+
+- 引入 LiteLLM 支持多提供商模型转发 ([8b4ee6d](https://github.com/BiFangKNT/mtga/commit/8b4ee6d8bd819b76dee153f9d57a2f6527d46120))
+
+- 支持模型发现策略缓存与上游鉴权分离 ([996cfde](https://github.com/BiFangKNT/mtga/commit/996cfde370b0a18272d3c1fc3737166cdb82537f))
+
+- 添加双栈 IPv4/IPv6 监听支持与优雅回退 ([6b376fd](https://github.com/BiFangKNT/mtga/commit/6b376fd07816be274e0e5f1f458caaf7fb551540))
+
+- 为上游 API 调用增加建连阶段故障重试机制 ([33abc66](https://github.com/BiFangKNT/mtga/commit/33abc66087dd358861d4003703b219eff6f59e8e))
+
+- 添加 pyembed 裁剪脚本以减小应用体积 ([b288a5d](https://github.com/BiFangKNT/mtga/commit/b288a5de236eda3420a247932be3971664b14404))
+
+- 改进上游错误处理与日志格式化 ([c500c2d](https://github.com/BiFangKNT/mtga/commit/c500c2dd0f5323fc5979d10a45e2e8a792e9ac63))
+
+- 添加前端诊断插件并改进日志目录管理 ([ca2d81d](https://github.com/BiFangKNT/mtga/commit/ca2d81d36ecc099aaff3f0cb351235a898260ceb))
+
+- 添加上游参数自愈机制以临时处理不兼容参数 ([7ded897](https://github.com/BiFangKNT/mtga/commit/7ded8979a4294ee18b5c3ebc7bf3040e7069cf65))
+
+- 重构参数自愈信号提取逻辑并支持litellm本地验证错误 ([2a55f87](https://github.com/BiFangKNT/mtga/commit/2a55f8715e4031c6a69b7c7070fd7bddb6a6871d))
+
+### :bug: 修复
+
+- 修复上游适配器中模型发现策略对路由构建的影响 ([610ddcf](https://github.com/BiFangKNT/mtga/commit/610ddcfd488739a1987092733ff06f6f38239dd3))
+
+- 延迟应用 Gemini 兼容补丁至实际请求时 ([a96e96f](https://github.com/BiFangKNT/mtga/commit/a96e96f0313447e4be2314f2489a649784f75100))
+
+- 移除模型测试中不必要的temperature参数 ([633f63b](https://github.com/BiFangKNT/mtga/commit/633f63b6332fa6cb82ac99d01f829b962ac5e85c))
+
+- 修复上游适配器中不兼容参数过滤逻辑 ([e25cf1c](https://github.com/BiFangKNT/mtga/commit/e25cf1ced4beba55f2b819bb1846e3a5f4f09446))
+
+- 修复 shell 转义问题以正确忽略标签 ([d5459e9](https://github.com/BiFangKNT/mtga/commit/d5459e907c470faaa83c87fe0938d2eaca23318a))
+
+- 修复日志路径处理并改进错误处理 ([5b7fcd7](https://github.com/BiFangKNT/mtga/commit/5b7fcd7cd388e9f0e34f14d75c2a660cd9046850))
+
 ## v2.3.3 - 2026-03-19
 
 
