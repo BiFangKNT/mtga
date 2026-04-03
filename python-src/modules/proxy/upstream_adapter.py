@@ -12,6 +12,7 @@ import httpx
 import litellm
 from litellm.exceptions import APIConnectionError
 
+from modules.proxy.param_self_heal_signal import extract_param_self_heal_signal
 from modules.proxy.proxy_config import (
     ANTHROPIC_PROVIDER,
     DEFAULT_MIDDLE_ROUTE,
@@ -31,7 +32,6 @@ from modules.proxy.upstream_param_self_heal import (
     TEMPORARY_SELF_HEAL_WARNING_PREFIX,
     UnsupportedParamRule,
     UpstreamParamSelfHealController,
-    extract_invalid_request_error_signal,
 )
 
 type LogFunc = Callable[[str], None]
@@ -766,13 +766,13 @@ class LiteLLMUpstreamAdapter:
                     completion_func=completion_func,
                 )
             except Exception as exc:  # noqa: BLE001
-                invalid_request_signal = extract_invalid_request_error_signal(exc)
-                if invalid_request_signal is None:
+                param_self_heal_signal = extract_param_self_heal_signal(exc)
+                if param_self_heal_signal is None:
                     raise
                 selection = self._param_self_heal.select_rule(
                     call_kwargs=current_call_kwargs,
-                    message=invalid_request_signal.message,
-                    param=invalid_request_signal.param,
+                    message=param_self_heal_signal.message,
+                    param=param_self_heal_signal.param,
                     skipped_rules=skipped_rules,
                 )
                 if selection is None:
@@ -795,14 +795,13 @@ class LiteLLMUpstreamAdapter:
                 )
                 self._log(
                     f"{TEMPORARY_SELF_HEAL_WARNING_PREFIX} "
-                    f"{route_log_context} "
-                    f"{retry_action}: "
-                    f"{selection.rule.label}"
+                    f"{route_log_context}"
                     + (
-                        f" | error={invalid_request_signal.message}"
-                        if invalid_request_signal.message
+                        f"\nerror={param_self_heal_signal.message}"
+                        if param_self_heal_signal.message
                         else ""
                     )
+                    + f"\n{retry_action}: {selection.rule.label}"
                 )
                 current_call_kwargs = next_call_kwargs
                 continue

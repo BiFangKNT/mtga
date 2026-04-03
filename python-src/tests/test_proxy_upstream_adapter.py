@@ -1027,9 +1027,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertIn(
             (
                 "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
-                "model=Qwen/Qwen3.5-27B 上游拒绝参数，自动剔除后重试: "
-                "extra_body.thinking.budget_tokens | error=Unsupported parameter: "
-                "'thinking.budget_tokens'"
+                "model=Qwen/Qwen3.5-27B\n"
+                "error=Unsupported parameter: 'thinking.budget_tokens'\n"
+                "上游拒绝参数，自动剔除后重试: extra_body.thinking.budget_tokens"
             ),
             logs,
         )
@@ -1123,9 +1123,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertIn(
             (
                 "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
-                "model=Qwen/Qwen3.5-27B 根据上游报错临时剔除参数后重试（本次不缓存）: "
-                "extra_body.thinking.type | error='type' must be in "
-                "[\"enabled\", \"disabled\", \"auto\"]"
+                "model=Qwen/Qwen3.5-27B\n"
+                "error='type' must be in [\"enabled\", \"disabled\", \"auto\"]\n"
+                "根据上游报错临时剔除参数后重试（本次不缓存）: extra_body.thinking.type"
             ),
             logs,
         )
@@ -1227,9 +1227,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertIn(
             (
                 "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
-                "model=gpt-5 根据上游报错临时剔除参数后重试（本次不缓存）: "
-                "temperature | error=Invalid value for 'temperature': "
-                "expected a number between 0 and 2"
+                "model=gpt-5\n"
+                "error=Invalid value for 'temperature': expected a number between 0 and 2\n"
+                "根据上游报错临时剔除参数后重试（本次不缓存）: temperature"
             ),
             logs,
         )
@@ -1315,9 +1315,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertIn(
             (
                 "⚠️ [临时兼容] provider=openai_chat_completion request_api=chat_completions "
-                "model=gpt-5 根据上游报错临时剔除参数后重试（本次不缓存）: "
-                "response_format.strict | error=Invalid value for "
-                "'response_format.strict': expected a boolean"
+                "model=gpt-5\n"
+                "error=Invalid value for 'response_format.strict': expected a boolean\n"
+                "根据上游报错临时剔除参数后重试（本次不缓存）: response_format.strict"
             ),
             logs,
         )
@@ -1659,6 +1659,154 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(
             call_kwargs["thinking"],
             {"type": "enabled", "budget_tokens": 1024},
+        )
+
+    def test_anthropic_retries_litellm_local_unsupported_param_and_caches(self) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=ANTHROPIC_PROVIDER,
+                target_api_base_url="https://anthropic-proxy.example.com",
+                target_model_id="glm-4.7-flash",
+            )
+        )
+        litellm_validation_error = Exception(
+            "anthropic does not support parameters: ['thinking'], for model=glm-4.7-flash. "
+            "To drop these, set `litellm.drop_params=True` or for proxy:\n\n"
+            "`litellm_settings:\n drop_params: true`\n.\n"
+            "If you want to use these params dynamically send "
+            "allowed_openai_params=['thinking'] in your request."
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["stream", "tools", "tool_choice"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                litellm_validation_error,
+                {"id": "chatcmpl_anthropic_retry", "choices": []},
+                {"id": "chatcmpl_anthropic_cached", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "thinking": {"type": "enabled", "budget_tokens": 1024},
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "thinking": {"type": "enabled", "budget_tokens": 1024},
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_anthropic_retry")
+        self.assertEqual(second_response["id"], "chatcmpl_anthropic_cached")
+        self.assertEqual(completion_mock.call_count, 3)
+        self.assertEqual(
+            completion_mock.call_args_list[0].kwargs["thinking"],
+            {"type": "enabled", "budget_tokens": 1024},
+        )
+        self.assertNotIn("thinking", completion_mock.call_args_list[1].kwargs)
+        self.assertNotIn("thinking", completion_mock.call_args_list[2].kwargs)
+        self.assertTrue(
+            any(
+                "error=anthropic does not support parameters: ['thinking'], "
+                "for model=glm-4.7-flash."
+                in log
+                and "\n上游拒绝参数，自动剔除后重试: thinking" in log
+                for log in logs
+            )
+        )
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=anthropic request_api=chat_completions "
+                "model=anthropic/glm-4.7-flash 命中上游不兼容参数缓存，已跳过: "
+                "thinking"
+            ),
+            logs,
+        )
+
+    def test_anthropic_retries_multiple_litellm_local_unsupported_params_and_caches(
+        self,
+    ) -> None:
+        logs: list[str] = []
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=logs.append,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=ANTHROPIC_PROVIDER,
+                target_api_base_url="https://anthropic-proxy.example.com",
+                target_model_id="glm-4.7-flash",
+            )
+        )
+        litellm_validation_error = Exception(
+            "anthropic does not support parameters: ['foo', 'bar'], for model=glm-4.7-flash. "
+            "To drop these, set `litellm.drop_params=True` or for proxy:\n\n"
+            "`litellm_settings:\n drop_params: true`\n.\n"
+            "If you want to use these params dynamically send "
+            "allowed_openai_params=['foo', 'bar'] in your request."
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            return_value=["stream", "tools", "tool_choice"],
+        ), patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            side_effect=[
+                litellm_validation_error,
+                litellm_validation_error,
+                {"id": "chatcmpl_anthropic_multi_retry", "choices": []},
+                {"id": "chatcmpl_anthropic_multi_cached", "choices": []},
+            ],
+        ) as completion_mock:
+            first_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "foo": 1,
+                    "bar": 2,
+                },
+            )
+            second_response = adapter.create_chat_completion(
+                route=route,
+                request_data={
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "foo": 1,
+                    "bar": 2,
+                },
+            )
+
+        self.assertEqual(first_response["id"], "chatcmpl_anthropic_multi_retry")
+        self.assertEqual(second_response["id"], "chatcmpl_anthropic_multi_cached")
+        self.assertEqual(completion_mock.call_count, 4)
+        self.assertEqual(
+            {key: completion_mock.call_args_list[0].kwargs[key] for key in ("foo", "bar")},
+            {"foo": 1, "bar": 2},
+        )
+        self.assertNotIn("foo", completion_mock.call_args_list[1].kwargs)
+        self.assertEqual(completion_mock.call_args_list[1].kwargs["bar"], 2)
+        self.assertNotIn("foo", completion_mock.call_args_list[2].kwargs)
+        self.assertNotIn("bar", completion_mock.call_args_list[2].kwargs)
+        self.assertNotIn("foo", completion_mock.call_args_list[3].kwargs)
+        self.assertNotIn("bar", completion_mock.call_args_list[3].kwargs)
+        self.assertIn(
+            (
+                "⚠️ [临时兼容] provider=anthropic request_api=chat_completions "
+                "model=anthropic/glm-4.7-flash 命中上游不兼容参数缓存，已跳过: "
+                "bar, foo"
+            ),
+            logs,
         )
 
     def test_anthropic_drops_unsupported_openai_params(self) -> None:
