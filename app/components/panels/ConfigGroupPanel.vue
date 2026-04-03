@@ -208,32 +208,6 @@ watch(
 const getDisplayName = (group: ConfigGroup, index: number) =>
   group.name?.trim() || `配置组 ${index + 1}`;
 
-/**
- * 获取 API Key 的显示文本
- * 规则：
- * 1. 长度 <= 12 位时，全部显示为星号
- * 2. 长度 > 12 位时，每超出一位显示一位明文，上限为 4 位明文
- * 3. 显示的总长度（星号+明文）与实际长度一致
- */
-const getApiKeyDisplay = (group: ConfigGroup) => {
-  const apiKey = group.api_key || "";
-  if (!apiKey) {
-    return "(无)";
-  }
-
-  const len = apiKey.length;
-  const threshold = 12;
-  const maxVisible = 4;
-
-  // 计算可见字符数：超出阈值的部分，且不超过上限
-  const visibleCount = Math.min(Math.max(0, len - threshold), maxVisible);
-
-  if (visibleCount > 0) {
-    return `${"*".repeat(len - visibleCount)}${apiKey.slice(-visibleCount)}`;
-  }
-  return "*".repeat(len);
-};
-
 const refreshList = async () => {
   if (refreshInProgress.value) {
     return;
@@ -580,10 +554,10 @@ const moveDown = async () => {
           <thead class="sticky top-0 z-10 bg-slate-50/70 backdrop-blur-md">
             <tr style="height: var(--head-h)">
               <th class="w-16 text-center border-b border-slate-200/60">序号</th>
-              <th class="min-w-[110px] border-b border-slate-200/60">提供商</th>
+              <th class="min-w-[60px] border-b border-slate-200/60">名称</th>
+              <th class="min-w-[100px] border-b border-slate-200/60">提供商</th>
               <th class="min-w-[140px] border-b border-slate-200/60">API URL</th>
               <th class="min-w-[120px] border-b border-slate-200/60">实际模型ID</th>
-              <th class="min-w-[160px] border-b border-slate-200/60">API Key</th>
             </tr>
           </thead>
           <tbody v-if="configGroups.length">
@@ -607,7 +581,13 @@ const moveDown = async () => {
                 {{ index + 1 }}
               </td>
               <td
-                class="truncate max-w-[120px] text-slate-700 transition-all"
+                class="truncate max-w-[128px] text-slate-700 transition-all"
+                :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
+              >
+                {{ getDisplayName(group, index) }}
+              </td>
+              <td
+                class="truncate max-w-[170px] text-slate-700 transition-all"
                 :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
               >
                 {{ getProviderLabel(group.provider) }}
@@ -623,12 +603,6 @@ const moveDown = async () => {
                 :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
               >
                 {{ group.model_id || "(未填写)" }}
-              </td>
-              <td
-                class="truncate max-w-[200px] text-slate-700 transition-all"
-                :class="selectedIndex === index ? 'border-amber-400' : 'border-transparent'"
-              >
-                {{ getApiKeyDisplay(group) }}
               </td>
             </tr>
           </tbody>
