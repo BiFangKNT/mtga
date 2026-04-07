@@ -10,7 +10,7 @@ from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
 
-from .common import build_result_payload, collect_logs
+from .common import build_result_payload, collect_logs, register_command
 
 
 class SystemPromptUpdatePayload(BaseModel):
@@ -33,14 +33,14 @@ def _get_prompt_store() -> SystemPromptStore:
 
 
 def register_system_prompt_commands(commands: Commands) -> None:
-    @commands.command()
+    @register_command(commands)
     async def system_prompts_list() -> dict[str, Any]:
         logs, _log = collect_logs()
         items = _get_prompt_store().list_items()
         result = OperationResult.success(items=items)
         return build_result_payload(result, logs, "系统提示词列表加载完成")
 
-    @commands.command()
+    @register_command(commands)
     async def system_prompts_update(body: SystemPromptUpdatePayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         hash_value = body.hash.strip()
@@ -52,7 +52,7 @@ def register_system_prompt_commands(commands: Commands) -> None:
             log_func(f"已更新系统提示词增量 hash={hash_value[:12]}")
         return build_result_payload(result, logs, "系统提示词更新完成")
 
-    @commands.command()
+    @register_command(commands)
     async def system_prompts_delete(body: SystemPromptDeletePayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         result = _get_prompt_store().delete_items(body.hashes)

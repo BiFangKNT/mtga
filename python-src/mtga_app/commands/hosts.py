@@ -13,7 +13,7 @@ from modules.services.hosts_service import (
     restore_hosts_file_result,
 )
 
-from .common import build_result_payload, collect_logs
+from .common import build_result_payload, collect_logs, register_command
 
 
 class HostsModifyPayload(BaseModel):
@@ -23,7 +23,7 @@ class HostsModifyPayload(BaseModel):
 
 
 def register_hosts_commands(commands: Commands) -> None:
-    @commands.command()
+    @register_command(commands)
     async def hosts_modify(body: HostsModifyPayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         domain_value = body.domain or "api.openai.com"
@@ -60,7 +60,7 @@ def register_hosts_commands(commands: Commands) -> None:
             "logs": logs,
         }
 
-    @commands.command()
+    @register_command(commands)
     async def hosts_open() -> dict[str, Any]:
         logs, log_func = collect_logs()
         result = open_hosts_file_result(log_func=log_func)

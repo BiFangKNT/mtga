@@ -1,36 +1,60 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, cast
 
 from pytauri import Commands
 
-from modules.hosts import hosts_state
 from modules.runtime.operation_result import OperationResult
-from modules.runtime.resource_manager import (
-    ResourceManager,
-    get_legacy_user_data_dir,
-    get_packaging_runtime,
-    has_legacy_user_data_dir,
-)
-from modules.services import environment_service, startup_context
 
 from .common import build_result_payload, collect_logs
+
+if TYPE_CHECKING:
+    from modules.runtime.resource_manager import ResourceManager
+    from modules.services.startup_context import StartupContext
+
+
+@lru_cache(maxsize=1)
+def _get_hosts_state_module() -> Any:
+    return import_module("modules.hosts.hosts_state")
+
+
+@lru_cache(maxsize=1)
+def _get_environment_service_module() -> Any:
+    return import_module("modules.services.environment_service")
+
+
+@lru_cache(maxsize=1)
+def _get_resource_manager_module() -> Any:
+    return import_module("modules.runtime.resource_manager")
+
+
+@lru_cache(maxsize=1)
+def _get_startup_context_module() -> Any:
+    return import_module("modules.services.startup_context")
 
 
 @lru_cache(maxsize=1)
 def _get_resource_manager() -> ResourceManager:
-    return ResourceManager()
+    resource_manager_cls = _get_resource_manager_module().ResourceManager
+    return resource_manager_cls()
 
 
 @lru_cache(maxsize=1)
-def _get_startup_context() -> startup_context.StartupContext:
-    return startup_context.build_startup_context()
+def _get_startup_context() -> StartupContext:
+    build_startup_context = _get_startup_context_module().build_startup_context
+    return build_startup_context()
 
 
 def _check_environment() -> tuple[bool, str]:
     resource_manager = _get_resource_manager()
-    return environment_service.check_environment(
+    check_environment = cast(
+        Callable[..., tuple[bool, str]],
+        _get_environment_service_module().check_environment,
+    )
+    return check_environment(
         check_resources=resource_manager.check_resources,
     )
 
@@ -38,11 +62,30 @@ def _check_environment() -> tuple[bool, str]:
 def register_startup_commands(commands: Commands) -> None:
     @commands.command()
     async def startup_status() -> dict[str, Any]:
+        hosts_state_module = _get_hosts_state_module()
+        resource_manager_module = _get_resource_manager_module()
         logs, _log_func = collect_logs()
         context = _get_startup_context()
         env_ok, env_message = _check_environment()
+        get_packaging_runtime = cast(
+            Callable[[], str],
+            resource_manager_module.get_packaging_runtime,
+        )
+        get_legacy_user_data_dir = cast(
+            Callable[[], str],
+            resource_manager_module.get_legacy_user_data_dir,
+        )
+        has_legacy_user_data_dir = cast(
+            Callable[[], bool],
+            resource_manager_module.has_legacy_user_data_dir,
+        )
+        get_hosts_modify_block_state = hosts_state_module.get_hosts_modify_block_state
+        allow_unsafe_hosts_flag = cast(
+            str,
+            hosts_state_module.ALLOW_UNSAFE_HOSTS_FLAG,
+        )
         runtime = get_packaging_runtime()
-        block_state = hosts_state.get_hosts_modify_block_state()
+        block_state = get_hosts_modify_block_state()
         hosts_preflight_report = context.hosts_preflight_report
         hosts_preflight_ok = None
         hosts_preflight_status = None
@@ -72,7 +115,7 @@ def register_startup_commands(commands: Commands) -> None:
             runtime=runtime,
             legacy_user_data_dir_detected=has_legacy_user_data_dir(),
             legacy_user_data_dir=get_legacy_user_data_dir(),
-            allow_unsafe_hosts_flag=hosts_state.ALLOW_UNSAFE_HOSTS_FLAG,
+            allow_unsafe_hosts_flag=allow_unsafe_hosts_flag,
             hosts_modify_blocked=block_state.blocked,
             hosts_modify_block_status=block_status,
             hosts_preflight_ok=hosts_preflight_ok,

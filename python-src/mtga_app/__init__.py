@@ -6,13 +6,14 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from contextlib import suppress
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from threading import Lock, Thread
 from types import TracebackType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from platformdirs import user_data_dir
 
@@ -148,37 +149,16 @@ REPO_ROOT = TAURI_PROJECT_ROOT
 from anyio.from_thread import start_blocking_portal
 from pydantic import BaseModel
 from pytauri import AppHandle, Commands, Emitter
-from pytauri_wheel.lib import builder_factory, context_factory
 
-from modules.runtime.log_bus import pull_logs
-from modules.runtime.proxy_step_bus import pull_steps
-from modules.runtime.resource_manager import ResourceManager
-from modules.services.app_metadata import DEFAULT_METADATA
-from modules.services.app_version import resolve_app_version
-from modules.services.config_service import ConfigStore
+from .commands import register_eager_command_groups, register_lazy_command_groups
 
-from .commands import (
-    register_cert_commands,
-    register_hosts_commands,
-    register_log_commands,
-    register_model_test_commands,
-    register_proxy_commands,
-    register_startup_commands,
-    register_system_prompt_commands,
-    register_update_commands,
-    register_user_data_commands,
-)
+if TYPE_CHECKING:
+    from modules.runtime.resource_manager import ResourceManager
+    from modules.services.config_service import ConfigStore
 
 command_registry = Commands()
-register_cert_commands(command_registry)
-register_hosts_commands(command_registry)
-register_log_commands(command_registry)
-register_model_test_commands(command_registry)
-register_proxy_commands(command_registry)
-register_startup_commands(command_registry)
-register_system_prompt_commands(command_registry)
-register_update_commands(command_registry)
-register_user_data_commands(command_registry)
+register_eager_command_groups(command_registry)
+register_lazy_command_groups(command_registry)
 
 _invoke_state: dict[str, Any] = {
     "portal": None,
@@ -213,6 +193,16 @@ class LogEventPayload(BaseModel):
     next_id: int
 
 
+class LazyWarmupEventPayload(BaseModel):
+    phase: Literal["start", "progress", "done", "error"]
+    stage: str | None = None
+    label: str | None = None
+    detail: str | None = None
+    completed: int
+    total: int
+    error_message: str | None = None
+
+
 class SaveConfigPayload(BaseModel):
     config_groups: list[dict[str, Any]]
     current_config_index: int
@@ -222,13 +212,15 @@ class SaveConfigPayload(BaseModel):
 
 @lru_cache(maxsize=1)
 def _get_resource_manager() -> ResourceManager:
-    return ResourceManager()
+    resource_manager_cls = import_module("modules.runtime.resource_manager").ResourceManager
+    return resource_manager_cls()
 
 
 @lru_cache(maxsize=1)
 def _get_config_store() -> ConfigStore:
+    config_store_cls = import_module("modules.services.config_service").ConfigStore
     resource_manager = _get_resource_manager()
-    return ConfigStore(resource_manager.get_user_config_file())
+    return config_store_cls(resource_manager.get_user_config_file())
 
 
 @command_registry.command()
@@ -264,7 +256,10 @@ async def save_config(body: SaveConfigPayload) -> bool:
 
 @command_registry.command()
 async def get_app_info() -> dict[str, Any]:
-    metadata = DEFAULT_METADATA
+    metadata_module = import_module("modules.services.app_metadata")
+    version_module = import_module("modules.services.app_version")
+    metadata = metadata_module.DEFAULT_METADATA
+    resolve_app_version = version_module.resolve_app_version
     version = resolve_app_version(project_root=REPO_ROOT)
     resource_manager = _get_resource_manager()
     default_user_data_dir = user_data_dir(
@@ -283,8 +278,28 @@ async def get_app_info() -> dict[str, Any]:
     }
 
 
+@command_registry.command("start_lazy_warmup")
+async def start_lazy_warmup_command() -> bool:
+    start_lazy_warmup = import_module("mtga_app.lazy_warmup").start_lazy_warmup
+    result = start_lazy_warmup(
+        command_registry,
+        log_func=_boot_log,
+    )
+    return result in {"started", "running", "completed"}
+
+
+@command_registry.command("get_lazy_warmup_status")
+async def get_lazy_warmup_status_command() -> dict[str, Any] | None:
+    get_lazy_warmup_status = cast(
+        Callable[[], dict[str, Any] | None],
+        import_module("mtga_app.lazy_warmup").get_lazy_warmup_status,
+    )
+    return get_lazy_warmup_status()
+
+
 def _start_log_event_stream(app_handle: AppHandle) -> None:
     def run() -> None:
+        pull_logs = import_module("modules.runtime.log_bus").pull_logs
         after_id: int | None = None
         while True:
             try:
@@ -319,6 +334,7 @@ def _start_log_event_stream(app_handle: AppHandle) -> None:
 
 def _start_proxy_step_event_stream(app_handle: AppHandle) -> None:
     def run() -> None:
+        pull_steps = import_module("modules.runtime.proxy_step_bus").pull_steps
         after_id: int | None = None
         while True:
             try:
@@ -348,7 +364,44 @@ def _start_proxy_step_event_stream(app_handle: AppHandle) -> None:
     Thread(target=run, name="mtga-proxy-step-stream", daemon=True).start()
 
 
+def _start_lazy_warmup_event_stream(app_handle: AppHandle) -> None:
+    def run() -> None:
+        pull_events = import_module("modules.runtime.lazy_warmup_bus").pull_events
+        after_id: int | None = None
+        while True:
+            try:
+                result = pull_events(
+                    after_id=after_id,
+                    timeout_ms=1000,
+                    max_items=100,
+                )
+            except Exception as exc:
+                _boot_log(f"lazy warmup pull failed: {exc}")
+                time.sleep(0.2)
+                continue
+
+            items = result.get("items")
+            next_id = result.get("next_id")
+            if isinstance(next_id, int):
+                after_id = next_id
+            if isinstance(items, list) and items:
+                safe_items = cast(list[object], items)
+                for item in safe_items:
+                    try:
+                        payload = LazyWarmupEventPayload.model_validate_json(str(item))
+                        Emitter.emit(app_handle, "mtga:lazy-warmup", payload)
+                    except Exception as exc:
+                        _boot_log(f"lazy warmup emit failed: {exc}")
+                        time.sleep(0.2)
+
+    Thread(target=run, name="mtga-lazy-warmup-stream", daemon=True).start()
+
+
 def main() -> int:
+    pytauri_wheel_lib = import_module("pytauri_wheel.lib")
+    builder_factory = pytauri_wheel_lib.builder_factory
+    context_factory = pytauri_wheel_lib.context_factory
+
     # 开发期：让 Tauri 加载 Nuxt dev server
     dev_server = os.environ.get("DEV_SERVER")
     src_tauri_dir = os.environ.get("MTGA_SRC_TAURI_DIR")
@@ -387,8 +440,7 @@ def main() -> int:
         tauri_config = base_config
 
     with start_blocking_portal("asyncio") as portal:
-        context_factory_any = cast(Any, context_factory)
-        context = context_factory_any(
+        context = context_factory(
             # ✅ v2：context 根通常用 src-tauri 目录
             src_tauri_path,
             tauri_config=tauri_config,
@@ -399,4 +451,5 @@ def main() -> int:
         )
         _start_log_event_stream(app.handle())
         _start_proxy_step_event_stream(app.handle())
+        _start_lazy_warmup_event_stream(app.handle())
         return app.run_return()

@@ -1,7 +1,13 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { pyInvoke } from "tauri-plugin-pytauri-api";
 
-import type { AppInfo, ConfigPayload, InvokeResult, LogPullResult } from "./mtgaTypes";
+import type {
+  AppInfo,
+  ConfigPayload,
+  InvokeResult,
+  LazyWarmupEventPayload,
+  LogPullResult,
+} from "./mtgaTypes";
 
 type InvokePayload = Record<string, unknown>;
 
@@ -33,6 +39,8 @@ export const useMtgaApi = () => {
   const saveConfig = (payload: ConfigPayload) => safeInvoke<boolean>("save_config", payload, false);
   const getAppInfo = () => safeInvoke<AppInfo>("get_app_info");
   const getStartupStatus = () => safeInvoke<InvokeResult>("startup_status");
+  const startLazyWarmup = () => safeInvoke<boolean>("start_lazy_warmup", undefined, false);
+  const getLazyWarmupStatus = () => safeInvoke<LazyWarmupEventPayload>("get_lazy_warmup_status");
   const hostsModify = (payload: {
     mode: "add" | "backup" | "restore" | "remove";
     domain?: string;
@@ -123,6 +131,8 @@ export const useMtgaApi = () => {
     saveConfig,
     getAppInfo,
     getStartupStatus,
+    startLazyWarmup,
+    getLazyWarmupStatus,
     hostsModify,
     hostsOpen,
     generateCertificates,

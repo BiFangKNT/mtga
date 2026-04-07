@@ -12,7 +12,7 @@ from modules.services.cert_service import (
     install_ca_cert_result,
 )
 
-from .common import build_result_payload, collect_logs
+from .common import build_result_payload, collect_logs, register_command
 
 
 class ClearCaCertPayload(BaseModel):
@@ -20,7 +20,7 @@ class ClearCaCertPayload(BaseModel):
 
 
 def register_cert_commands(commands: Commands) -> None:
-    @commands.command()
+    @register_command(commands)
     async def generate_certificates() -> dict[str, Any]:
         logs, log_func = collect_logs()
         result = generate_certificates_result(
@@ -29,13 +29,13 @@ def register_cert_commands(commands: Commands) -> None:
         )
         return build_result_payload(result, logs, "证书生成完成")
 
-    @commands.command()
+    @register_command(commands)
     async def install_ca_cert() -> dict[str, Any]:
         logs, log_func = collect_logs()
         result = install_ca_cert_result(log_func=log_func)
         return build_result_payload(result, logs, "CA 证书安装完成")
 
-    @commands.command()
+    @register_command(commands)
     async def clear_ca_cert(body: ClearCaCertPayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         result = clear_ca_cert_result(

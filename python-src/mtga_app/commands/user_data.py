@@ -18,7 +18,7 @@ from modules.services.user_data_service import (
     restore_latest_backup_result,
 )
 
-from .common import build_result_payload, collect_logs
+from .common import build_result_payload, collect_logs, register_command
 
 type LogFunc = Callable[[str], None]
 
@@ -44,14 +44,14 @@ def _open_directory(path: str, *, log_func: LogFunc) -> OperationResult:
 
 
 def register_user_data_commands(commands: Commands) -> None:
-    @commands.command()
+    @register_command(commands)
     async def user_data_open_dir() -> dict[str, Any]:
         logs, log_func = collect_logs()
         user_dir = _get_resource_manager().user_data_dir
         result = _open_directory(user_dir, log_func=log_func)
         return build_result_payload(result, logs, "打开用户数据目录完成")
 
-    @commands.command()
+    @register_command(commands)
     async def user_data_backup() -> dict[str, Any]:
         logs, _ = collect_logs()
         user_dir = _get_resource_manager().user_data_dir
@@ -61,14 +61,14 @@ def register_user_data_commands(commands: Commands) -> None:
         )
         return build_result_payload(result, logs, "用户数据备份完成")
 
-    @commands.command()
+    @register_command(commands)
     async def user_data_restore_latest() -> dict[str, Any]:
         logs, _ = collect_logs()
         user_dir = _get_resource_manager().user_data_dir
         result = restore_latest_backup_result(user_dir)
         return build_result_payload(result, logs, "用户数据还原完成")
 
-    @commands.command()
+    @register_command(commands)
     async def user_data_clear() -> dict[str, Any]:
         logs, _ = collect_logs()
         user_dir = _get_resource_manager().user_data_dir

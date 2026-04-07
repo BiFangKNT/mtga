@@ -17,7 +17,7 @@ from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.config_service import ConfigStore
 
-from .common import build_result_payload, collect_logs
+from .common import build_result_payload, collect_logs, register_command
 
 
 class InlineThreadManager:
@@ -144,7 +144,7 @@ def _persist_model_discovery_strategy_for_matching_group(
 
 
 def register_model_test_commands(commands: Commands) -> None:
-    @commands.command()
+    @register_command(commands)
     async def config_group_test(body: ConfigGroupTestPayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         config_store = _get_config_store()
@@ -190,7 +190,7 @@ def register_model_test_commands(commands: Commands) -> None:
         result = OperationResult.success()
         return build_result_payload(result, logs, "配置组测活完成")
 
-    @commands.command()
+    @register_command(commands)
     async def config_group_models(body: ConfigGroupModelListPayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         config_store = _get_config_store()

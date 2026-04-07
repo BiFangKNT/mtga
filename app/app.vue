@@ -17,6 +17,7 @@ const {
   openUpdateRelease,
   stopLogStream,
   stopProxyStepListener,
+  stopLazyWarmupListener,
   panelNavTarget,
   panelNavSignal,
 } = useMtgaStore();
@@ -149,6 +150,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopLogStream();
   stopProxyStepListener();
+  stopLazyWarmupListener();
 });
 </script>
 
@@ -260,6 +262,8 @@ onBeforeUnmount(() => {
       @close="closeUpdateDialog"
       @open-release="openUpdateRelease"
     />
+
+    <WarmupHud />
 
     <!-- 全局 Tooltip 代理，用于逃逸容器剪裁 -->
     <div
