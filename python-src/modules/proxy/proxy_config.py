@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -36,6 +37,8 @@ SUPPORTED_PROVIDER_IDS = (
     ANTHROPIC_PROVIDER,
     GEMINI_PROVIDER,
 )
+PROMPT_CACHE_BUCKET_ID_KEY = "prompt_cache_bucket_id"
+PROMPT_CACHE_BUCKET_ID_LENGTH = 16
 type LogFunc = Callable[[str], None]
 
 
@@ -52,19 +55,102 @@ class ProxyConfig:
     api_key: str
     mtga_auth_key: str
     model_discovery_strategy: str | None = None
+    prompt_cache_bucket_id: str = ""
+
+
+@dataclass(frozen=True)
+class GlobalConfigLoadResult:
+    global_config: dict[str, Any]
+    load_failed: bool
+
+
+def _load_global_config_result(
+    *, resource_manager: ResourceManager, log_func: LogFunc = print
+) -> GlobalConfigLoadResult:
+    config_file = resource_manager.get_user_config_file()
+    if not os.path.exists(config_file):
+        return GlobalConfigLoadResult(global_config={}, load_failed=False)
+
+    try:
+        with open(config_file, encoding="utf-8") as f:
+            loaded: Any = yaml.safe_load(f)
+    except Exception as exc:
+        log_func(f"加载全局配置失败: {exc}")
+        return GlobalConfigLoadResult(global_config={}, load_failed=True)
+
+    if loaded is None:
+        return GlobalConfigLoadResult(global_config={}, load_failed=False)
+    if isinstance(loaded, dict):
+        return GlobalConfigLoadResult(
+            global_config=cast(dict[str, Any], loaded),
+            load_failed=False,
+        )
+
+    log_func("加载全局配置失败: 配置根节点必须是对象")
+    return GlobalConfigLoadResult(global_config={}, load_failed=True)
 
 
 def load_global_config(
     *, resource_manager: ResourceManager, log_func: LogFunc = print
 ) -> dict[str, Any]:
+    return _load_global_config_result(
+        resource_manager=resource_manager,
+        log_func=log_func,
+    ).global_config
+
+
+def _generate_prompt_cache_bucket_id() -> str:
+    return secrets.token_hex(PROMPT_CACHE_BUCKET_ID_LENGTH // 2)
+
+
+def _persist_global_config(
+    *,
+    resource_manager: ResourceManager,
+    global_config: dict[str, Any],
+    log_func: LogFunc = print,
+) -> None:
+    config_file = resource_manager.get_user_config_file()
     try:
-        config_file = resource_manager.get_user_config_file()
-        if os.path.exists(config_file):
-            with open(config_file, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        with open(config_file, "w", encoding="utf-8") as f:
+            yaml.dump(
+                global_config,
+                f,
+                default_flow_style=False,
+                allow_unicode=True,
+                indent=2,
+                sort_keys=False,
+            )
     except Exception as exc:
-        log_func(f"加载全局配置失败: {exc}")
-    return {}
+        log_func(f"写入全局配置失败: {exc}")
+
+
+def _resolve_prompt_cache_bucket_id(
+    *,
+    global_config: dict[str, Any],
+    resource_manager: ResourceManager,
+    log_func: LogFunc = print,
+    allow_persist: bool = True,
+) -> str:
+    bucket_id_obj = global_config.get(PROMPT_CACHE_BUCKET_ID_KEY)
+    if isinstance(bucket_id_obj, str):
+        bucket_id = bucket_id_obj.strip().lower()
+        if bucket_id:
+            return bucket_id
+
+    if not allow_persist:
+        log_func("全局配置读取失败，跳过 prompt cache bucket id 自动持久化")
+        return ""
+
+    bucket_id = _generate_prompt_cache_bucket_id()
+    next_global_config = dict(global_config)
+    next_global_config[PROMPT_CACHE_BUCKET_ID_KEY] = bucket_id
+    _persist_global_config(
+        resource_manager=resource_manager,
+        global_config=next_global_config,
+        log_func=log_func,
+    )
+    return bucket_id
 
 
 def _resolve_custom_model_id(*, global_config: dict[str, Any]) -> str:
@@ -126,7 +212,11 @@ def build_proxy_config(
     log_func: LogFunc = print,
 ) -> ProxyConfig | None:
     raw_config = raw_config or {}
-    global_config = load_global_config(resource_manager=resource_manager, log_func=log_func)
+    global_config_result = _load_global_config_result(
+        resource_manager=resource_manager,
+        log_func=log_func,
+    )
+    global_config = global_config_result.global_config
 
     target_api_base_url = raw_config.get("api_url", PLACEHOLDER_API_URL)
     if target_api_base_url == PLACEHOLDER_API_URL:
@@ -146,6 +236,12 @@ def build_proxy_config(
         if isinstance(raw_config.get("model_discovery_strategy"), str)
         else None
     )
+    prompt_cache_bucket_id = _resolve_prompt_cache_bucket_id(
+        global_config=global_config,
+        resource_manager=resource_manager,
+        log_func=log_func,
+        allow_persist=not global_config_result.load_failed,
+    )
     middle_route = normalize_middle_route(
         raw_config.get("middle_route"),
         provider=provider,
@@ -163,6 +259,7 @@ def build_proxy_config(
         api_key=(raw_config.get("api_key") or ""),
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
         model_discovery_strategy=model_discovery_strategy,
+        prompt_cache_bucket_id=prompt_cache_bucket_id,
     )
 
 

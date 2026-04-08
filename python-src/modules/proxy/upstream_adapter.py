@@ -95,6 +95,7 @@ class UpstreamRoute:
     middle_route_ignored: bool
     litellm_base_url: str = ""
     model_discovery_strategy: str | None = None
+    prompt_cache_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -391,6 +392,7 @@ def build_upstream_route(
         middle_route_ignored=False,
         litellm_base_url=litellm_base_url,
         model_discovery_strategy=proxy_config.model_discovery_strategy,
+        prompt_cache_key=_build_prompt_cache_key(proxy_config.prompt_cache_bucket_id),
     )
 
 
@@ -431,6 +433,13 @@ def _build_openai_compatible_middle_route(
 def _build_chat_base_url(*, target_api_base_url: str, middle_route: str) -> str:
     base_url = target_api_base_url.rstrip("/")
     return f"{base_url}{middle_route}"
+
+
+def _build_prompt_cache_key(prompt_cache_bucket_id: str) -> str:
+    normalized_bucket_id = prompt_cache_bucket_id.strip().lower()
+    if not normalized_bucket_id:
+        return ""
+    return f"mtga:pc:v1:b:{normalized_bucket_id}"
 
 
 def _build_litellm_base_url(
@@ -962,6 +971,8 @@ class LiteLLMUpstreamAdapter:
             self._disable_ssl_strict_mode
         )
         call_kwargs = self._merge_provider_extra_headers(route, call_kwargs)
+        if route.provider in OPENAI_PROVIDER_IDS and route.prompt_cache_key:
+            call_kwargs.setdefault("prompt_cache_key", route.prompt_cache_key)
         # 关闭 LiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
         call_kwargs["max_retries"] = 0
         call_kwargs["num_retries"] = 0
