@@ -1,7 +1,9 @@
 <script setup lang="ts">
+type ProxyAction = "start" | "stop" | "check";
+
 const store = useMtgaStore();
 const options = store.runtimeOptions;
-const runningAction = ref<"start" | "stop" | "check" | null>(null);
+const { runningAction, runAction } = usePendingAction<ProxyAction>();
 
 const debugModeTooltip = [
   "开启后：",
@@ -10,18 +12,6 @@ const debugModeTooltip = [
   "并提示其可能绕过 hosts 导流。",
   "（默认不做第 2 项检查，仅在调试模式下启用）",
 ].join("\n");
-
-const runAction = async (action: "start" | "stop" | "check", runner: () => Promise<boolean>) => {
-  if (runningAction.value) {
-    return;
-  }
-  runningAction.value = action;
-  try {
-    await runner();
-  } finally {
-    runningAction.value = null;
-  }
-};
 
 const handleStart = async () => {
   await runAction("start", () => store.runProxyStart());
@@ -81,30 +71,30 @@ const handleCheck = async () => {
       <div class="text-xs text-slate-500">启动 / 停止 / 网络检查</div>
     </div>
     <div class="space-y-2">
-      <button
+      <MtgaLoadingButton
         class="mtga-btn-primary"
-        :class="runningAction === 'start' ? 'loading' : ''"
+        :loading="runningAction === 'start'"
         :disabled="Boolean(runningAction)"
         @click="handleStart"
       >
         启动代理服务器
-      </button>
-      <button
+      </MtgaLoadingButton>
+      <MtgaLoadingButton
         class="mtga-btn-error"
-        :class="runningAction === 'stop' ? 'loading' : ''"
+        :loading="runningAction === 'stop'"
         :disabled="Boolean(runningAction)"
         @click="handleStop"
       >
         停止代理服务器
-      </button>
-      <button
+      </MtgaLoadingButton>
+      <MtgaLoadingButton
         class="mtga-btn-outline"
-        :class="runningAction === 'check' ? 'loading' : ''"
+        :loading="runningAction === 'check'"
         :disabled="Boolean(runningAction)"
         @click="handleCheck"
       >
         检查网络环境
-      </button>
+      </MtgaLoadingButton>
     </div>
   </div>
 </template>

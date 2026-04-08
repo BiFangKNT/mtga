@@ -1,20 +1,23 @@
 <script setup lang="ts">
+type HostsAction = "modify" | "backup" | "restore" | "open";
+
 const store = useMtgaStore();
+const { runningAction, runAction } = usePendingAction<HostsAction>();
 
-const handleModify = () => {
-  store.runHostsModify("add");
+const handleModify = async () => {
+  await runAction("modify", () => store.runHostsModify("add"));
 };
 
-const handleBackup = () => {
-  store.runHostsModify("backup");
+const handleBackup = async () => {
+  await runAction("backup", () => store.runHostsModify("backup"));
 };
 
-const handleRestore = () => {
-  store.runHostsModify("restore");
+const handleRestore = async () => {
+  await runAction("restore", () => store.runHostsModify("restore"));
 };
 
-const handleOpen = () => {
-  store.runHostsOpen();
+const handleOpen = async () => {
+  await runAction("open", () => store.runHostsOpen());
 };
 </script>
 
@@ -25,12 +28,40 @@ const handleOpen = () => {
       <div class="text-xs text-slate-500">快速修改与备份恢复</div>
     </div>
     <div class="space-y-2">
-      <button class="mtga-btn-primary" @click="handleModify">修改hosts文件</button>
+      <MtgaLoadingButton
+        class="mtga-btn-primary"
+        :loading="runningAction === 'modify'"
+        :disabled="Boolean(runningAction)"
+        @click="handleModify"
+      >
+        修改hosts文件
+      </MtgaLoadingButton>
       <div class="grid grid-cols-2 gap-2">
-        <button class="mtga-btn-outline" @click="handleBackup">备份hosts</button>
-        <button class="mtga-btn-outline" @click="handleRestore">还原hosts</button>
+        <MtgaLoadingButton
+          class="mtga-btn-outline"
+          :loading="runningAction === 'backup'"
+          :disabled="Boolean(runningAction)"
+          @click="handleBackup"
+        >
+          备份hosts
+        </MtgaLoadingButton>
+        <MtgaLoadingButton
+          class="mtga-btn-outline"
+          :loading="runningAction === 'restore'"
+          :disabled="Boolean(runningAction)"
+          @click="handleRestore"
+        >
+          还原hosts
+        </MtgaLoadingButton>
       </div>
-      <button class="mtga-btn-outline" @click="handleOpen">打开hosts文件</button>
+      <MtgaLoadingButton
+        class="mtga-btn-outline"
+        :loading="runningAction === 'open'"
+        :disabled="Boolean(runningAction)"
+        @click="handleOpen"
+      >
+        打开hosts文件
+      </MtgaLoadingButton>
     </div>
   </div>
 </template>

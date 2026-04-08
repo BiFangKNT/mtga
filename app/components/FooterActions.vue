@@ -21,13 +21,12 @@ const handleStartAll = async () => {
       <div class="text-sm font-semibold text-slate-900">快速操作</div>
       <div class="text-xs text-slate-500">一键启动会依次检查网络、证书与 hosts 配置</div>
     </div>
-    <button
+    <MtgaLoadingButton
       class="btn btn-primary px-8 rounded-xl shadow-[0_12px_25px_-10px_rgba(240,187,50,0.6)]"
-      :disabled="startAllPending"
+      :loading="startAllPending"
       @click="handleStartAll"
     >
-      <span v-if="startAllPending" class="loading loading-spinner loading-sm" aria-hidden="true" />
       一键启动全部服务
-    </button>
+    </MtgaLoadingButton>
   </div>
 </template>

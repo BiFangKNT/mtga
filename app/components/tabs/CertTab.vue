@@ -1,6 +1,9 @@
 <script setup lang="ts">
+type CertAction = "generate" | "install" | "clear";
+
 const store = useMtgaStore();
 const appInfo = store.appInfo;
+const { runningAction, runAction } = usePendingAction<CertAction>();
 
 const isConfirmOpen = ref(false);
 const inputCommonName = ref("");
@@ -16,12 +19,12 @@ const clearCaTooltip = computed(() => {
   ].join("\n");
 });
 
-const handleGenerate = () => {
-  store.runGenerateCertificates();
+const handleGenerate = async () => {
+  await runAction("generate", () => store.runGenerateCertificates());
 };
 
-const handleInstall = () => {
-  store.runInstallCaCert();
+const handleInstall = async () => {
+  await runAction("install", () => store.runInstallCaCert());
 };
 
 /**
@@ -36,13 +39,13 @@ const handleClear = () => {
 /**
  * 用户确认后的实际清除操作
  */
-const confirmClear = () => {
+const confirmClear = async () => {
   if (!inputCommonName.value.trim()) {
     showInputError.value = true;
     return;
   }
   isConfirmOpen.value = false;
-  store.runClearCaCert(inputCommonName.value);
+  await runAction("clear", () => store.runClearCaCert(inputCommonName.value));
 };
 
 watch(inputCommonName, (val) => {
@@ -59,17 +62,33 @@ watch(inputCommonName, (val) => {
       <div class="text-xs text-slate-500">生成、安装与清理本地证书</div>
     </div>
     <div class="space-y-2">
-      <button class="mtga-btn-primary" @click="handleGenerate">生成CA和服务器证书</button>
+      <MtgaLoadingButton
+        class="mtga-btn-primary"
+        :loading="runningAction === 'generate'"
+        :disabled="Boolean(runningAction)"
+        @click="handleGenerate"
+      >
+        生成CA和服务器证书
+      </MtgaLoadingButton>
       <div class="grid grid-cols-2 gap-2">
-        <button class="mtga-btn-primary" @click="handleInstall">安装CA证书</button>
-        <button
+        <MtgaLoadingButton
+          class="mtga-btn-primary"
+          :loading="runningAction === 'install'"
+          :disabled="Boolean(runningAction)"
+          @click="handleInstall"
+        >
+          安装CA证书
+        </MtgaLoadingButton>
+        <MtgaLoadingButton
           class="mtga-btn-error tooltip mtga-tooltip"
           :data-tip="clearCaTooltip"
+          :loading="runningAction === 'clear'"
+          :disabled="Boolean(runningAction)"
           style="--mtga-tooltip-max: 280px"
           @click="handleClear"
         >
           清除系统CA证书
-        </button>
+        </MtgaLoadingButton>
       </div>
     </div>
   </div>
