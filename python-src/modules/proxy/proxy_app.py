@@ -797,9 +797,6 @@ class ProxyApp:
                                 normalized_chunk if normalized_chunk is not None else chunk
                             )
                             event_index += 1
-                            if debug_mode:
-                                payload_preview = transport.dump_payload_json(event_payload)
-                                log(f"UP<< evt#{event_index} | {payload_preview}")
 
                             normalized_bytes, _finish_reason = transport.normalize_openai_event(
                                 event_payload,
