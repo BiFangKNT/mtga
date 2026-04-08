@@ -31,6 +31,7 @@ CONFIG_GROUP_ALLOWED_KEYS = frozenset(
         "api_key",
         "middle_route",
         "model_discovery_strategy",
+        "prompt_cache_enabled",
     }
 )
 
@@ -53,6 +54,18 @@ def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
     normalized["model_discovery_strategy"] = normalize_model_discovery_strategy(
         strategy if isinstance(strategy, str) else None
     )
+    prompt_cache_enabled = normalized.get("prompt_cache_enabled")
+    if isinstance(prompt_cache_enabled, str):
+        normalized["prompt_cache_enabled"] = prompt_cache_enabled.strip().lower() not in {
+            "false",
+            "0",
+            "off",
+            "no",
+        }
+    elif isinstance(prompt_cache_enabled, bool):
+        normalized["prompt_cache_enabled"] = prompt_cache_enabled
+    else:
+        normalized["prompt_cache_enabled"] = False
     return normalized
 
 

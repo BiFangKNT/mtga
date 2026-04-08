@@ -88,6 +88,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
             litellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="",
+            prompt_cache_enabled=True,
             middle_route_applied=True,
             middle_route_ignored=False,
         )
@@ -208,6 +209,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
             litellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="upstream-key",
+            prompt_cache_enabled=True,
             middle_route_applied=True,
             middle_route_ignored=False,
         )
@@ -294,6 +296,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
             litellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="upstream-key",
+            prompt_cache_enabled=True,
             middle_route_applied=True,
             middle_route_ignored=False,
         )
@@ -400,6 +403,7 @@ class ProxyAppOpenAIResponseTests(unittest.TestCase):
             litellm_model="gpt-5.2-codex",
             base_url="https://responses.example.com/v1",
             api_key="upstream-key",
+            prompt_cache_enabled=True,
             middle_route_applied=True,
             middle_route_ignored=False,
         )

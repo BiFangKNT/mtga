@@ -40,6 +40,7 @@ class ConfigGroupNormalizationTests(unittest.TestCase):
                 "api_key": "test-key",
                 "middle_route": "/v1beta",
                 "model_discovery_strategy": "gemini_native_bearer",
+                "prompt_cache_enabled": False,
             }
         )
 
@@ -53,8 +54,23 @@ class ConfigGroupNormalizationTests(unittest.TestCase):
                 "api_key": "test-key",
                 "middle_route": "/v1beta",
                 "model_discovery_strategy": "gemini_native_bearer",
+                "prompt_cache_enabled": False,
             },
         )
+
+    def test_normalize_config_group_defaults_prompt_cache_enabled_to_false(self) -> None:
+        normalized = _normalize_config_group(
+            {
+                "provider": "openai_chat_completion",
+                "api_url": "https://api.openai.com",
+                "model_id": "gpt-4o-mini",
+                "api_key": "test-key",
+            }
+        )
+
+        self.assertIsNotNone(normalized)
+        assert normalized is not None
+        self.assertFalse(normalized["prompt_cache_enabled"])
 
     def test_collect_config_warnings_reports_legacy_group_mapped_model_id(self) -> None:
         warnings = _collect_config_warnings(

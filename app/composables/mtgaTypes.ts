@@ -8,6 +8,7 @@ export type ConfigGroup = {
   api_key: string;
   middle_route?: string;
   model_discovery_strategy?: string;
+  prompt_cache_enabled?: boolean;
 };
 
 export type ConfigPayload = {

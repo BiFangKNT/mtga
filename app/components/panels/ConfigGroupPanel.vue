@@ -36,6 +36,7 @@ const form = reactive({
   model_id: "",
   api_key: "",
   middle_route: "",
+  prompt_cache_enabled: false,
 });
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -246,6 +247,7 @@ const resetForm = () => {
   form.model_id = "";
   form.api_key = "";
   form.middle_route = "";
+  form.prompt_cache_enabled = false;
   middleRouteEnabled.value = false;
   formError.value = "";
   availableModels.value = [];
@@ -275,6 +277,7 @@ const openEdit = () => {
   form.model_id = group.model_id || "";
   form.api_key = group.api_key || "";
   form.middle_route = group.middle_route || "";
+  form.prompt_cache_enabled = group.prompt_cache_enabled ?? false;
   middleRouteEnabled.value = Boolean(group.middle_route);
   formError.value = "";
   availableModels.value = [];
@@ -317,6 +320,7 @@ const handleSave = async () => {
     api_url: normalizeApiUrl(form.api_url),
     model_id: form.model_id.trim(),
     api_key: form.api_key.trim(),
+    prompt_cache_enabled: form.prompt_cache_enabled,
   };
 
   if (!payload.api_url || !payload.model_id || !payload.api_key) {
@@ -655,6 +659,7 @@ const moveDown = async () => {
     v-model:api-key="form.api_key"
     v-model:middle-route="form.middle_route"
     v-model:middle-route-enabled="middleRouteEnabled"
+    v-model:prompt-cache-enabled="form.prompt_cache_enabled"
     :mode="editorMode"
     :form-error="formError"
     :default-middle-route="getDefaultMiddleRoute(form.provider)"

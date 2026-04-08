@@ -12,6 +12,7 @@ const props = withDefaults(
     apiKey?: string;
     middleRoute?: string;
     middleRouteEnabled?: boolean;
+    promptCacheEnabled?: boolean;
     formError?: string;
     defaultMiddleRoute?: string;
     availableModels?: string[];
@@ -28,6 +29,7 @@ const props = withDefaults(
     apiKey: "",
     middleRoute: "",
     middleRouteEnabled: false,
+    promptCacheEnabled: false,
     formError: "",
     defaultMiddleRoute: "/v1",
     availableModels: () => [],
@@ -45,6 +47,7 @@ const emit = defineEmits<{
   (event: "update:apiKey", value: string): void;
   (event: "update:middleRoute", value: string): void;
   (event: "update:middleRouteEnabled", value: boolean): void;
+  (event: "update:promptCacheEnabled", value: boolean): void;
   (event: "save"): void;
   (event: "cancel"): void;
   (event: "fetch-models"): void;
@@ -88,6 +91,11 @@ const middleRouteModel = computed({
 const middleRouteEnabledModel = computed({
   get: () => props.middleRouteEnabled,
   set: (value: boolean) => emit("update:middleRouteEnabled", value),
+});
+
+const promptCacheEnabledModel = computed({
+  get: () => props.promptCacheEnabled,
+  set: (value: boolean) => emit("update:promptCacheEnabled", value),
 });
 
 const handleDialogClose = () => {
@@ -202,6 +210,15 @@ const getModelPlaceholder = (provider: ProviderId) => {
         placeholder="sk-..."
         icon="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
       />
+
+      <label class="flex cursor-pointer items-center gap-2">
+        <input
+          v-model="promptCacheEnabledModel"
+          type="checkbox"
+          class="checkbox checkbox-primary checkbox-sm"
+        />
+        <span class="label-text text-sm font-medium text-slate-700">提示缓存</span>
+      </label>
 
       <div v-if="props.formError" class="alert alert-error py-2 px-3 rounded-xl">
         <svg

@@ -56,6 +56,7 @@ class ProxyConfig:
     mtga_auth_key: str
     model_discovery_strategy: str | None = None
     prompt_cache_bucket_id: str = ""
+    prompt_cache_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,14 @@ def normalize_model_discovery_strategy(value: str | None) -> str | None:
     return None
 
 
+def normalize_prompt_cache_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "0", "off", "no"}
+    return bool(value) if value is not None else False
+
+
 def provider_supports_model_discovery(value: str | None) -> bool:
     return normalize_provider(value) in SUPPORTED_PROVIDER_IDS
 
@@ -260,6 +269,9 @@ def build_proxy_config(
         mtga_auth_key=(global_config.get("mtga_auth_key") or ""),
         model_discovery_strategy=model_discovery_strategy,
         prompt_cache_bucket_id=prompt_cache_bucket_id,
+        prompt_cache_enabled=normalize_prompt_cache_enabled(
+            raw_config.get("prompt_cache_enabled")
+        ),
     )
 
 
@@ -285,6 +297,7 @@ __all__ = [
     "load_global_config",
     "normalize_middle_route",
     "normalize_model_discovery_strategy",
+    "normalize_prompt_cache_enabled",
     "normalize_provider",
     "provider_supports_model_discovery",
 ]

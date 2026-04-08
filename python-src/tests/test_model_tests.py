@@ -53,6 +53,7 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
                     litellm_model=f"{provider}/{model_id}",
                     base_url="https://provider.example.com",
                     api_key="test-key",
+                    prompt_cache_enabled=True,
                     middle_route_applied=False,
                     middle_route_ignored=False,
                 )
@@ -105,6 +106,7 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
             litellm_model="gemini/gemini-2.5-pro",
             base_url="https://provider.example.com",
             api_key="test-key",
+            prompt_cache_enabled=True,
             middle_route_applied=False,
             middle_route_ignored=False,
             model_discovery_strategy=GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,

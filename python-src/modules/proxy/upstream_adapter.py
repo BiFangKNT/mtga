@@ -91,6 +91,7 @@ class UpstreamRoute:
     litellm_model: str
     base_url: str
     api_key: str
+    prompt_cache_enabled: bool
     middle_route_applied: bool
     middle_route_ignored: bool
     litellm_base_url: str = ""
@@ -388,6 +389,7 @@ def build_upstream_route(
         litellm_model=litellm_model,
         base_url=base_url,
         api_key=(proxy_config.api_key or fallback_api_key).strip(),
+        prompt_cache_enabled=proxy_config.prompt_cache_enabled,
         middle_route_applied=True,
         middle_route_ignored=False,
         litellm_base_url=litellm_base_url,
@@ -971,7 +973,11 @@ class LiteLLMUpstreamAdapter:
             self._disable_ssl_strict_mode
         )
         call_kwargs = self._merge_provider_extra_headers(route, call_kwargs)
-        if route.provider in OPENAI_PROVIDER_IDS and route.prompt_cache_key:
+        if (
+            route.provider in OPENAI_PROVIDER_IDS
+            and route.prompt_cache_enabled
+            and route.prompt_cache_key
+        ):
             call_kwargs.setdefault("prompt_cache_key", route.prompt_cache_key)
         # 关闭 LiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
         call_kwargs["max_retries"] = 0

@@ -67,6 +67,7 @@ def _build_proxy_config(  # noqa: PLR0913
     api_key: str = "test-key",
     model_discovery_strategy: str | None = None,
     prompt_cache_bucket_id: str = "",
+    prompt_cache_enabled: bool = True,
 ) -> ProxyConfig:
     return ProxyConfig(
         provider=provider,
@@ -81,6 +82,7 @@ def _build_proxy_config(  # noqa: PLR0913
         mtga_auth_key="mtga-auth",
         model_discovery_strategy=model_discovery_strategy,
         prompt_cache_bucket_id=prompt_cache_bucket_id,
+        prompt_cache_enabled=prompt_cache_enabled,
     )
 
 
@@ -314,6 +316,49 @@ class UpstreamRouteTests(unittest.TestCase):
             persisted["prompt_cache_bucket_id"],
             first_proxy_config.prompt_cache_bucket_id,
         )
+
+    def test_build_proxy_config_defaults_prompt_cache_enabled_to_false(self) -> None:
+        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-config-prompt-cache-enabled-")
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+
+        proxy_config = build_runtime_proxy_config(
+            {
+                "api_url": "https://api.openai.com",
+                "model_id": "gpt-4o-mini",
+                "api_key": "test-key",
+            },
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+            log_func=lambda _message: None,
+        )
+
+        self.assertIsNotNone(proxy_config)
+        assert proxy_config is not None
+        self.assertFalse(proxy_config.prompt_cache_enabled)
+
+    def test_build_proxy_config_preserves_prompt_cache_enabled_false(self) -> None:
+        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-config-prompt-cache-disabled-")
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+
+        proxy_config = build_runtime_proxy_config(
+            {
+                "api_url": "https://api.openai.com",
+                "model_id": "gpt-4o-mini",
+                "api_key": "test-key",
+                "prompt_cache_enabled": False,
+            },
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+            log_func=lambda _message: None,
+        )
+
+        self.assertIsNotNone(proxy_config)
+        assert proxy_config is not None
+        self.assertFalse(proxy_config.prompt_cache_enabled)
 
     def test_build_proxy_config_does_not_overwrite_invalid_global_config(self) -> None:
         temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-config-invalid-global-")
@@ -2221,6 +2266,33 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
         call_kwargs = completion_mock.call_args.kwargs
         self.assertEqual(call_kwargs["prompt_cache_key"], "explicit-cache-key")
+
+    def test_openai_response_does_not_inject_prompt_cache_key_when_disabled(self) -> None:
+        adapter = LiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            _build_proxy_config(
+                provider=OPENAI_RESPONSE_PROVIDER,
+                target_api_base_url="https://example.com",
+                target_model_id="gpt-5",
+                prompt_cache_bucket_id="abc123def4567890",
+                prompt_cache_enabled=False,
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.litellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ) as completion_mock:
+            adapter.create_chat_completion(
+                route=route,
+                request_data={"messages": [{"role": "user", "content": "你好"}]},
+            )
+
+        call_kwargs = completion_mock.call_args.kwargs
+        self.assertNotIn("prompt_cache_key", call_kwargs)
 
     def test_ssl_verify_is_passed_per_request_without_mutating_global_state(self) -> None:
         adapter = LiteLLMUpstreamAdapter(
