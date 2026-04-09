@@ -7,6 +7,7 @@
 
 - **Node.js** (版本 >= 24) 和 **pnpm** 包管理器。
 - **Rust** (Stable 版本)。
+- **Visual Studio C++ Build Tools** (仅 Windows 需要，包含在 Visual Studio 中，安装时勾选 "C++ 桌面开发" 工作负载)。
 - **uv**：高性能的 Python 包管理器（可通过 `pip install uv` 安装）。
 
 ## 2. 安装项目依赖
