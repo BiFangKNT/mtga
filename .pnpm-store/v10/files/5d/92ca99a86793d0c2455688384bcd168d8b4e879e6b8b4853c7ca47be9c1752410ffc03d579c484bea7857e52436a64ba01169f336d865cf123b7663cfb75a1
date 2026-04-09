@@ -1,0 +1,1 @@
+.n-code-block-lines code{counter-increment:step calc(var(--start,1) - 1);counter-reset:step}.n-code-block-lines code .line:before{content:counter(step);counter-increment:step;text-align:right;color:#a3a3a380;width:2.5rem;margin-right:.5rem;padding-right:.5rem;display:inline-block}

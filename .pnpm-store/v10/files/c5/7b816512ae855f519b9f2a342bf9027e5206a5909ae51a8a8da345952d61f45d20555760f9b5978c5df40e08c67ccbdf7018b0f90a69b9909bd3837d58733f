@@ -1,0 +1,54 @@
+import { isAttributesMatchers, isAttributesName, isAttributesRegex } from "../utils/matchers.js";
+import { deduplicateLiterals, getContent, getIndentation, matchesName } from "../utils/utils.js";
+export function getLiteralsByHTMLAttribute(ctx, attribute, attributes) {
+    const literals = attributes.reduce((literals, attributes) => {
+        if (isAttributesName(attributes)) {
+            if (!matchesName(attributes.toLowerCase(), attribute.key.value.toLowerCase())) {
+                return literals;
+            }
+            literals.push(...getLiteralsByHTMLAttributeNode(ctx, attribute));
+        }
+        else if (isAttributesRegex(attributes)) {
+            // console.warn("Regex not supported in HTML");
+        }
+        else if (isAttributesMatchers(attributes)) {
+            // console.warn("Matchers not supported in HTML");
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+export function getAttributesByHTMLTag(ctx, node) {
+    return node.attributes;
+}
+export function getLiteralsByHTMLAttributeNode(ctx, attribute) {
+    const value = attribute.value;
+    if (!value) {
+        return [];
+    }
+    const line = ctx.sourceCode.lines[attribute.loc.start.line - 1];
+    const raw = attribute.startWrapper?.value + value.value + attribute.endWrapper?.value;
+    const quotes = getQuotesByHTMLAttribute(ctx, attribute);
+    const indentation = getIndentation(line);
+    const content = getContent(raw, quotes);
+    return [{
+            ...quotes,
+            content,
+            indentation,
+            isInterpolated: false,
+            loc: value.loc,
+            range: [value.range[0] - 1, value.range[1] + 1], // include quotes in range
+            raw,
+            supportsMultiline: true,
+            type: "StringLiteral"
+        }];
+}
+function getQuotesByHTMLAttribute(ctx, attribute) {
+    const openingQuote = attribute.startWrapper?.value;
+    const closingQuote = attribute.endWrapper?.value;
+    return {
+        closingQuote: closingQuote === "'" || closingQuote === '"' ? closingQuote : undefined,
+        openingQuote: openingQuote === "'" || openingQuote === '"' ? openingQuote : undefined
+    };
+}
+//# sourceMappingURL=html.js.map

@@ -1,0 +1,1 @@
+import{H as e,O as t,S as n,q as r}from"./B7ITro8r.js";import{d as i}from"./Che7kYXg.js";var a=t({__name:`index`,setup(t){return i().replace(`/configs`),(t,i)=>(e(),n(`div`,null,[r(t.$slots,`default`)]))}});export{a as default};

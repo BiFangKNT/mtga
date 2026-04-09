@@ -1,0 +1,1 @@
+{"version":3,"file":"module.js","sourceRoot":"","sources":["../../../src/async-utils/module.ts"],"names":[],"mappings":"AAAA,MAAM,UAAU,gBAAgB;IAC9B,OAAO,OAAO,MAAM,KAAK,WAAW,IAAI,OAAO,MAAM,CAAC,OAAO,KAAK,WAAW,CAAC;AAChF,CAAC;AAED,MAAM,UAAU,UAAU;IACxB,OAAO,CAAC,gBAAgB,EAAE,CAAC;AAC7B,CAAC"}

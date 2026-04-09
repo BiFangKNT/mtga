@@ -1,0 +1,97 @@
+{
+  "name": "@nuxt/vite-builder",
+  "version": "4.4.2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nuxt/nuxt.git",
+    "directory": "packages/vite"
+  },
+  "description": "Vite bundler for Nuxt",
+  "homepage": "https://nuxt.com",
+  "license": "MIT",
+  "type": "module",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "imports": {
+    "#vite-node": "./dist/vite-node.mjs",
+    "#vite-node-entry": "./dist/vite-node-entry.mjs",
+    "#vite-node-runner": "./dist/vite-node-runner.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@rollup/plugin-replace": "^6.0.3",
+    "@vitejs/plugin-vue": "^6.0.4",
+    "@vitejs/plugin-vue-jsx": "^5.1.4",
+    "autoprefixer": "^10.4.27",
+    "consola": "^3.4.2",
+    "cssnano": "^7.1.3",
+    "defu": "^6.1.4",
+    "escape-string-regexp": "^5.0.0",
+    "exsolve": "^1.0.8",
+    "get-port-please": "^3.2.0",
+    "jiti": "^2.6.1",
+    "knitwork": "^1.3.0",
+    "magic-string": "^0.30.21",
+    "mlly": "^1.8.1",
+    "mocked-exports": "^0.1.1",
+    "nypm": "^0.6.5",
+    "pathe": "^2.0.3",
+    "pkg-types": "^2.3.0",
+    "postcss": "^8.5.8",
+    "seroval": "^1.5.1",
+    "std-env": "^4.0.0",
+    "ufo": "^1.6.3",
+    "unenv": "^2.0.0-rc.24",
+    "vite": "^7.3.1",
+    "vite-node": "^5.3.0",
+    "vite-plugin-checker": "^0.12.0",
+    "vue-bundle-renderer": "^2.2.0",
+    "@nuxt/kit": "4.4.2"
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-decorators": "7.29.0",
+    "@babel/plugin-syntax-jsx": "7.28.6",
+    "h3": "1.15.6",
+    "h3-next": "npm:h3@2.0.1-rc.16",
+    "nitropack": "2.13.1",
+    "obuild": "0.4.32",
+    "rolldown": "1.0.0-rc.8",
+    "rollup": "4.59.0",
+    "rollup-plugin-visualizer": "7.0.1",
+    "vue": "3.5.30",
+    "@nuxt/schema": "4.4.2"
+  },
+  "peerDependencies": {
+    "@babel/plugin-proposal-decorators": "^7.25.0",
+    "@babel/plugin-syntax-jsx": "^7.25.0",
+    "rolldown": "^1.0.0-beta.38",
+    "rollup-plugin-visualizer": "^6.0.0 || ^7.0.1",
+    "vue": "^3.3.4",
+    "nuxt": "4.4.2"
+  },
+  "peerDependenciesMeta": {
+    "@babel/plugin-proposal-decorators": {
+      "optional": true
+    },
+    "@babel/plugin-syntax-jsx": {
+      "optional": true
+    },
+    "rolldown": {
+      "optional": true
+    },
+    "rollup-plugin-visualizer": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "build:stub": "obuild --stub",
+    "test:attw": "attw --pack"
+  }
+}

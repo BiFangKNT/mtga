@@ -1,0 +1,57 @@
+{
+  "name": "impound",
+  "type": "module",
+  "version": "1.1.5",
+  "description": "Builder-agnostic plugin to allow restricting import patterns in certain parts of your code-base.",
+  "license": "MIT",
+  "repository": "unjs/impound",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31",
+    "es-module-lexer": "^2.0.0",
+    "pathe": "^2.0.3",
+    "unplugin": "^3.0.0",
+    "unplugin-utils": "^0.3.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "7.6.1",
+    "@types/node": "24.11.0",
+    "@vitest/coverage-v8": "4.0.18",
+    "bumpp": "10.4.1",
+    "eslint": "10.0.3",
+    "nano-staged": "0.9.0",
+    "rollup": "4.59.0",
+    "simple-git-hooks": "2.13.1",
+    "tsdown": "0.20.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.1",
+    "vitest": "4.0.18"
+  },
+  "resolutions": {
+    "impound": "link:."
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm exec nano-staged"
+  },
+  "nano-staged": {
+    "*.{js,ts,mjs,cjs,json,.*rc}": "pnpm exec eslint --fix"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "vitest dev",
+    "lint": "eslint .",
+    "release": "bumpp",
+    "test": "pnpm test:unit && pnpm test:types",
+    "test:unit": "vitest",
+    "test:types": "tsc --noEmit"
+  }
+}

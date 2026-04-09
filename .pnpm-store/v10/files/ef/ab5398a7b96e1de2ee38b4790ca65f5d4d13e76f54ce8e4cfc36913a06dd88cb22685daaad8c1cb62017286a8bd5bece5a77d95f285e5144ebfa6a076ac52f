@@ -1,0 +1,106 @@
+{
+  "name": "vite-plugin-checker",
+  "version": "0.12.0",
+  "description": "Vite plugin that runs TypeScript type checker on a separate process.",
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "typescript"
+  ],
+  "homepage": "https://github.com/fi3ework/vite-plugin-checker",
+  "bugs": "https://github.com/fi3ework/vite-plugin-checker/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fi3ework/vite-plugin-checker.git"
+  },
+  "license": "MIT",
+  "author": "fi3ework <fi3ework@gmail.com>",
+  "type": "module",
+  "exports": {
+    ".": "./dist/main.js"
+  },
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "files": [
+    "dist",
+    "!dist/checkers/vueTsc/typescript-vue-tsc"
+  ],
+  "dependencies": {
+    "@babel/code-frame": "^7.27.1",
+    "chokidar": "^4.0.3",
+    "npm-run-path": "^6.0.0",
+    "picocolors": "^1.1.1",
+    "picomatch": "^4.0.3",
+    "tiny-invariant": "^1.3.3",
+    "tinyglobby": "^0.2.15",
+    "vscode-uri": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/eslint": "^8.56.12",
+    "@types/picomatch": "^4.0.2",
+    "@vue/language-core": "~3.1.7",
+    "meow": "^13.2.0",
+    "stylelint": "^16.22.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vls": "^0.8.5",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vue-tsc": "~3.0.4"
+  },
+  "peerDependencies": {
+    "@biomejs/biome": ">=1.7",
+    "eslint": ">=9.39.1",
+    "meow": "^13.2.0",
+    "optionator": "^0.9.4",
+    "oxlint": ">=1",
+    "stylelint": ">=16",
+    "typescript": "*",
+    "vite": ">=5.4.21",
+    "vls": "*",
+    "vti": "*",
+    "vue-tsc": "~2.2.10 || ^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@biomejs/biome": {
+      "optional": true
+    },
+    "eslint": {
+      "optional": true
+    },
+    "meow": {
+      "optional": true
+    },
+    "optionator": {
+      "optional": true
+    },
+    "oxlint": {
+      "optional": true
+    },
+    "stylelint": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "vls": {
+      "optional": true
+    },
+    "vti": {
+      "optional": true
+    },
+    "vue-tsc": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=16.11"
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:test": "tsup --sourcemap inline",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsup --watch"
+  }
+}

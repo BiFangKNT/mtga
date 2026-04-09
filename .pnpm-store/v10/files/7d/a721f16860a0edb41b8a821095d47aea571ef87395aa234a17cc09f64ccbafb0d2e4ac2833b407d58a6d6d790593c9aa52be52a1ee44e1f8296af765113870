@@ -1,0 +1,136 @@
+{
+  "name": "eslint-plugin-yml",
+  "version": "3.3.1",
+  "description": "This ESLint plugin provides linting rules for YAML.",
+  "type": "module",
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.mts",
+      "import": "./lib/index.mjs",
+      "default": "./lib/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
+  },
+  "scripts": {
+    "prebuild": "npm run -s clean",
+    "build": "tsdown",
+    "clean": "rimraf .nyc_output dist coverage lib",
+    "lint": "eslint .",
+    "eslint-fix": "eslint . --fix",
+    "eslint-test-fix": "eslint tests/src/rules/*.ts --fix -c .eslintrc.for-vscode.js",
+    "pretest:base": "cross-env DEBUG=eslint-plugin-yml*",
+    "test:base": "npm run mocha -- \"tests/src/**/*.ts\" --reporter dot --timeout 60000",
+    "test": "npm run test:base",
+    "cover": "nyc --reporter=lcov npm run test:base",
+    "test:debug": "npm run mocha -- \"tests/src/**/*.ts\" --reporter dot",
+    "update": "npm run ts -- ./tools/update.ts && npm run eslint-fix && npm run cover",
+    "new": "npm run ts -- ./tools/new-rule.ts",
+    "predocs:watch": "npm run build",
+    "docs:watch": "vitepress dev docs",
+    "docs:build": "npm run build && vitepress build docs",
+    "preversion": "npm test && git add .",
+    "version": "env-cmd -e version -- npm run update && git add .",
+    "version:ci": "env-cmd -e version-ci -- npm run update && changeset version",
+    "prerelease": "npm run build",
+    "release": "changeset publish",
+    "update-fixtures": "npm run ts -- ./tools/update-fixtures.ts && npm run eslint-fix",
+    "ts": "tsx",
+    "mocha": "npm run ts -- ./node_modules/mocha/bin/mocha.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ota-meshi/eslint-plugin-yml.git"
+  },
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "eslint-plugin",
+    "yaml",
+    "yml",
+    "lint"
+  ],
+  "author": "Yosuke Ota",
+  "funding": "https://github.com/sponsors/ota-meshi",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ota-meshi/eslint-plugin-yml/issues"
+  },
+  "homepage": "https://ota-meshi.github.io/eslint-plugin-yml/",
+  "dependencies": {
+    "@eslint/core": "^1.0.1",
+    "@eslint/plugin-kit": "^0.6.0",
+    "@ota-meshi/ast-token-store": "^0.3.0",
+    "debug": "^4.3.2",
+    "diff-sequences": "^29.0.0",
+    "escape-string-regexp": "5.0.0",
+    "natural-compare": "^1.4.0",
+    "yaml-eslint-parser": "^2.0.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.38.0"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.24.2",
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.3.0",
+    "@eslint/eslintrc": "^3.1.0",
+    "@eslint/js": "^10.0.0",
+    "@eslint/json": "^1.0.0",
+    "@ota-meshi/eslint-plugin": "^0.20.0",
+    "@ota-meshi/site-kit-eslint-editor-vue": "^0.2.0",
+    "@stylistic/eslint-plugin": "^5.7.0",
+    "@types/debug": "^4.1.5",
+    "@types/mocha": "^10.0.0",
+    "@types/natural-compare": "^1.4.0",
+    "@types/node": "^24.0.0",
+    "@types/semver": "^7.3.1",
+    "@typescript-eslint/eslint-plugin": "~8.56.0",
+    "@typescript-eslint/parser": "~8.56.0",
+    "cross-env": "^10.0.0",
+    "env-cmd": "^11.0.0",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-eslint-plugin": "^7.0.0",
+    "eslint-plugin-eslint-rule-tester": "^0.6.0",
+    "eslint-plugin-jsdoc": "^62.0.0",
+    "eslint-plugin-json-schema-validator": "^6.0.0",
+    "eslint-plugin-jsonc": "^3.0.0",
+    "eslint-plugin-markdown": "^5.0.0",
+    "eslint-plugin-n": "^17.0.0",
+    "eslint-plugin-node-dependencies": "^2.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "eslint-plugin-regexp": "^3.0.0",
+    "eslint-plugin-vue": "^10.0.0",
+    "eslint-plugin-yml": "^3.0.0",
+    "events": "^3.3.0",
+    "mocha": "^11.0.0",
+    "monaco-editor": "^0.55.0",
+    "nyc": "^18.0.0",
+    "pako": "^2.1.0",
+    "prettier": "^3.0.3",
+    "semver": "^7.3.2",
+    "stylelint": "^17.0.0",
+    "stylelint-config-recommended-vue": "^1.0.0",
+    "stylelint-config-standard": "^40.0.0",
+    "stylelint-config-standard-vue": "^1.0.0",
+    "stylelint-stylus": "^1.0.0",
+    "tsdown": "^0.20.0-beta.3",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vite-plugin-eslint4b": "^0.7.0",
+    "vitepress": "^1.0.0-rc.17",
+    "vue-eslint-parser": "^10.0.0",
+    "yaml": "^2.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

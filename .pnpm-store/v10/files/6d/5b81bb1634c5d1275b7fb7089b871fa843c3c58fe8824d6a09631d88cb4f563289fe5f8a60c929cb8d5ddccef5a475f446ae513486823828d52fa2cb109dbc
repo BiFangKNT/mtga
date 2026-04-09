@@ -1,0 +1,62 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getTailwindConfigPath = void 0;
+const cache_js_1 = require("./cache.js");
+const fs_js_1 = require("./fs.js");
+const resolvers_js_1 = require("./resolvers.js");
+const getTailwindConfigPath = ({ configPath, cwd, version }) => (0, cache_js_1.withCache)("config-path", configPath, () => {
+    const { major } = version;
+    if (major >= 4 /* TailwindcssVersion.V4 */) {
+        const foundConfigPath = configPath && (0, fs_js_1.findFileRecursive)(cwd, [configPath]);
+        const warning = getEntryPointWarning(configPath, foundConfigPath);
+        if (foundConfigPath) {
+            return {
+                path: foundConfigPath,
+                warnings: [warning]
+            };
+        }
+        const defaultConfigPath = (0, resolvers_js_1.resolveCss)("tailwindcss/theme.css", cwd);
+        if (!defaultConfigPath) {
+            throw new Error("No default tailwind config found. Please ensure you have Tailwind CSS installed.");
+        }
+        return {
+            path: defaultConfigPath,
+            warnings: [warning]
+        };
+    }
+    if (major <= 3 /* TailwindcssVersion.V3 */) {
+        const defaultPaths = [
+            "tailwind.config.js",
+            "tailwind.config.cjs",
+            "tailwind.config.mjs",
+            "tailwind.config.ts"
+        ];
+        const foundConfigPath = configPath && (0, fs_js_1.findFileRecursive)(cwd, [configPath]);
+        const foundDefaultPath = (0, fs_js_1.findFileRecursive)(cwd, defaultPaths);
+        const warning = getConfigPathWarning(configPath, foundConfigPath);
+        return {
+            path: foundConfigPath ?? foundDefaultPath ?? "default",
+            warnings: [warning]
+        };
+    }
+    throw new Error(`Unsupported Tailwind CSS version: ${major}. Please use a version between 3 and 4.`);
+});
+exports.getTailwindConfigPath = getTailwindConfigPath;
+function getConfigPathWarning(configPath, foundConfigPath) {
+    if (configPath && !foundConfigPath) {
+        return {
+            option: "tailwindConfig",
+            title: `No tailwind css config found at \`${configPath}\``
+        };
+    }
+}
+function getEntryPointWarning(entryPoint, foundEntryPoint) {
+    // entryPoint must be explicitly set
+    if (!foundEntryPoint) {
+        return {
+            option: "entryPoint",
+            title: `No tailwind css entry point found at \`${entryPoint}\``
+        };
+    }
+}
+//# sourceMappingURL=config.js.map

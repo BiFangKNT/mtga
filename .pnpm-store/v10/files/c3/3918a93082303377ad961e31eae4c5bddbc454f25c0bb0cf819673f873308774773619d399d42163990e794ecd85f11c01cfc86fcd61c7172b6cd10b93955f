@@ -1,0 +1,77 @@
+{
+  "name": "@nuxt/telemetry",
+  "version": "2.7.0",
+  "repository": "nuxt/telemetry",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.mts",
+      "import": "./dist/module.mjs",
+      "require": "./dist/module.cjs"
+    }
+  },
+  "main": "./dist/module.cjs",
+  "types": "./dist/types.d.mts",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/types.d.cts"
+      ]
+    }
+  },
+  "bin": {
+    "nuxt-telemetry": "./bin/nuxt-telemetry.mjs"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "dependencies": {
+    "citty": "^0.2.0",
+    "consola": "^3.4.2",
+    "ofetch": "^2.0.0-alpha.3",
+    "rc9": "^3.0.0",
+    "std-env": "^3.10.0"
+  },
+  "devDependencies": {
+    "@nuxt/eslint-config": "^1.14.0",
+    "@nuxt/kit": "^4.3.0",
+    "@nuxt/module-builder": "^1.0.2",
+    "@nuxt/schema": "^4.3.0",
+    "@nuxt/test-utils": "^4.0.0",
+    "@types/semver": "^7.7.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "changelogen": "^0.6.2",
+    "eslint": "^10.0.0",
+    "get-port-please": "^3.2.0",
+    "h3": "^1.15.5",
+    "installed-check": "^9.3.0",
+    "knip": "^5.83.1",
+    "nuxt": "^4.3.0",
+    "semver": "^7.7.4",
+    "typescript": "^5.9.3",
+    "unbuild": "^3.6.1",
+    "vitest": "^4.0.18",
+    "vue-tsc": "^3.2.4"
+  },
+  "peerDependencies": {
+    "@nuxt/kit": ">=3.0.0"
+  },
+  "engines": {
+    "node": ">=18.12.0"
+  },
+  "scripts": {
+    "build": "nuxt-module-build build",
+    "dev": "NUXT_TELEMETRY_DEBUG=1 nuxt dev playground",
+    "dev:build": "NUXT_TELEMETRY_DEBUG=1 nuxt build playground",
+    "dev:generate": "NUXT_TELEMETRY_DEBUG=1 nuxt generate playground",
+    "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxt prepare playground",
+    "lint": "eslint .",
+    "nuxt-telemetry": "node ./bin/nuxt-telemetry.mjs",
+    "test": "vitest run",
+    "test:engines": "installed-check -d --no-workspaces",
+    "test:knip": "knip",
+    "test:types": "nuxt-module-build prepare && nuxt prepare playground && vue-tsc --noEmit"
+  }
+}

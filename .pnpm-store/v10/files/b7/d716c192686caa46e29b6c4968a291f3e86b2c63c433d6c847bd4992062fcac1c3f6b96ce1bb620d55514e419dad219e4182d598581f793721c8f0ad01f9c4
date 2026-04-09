@@ -1,0 +1,184 @@
+import { ES_CONTAINER_TYPES_TO_INSERT_BRACES, ES_CONTAINER_TYPES_TO_REPLACE_QUOTES, getESObjectPath, getLiteralsByESLiteralNode, getLiteralsByESNodeAndRegex, hasESNodeParentExtension, isESNode, isESObjectKey, isESStringLike, isInsideObjectValue } from "./es.js";
+import { MatcherType } from "../types/rule.js";
+import { getLiteralNodesByMatchers, isAttributesMatchers, isAttributesName, isAttributesRegex, isInsideBinaryExpression, isInsideConditionalExpressionTest, isInsideLogicalExpressionLeft, isInsideMemberExpression, matchesPathPattern } from "../utils/matchers.js";
+import { deduplicateLiterals, getContent, getIndentation, getQuotes, getWhitespace, matchesName } from "../utils/utils.js";
+export const VUE_CONTAINER_TYPES_TO_REPLACE_QUOTES = [
+    ...ES_CONTAINER_TYPES_TO_REPLACE_QUOTES
+];
+export const VUE_CONTAINER_TYPES_TO_INSERT_BRACES = [
+    ...ES_CONTAINER_TYPES_TO_INSERT_BRACES
+];
+export function getAttributesByVueStartTag(ctx, node) {
+    return node.attributes;
+}
+export function getLiteralsByVueAttribute(ctx, attribute, attributes) {
+    if (attribute.value === null) {
+        return [];
+    }
+    const value = attribute.value;
+    const literals = attributes.reduce((literals, attributes) => {
+        if (isAttributesName(attributes)) {
+            if (!matchesName(getVueBoundName(attributes).toLowerCase(), getVueAttributeName(attribute)?.toLowerCase())) {
+                return literals;
+            }
+            literals.push(...getLiteralsByVueLiteralNode(ctx, value));
+        }
+        else if (isAttributesRegex(attributes)) {
+            literals.push(...getLiteralsByESNodeAndRegex(ctx, attribute, attributes));
+        }
+        else if (isAttributesMatchers(attributes)) {
+            if (!matchesName(getVueBoundName(attributes[0]).toLowerCase(), getVueAttributeName(attribute)?.toLowerCase())) {
+                return literals;
+            }
+            literals.push(...getLiteralsByVueMatchers(ctx, value, attributes[1]));
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+function getLiteralsByVueLiteralNode(ctx, node) {
+    if (!hasESNodeParentExtension(node)) {
+        return [];
+    }
+    if (isVueLiteralNode(node)) {
+        const literal = getStringLiteralByVueStringLiteral(ctx, node);
+        return [literal];
+    }
+    if (isESStringLike(node)) {
+        return getLiteralsByVueESLiteralNode(ctx, node);
+    }
+    return [];
+}
+function getLiteralsByVueMatchers(ctx, node, matchers) {
+    const matcherFunctions = getVueMatcherFunctions(matchers);
+    const literalNodes = getLiteralNodesByMatchers(ctx, node, matcherFunctions);
+    const literals = literalNodes.flatMap(literalNode => getLiteralsByVueLiteralNode(ctx, literalNode));
+    return deduplicateLiterals(literals);
+}
+function getLiteralsByVueESLiteralNode(ctx, node) {
+    const literals = getLiteralsByESLiteralNode(ctx, node);
+    return literals.map(literal => {
+        const multilineQuotes = getMultilineQuotes(node);
+        return {
+            ...literal,
+            ...multilineQuotes
+        };
+    });
+}
+function getStringLiteralByVueStringLiteral(ctx, node) {
+    const raw = ctx.sourceCode.getText(node);
+    const line = ctx.sourceCode.lines[node.loc.start.line - 1];
+    const quotes = getQuotes(raw);
+    const content = getContent(raw, quotes);
+    const whitespaces = getWhitespace(content);
+    const indentation = getIndentation(line);
+    const multilineQuotes = getMultilineQuotes(node);
+    return {
+        ...whitespaces,
+        ...quotes,
+        ...multilineQuotes,
+        content,
+        indentation,
+        loc: node.loc,
+        priorLiterals: [],
+        range: [node.range[0], node.range[1]],
+        raw,
+        supportsMultiline: true,
+        type: "StringLiteral"
+    };
+}
+function getMultilineQuotes(node) {
+    const surroundingBraces = VUE_CONTAINER_TYPES_TO_INSERT_BRACES.includes(node.parent.type);
+    const multilineQuotes = VUE_CONTAINER_TYPES_TO_REPLACE_QUOTES.includes(node.parent.type)
+        ? ["`"]
+        : [];
+    return {
+        multilineQuotes,
+        surroundingBraces
+    };
+}
+function getVueBoundName(name) {
+    return name.startsWith(":") ? `v-bind:${name.slice(1)}` : name;
+}
+function getVueAttributeName(attribute) {
+    if (isVueAttribute(attribute)) {
+        return attribute.key.name;
+    }
+    if (isVueDirective(attribute)) {
+        if (attribute.key.argument?.type === "VIdentifier") {
+            return `v-${attribute.key.name.name}:${attribute.key.argument.name}`;
+        }
+    }
+}
+function isVueAttribute(attribute) {
+    return attribute.key.type === "VIdentifier";
+}
+function isVueDirective(attribute) {
+    return attribute.key.type === "VDirectiveKey";
+}
+function isVueLiteralNode(node) {
+    return node.type === "VLiteral";
+}
+function getVueMatcherFunctions(matchers) {
+    return matchers.reduce((matcherFunctions, matcher) => {
+        switch (matcher.match) {
+            case MatcherType.String: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node) ||
+                        isESObjectKey(node) ||
+                        isInsideObjectValue(node)) {
+                        return false;
+                    }
+                    return isESStringLike(node) || isVueLiteralNode(node);
+                });
+                break;
+            }
+            case MatcherType.ObjectKey: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isESObjectKey(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+            case MatcherType.ObjectValue: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isInsideObjectValue(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isESObjectKey(node) ||
+                        !isESStringLike(node) && !isVueLiteralNode(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+        }
+        return matcherFunctions;
+    }, []);
+}
+//# sourceMappingURL=vue.js.map

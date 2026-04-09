@@ -1,0 +1,73 @@
+{
+  "name": "eslint-plugin-import-lite",
+  "type": "module",
+  "version": "0.5.2",
+  "author": "Vida Xie<https://github.com/9romise>",
+  "license": "MIT",
+  "homepage": "https://github.com/9romise/eslint-plugin-import-lite#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/9romise/eslint-plugin-import-lite.git"
+  },
+  "bugs": {
+    "url": "https://github.com/9romise/eslint-plugin-import-lite/issues"
+  },
+  "keywords": [],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/dts/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json",
+    "./rule-options": "./dist/dts/rule-options.d.ts"
+  },
+  "types": "./dist/dts/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": "^18.18.0 || ^20.9.0 || >=21.1.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.0.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/core": "^0.18.2",
+    "@types/node": "^25.3.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "@typescript-eslint/utils": "^8.56.0",
+    "@vida0905/eslint-config": "^2.10.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "change-case": "^5.4.4",
+    "es-toolkit": "^1.44.0",
+    "eslint": "^9.39.3",
+    "eslint-typegen": "^2.3.1",
+    "eslint-vitest-rule-tester": "^3.1.0",
+    "json-schema-to-typescript-lite": "^15.0.0",
+    "nano-staged": "^0.9.0",
+    "simple-git-hooks": "^2.13.1",
+    "tinyglobby": "^0.2.15",
+    "tsdown": "^0.20.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "eslint-plugin-import-lite": "0.5.2"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx nano-staged"
+  },
+  "nano-staged": {
+    "*": "eslint --fix"
+  },
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "test": "vitest",
+    "lint": "eslint .",
+    "update": "tsx scripts/update && eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck",
+    "release": "npx bumpp"
+  }
+}

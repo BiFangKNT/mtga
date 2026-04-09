@@ -1,0 +1,48 @@
+{
+  "name": "rou3",
+  "version": "0.8.1",
+  "description": "Lightweight and fast router for JavaScript.",
+  "license": "MIT",
+  "repository": "h3js/rou3",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./compiler": "./dist/compiler.mjs"
+  },
+  "scripts": {
+    "bench:bun": "bun ./test/bench",
+    "bench:deno": "deno run -A ./test/bench/index.ts",
+    "bench:node": "node --expose-gc --allow-natives-syntax --disable-warning=ExperimentalWarning --experimental-strip-types ./test/bench/index.ts",
+    "build": "obuild",
+    "dev": "vitest",
+    "lint": "oxlint . && oxfmt --check src test",
+    "lint:fix": "automd && oxlint --fix . && oxfmt src test",
+    "release": "pnpm test && pnpm build && changelogen --release && git push --follow-tags && npm publish",
+    "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:types": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "0x": "^6.0.0",
+    "@mitata/counters": "^0.0.8",
+    "@types/node": "^25.3.5",
+    "@typescript/native-preview": "7.0.0-dev.20260308.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "automd": "^0.4.3",
+    "changelogen": "^0.6.2",
+    "esbuild": "^0.27.3",
+    "eslint-config-unjs": "^0.6.2",
+    "mitata": "^1.0.34",
+    "obuild": "^0.4.32",
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
+    "rou3-latest": "npm:rou3@^0.7.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "packageManager": "pnpm@10.31.0"
+}

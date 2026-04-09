@@ -1,0 +1,1 @@
+/*! 🌼 daisyUI 5.5.18 - MIT License */ @layer base{@property --radialprogress{syntax: "<percentage>"; inherits: true; initial-value: 0%;}}

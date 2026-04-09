@@ -1,0 +1,150 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getLiteralNodesByMatchers = getLiteralNodesByMatchers;
+exports.findMatchingParentNodes = findMatchingParentNodes;
+exports.matchesPathPattern = matchesPathPattern;
+exports.isCalleeName = isCalleeName;
+exports.isCalleeRegex = isCalleeRegex;
+exports.isCalleeMatchers = isCalleeMatchers;
+exports.isVariableName = isVariableName;
+exports.isVariableRegex = isVariableRegex;
+exports.isVariableMatchers = isVariableMatchers;
+exports.isTagName = isTagName;
+exports.isTagRegex = isTagRegex;
+exports.isTagMatchers = isTagMatchers;
+exports.isAttributesName = isAttributesName;
+exports.isAttributesRegex = isAttributesRegex;
+exports.isAttributesMatchers = isAttributesMatchers;
+exports.isInsideConditionalExpressionTest = isInsideConditionalExpressionTest;
+exports.isInsideBinaryExpression = isInsideBinaryExpression;
+exports.isInsideLogicalExpressionLeft = isInsideLogicalExpressionLeft;
+exports.isInsideMemberExpression = isInsideMemberExpression;
+const es_js_1 = require("../parsers/es.js");
+const utils_js_1 = require("./utils.js");
+function getLiteralNodesByMatchers(ctx, node, matcherFunctions, deadEnd) {
+    if (!(0, utils_js_1.isGenericNodeWithParent)(node)) {
+        return [];
+    }
+    const nestedLiterals = findMatchingNestedNodes(node, matcherFunctions, deadEnd);
+    const self = nodeMatches(node, matcherFunctions) ? [node] : [];
+    return [...nestedLiterals, ...self];
+}
+function findMatchingNestedNodes(node, matcherFunctions, deadEnd = value => (0, es_js_1.isESNode)(value) && ((0, es_js_1.isESCallExpression)(value) || (0, es_js_1.isESArrowFunctionExpression)(value) || (0, es_js_1.isESVariableDeclarator)(value))) {
+    return Object.entries(node).reduce((matchedNodes, [key, value]) => {
+        if (!value || typeof value !== "object" || key === "parent") {
+            return matchedNodes;
+        }
+        if (deadEnd?.(value)) {
+            return matchedNodes;
+        }
+        if (nodeMatches(value, matcherFunctions)) {
+            matchedNodes.push(value);
+        }
+        matchedNodes.push(...findMatchingNestedNodes(value, matcherFunctions, deadEnd));
+        return matchedNodes;
+    }, []);
+}
+function findMatchingParentNodes(node, matcherFunctions) {
+    if (!(0, utils_js_1.isGenericNodeWithParent)(node)) {
+        return [];
+    }
+    if (nodeMatches(node.parent, matcherFunctions)) {
+        return [node.parent];
+    }
+    return findMatchingParentNodes(node.parent, matcherFunctions);
+}
+function nodeMatches(node, matcherFunctions) {
+    for (const matcherFunction of matcherFunctions) {
+        if (matcherFunction(node)) {
+            return true;
+        }
+    }
+    return false;
+}
+function isChildNodeOfNode(node, parent) {
+    if (!(0, es_js_1.hasESNodeParentExtension)(node)) {
+        return false;
+    }
+    if (node.parent === parent) {
+        return true;
+    }
+    return isChildNodeOfNode(node.parent, parent);
+}
+function matchesPathPattern(path, pattern) {
+    const regex = new RegExp(pattern);
+    return regex.test(path);
+}
+function isCalleeName(callee) {
+    return typeof callee === "string";
+}
+function isCalleeRegex(callee) {
+    return Array.isArray(callee) && typeof callee[0] === "string" && typeof callee[1] === "string";
+}
+function isCalleeMatchers(callee) {
+    return Array.isArray(callee) && typeof callee[0] === "string" && Array.isArray(callee[1]);
+}
+function isVariableName(variable) {
+    return typeof variable === "string";
+}
+function isVariableRegex(variable) {
+    return Array.isArray(variable) && typeof variable[0] === "string" && typeof variable[1] === "string";
+}
+function isVariableMatchers(variable) {
+    return Array.isArray(variable) && typeof variable[0] === "string" && Array.isArray(variable[1]);
+}
+function isTagName(tag) {
+    return typeof tag === "string";
+}
+function isTagRegex(tag) {
+    return Array.isArray(tag) && typeof tag[0] === "string" && typeof tag[1] === "string";
+}
+function isTagMatchers(tag) {
+    return Array.isArray(tag) && typeof tag[0] === "string" && Array.isArray(tag[1]);
+}
+function isAttributesName(attributes) {
+    return typeof attributes === "string";
+}
+function isAttributesRegex(attributes) {
+    return Array.isArray(attributes) && typeof attributes[0] === "string" && typeof attributes[1] === "string";
+}
+function isAttributesMatchers(attributes) {
+    return Array.isArray(attributes) && typeof attributes[0] === "string" && Array.isArray(attributes[1]);
+}
+function isInsideConditionalExpressionTest(node) {
+    if (!(0, es_js_1.hasESNodeParentExtension)(node)) {
+        return false;
+    }
+    if (node.parent.type === "ConditionalExpression" && node.parent.test === node) {
+        return true;
+    }
+    return isInsideConditionalExpressionTest(node.parent);
+}
+function isInsideBinaryExpression(node) {
+    if (!(0, es_js_1.hasESNodeParentExtension)(node)) {
+        return false;
+    }
+    if (node.parent.type === "BinaryExpression") {
+        return true;
+    }
+    return isInsideBinaryExpression(node.parent);
+}
+function isInsideLogicalExpressionLeft(node) {
+    if (!(0, es_js_1.hasESNodeParentExtension)(node)) {
+        return false;
+    }
+    if (node.parent.type === "LogicalExpression" && node.parent.left === node) {
+        return true;
+    }
+    return isInsideLogicalExpressionLeft(node.parent);
+}
+function isInsideMemberExpression(node) {
+    // aka indexed access: https://github.com/estree/estree/blob/master/es5.md#memberexpression
+    if (!(0, es_js_1.hasESNodeParentExtension)(node)) {
+        return false;
+    }
+    if (node.parent.type === "MemberExpression") {
+        return true;
+    }
+    return isInsideMemberExpression(node.parent);
+}
+//# sourceMappingURL=matchers.js.map

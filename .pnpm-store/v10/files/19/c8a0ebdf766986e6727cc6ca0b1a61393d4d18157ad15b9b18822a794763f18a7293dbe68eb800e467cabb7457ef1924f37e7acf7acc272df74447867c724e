@@ -1,0 +1,39 @@
+{
+  "name": "@vue/devtools-core",
+  "type": "module",
+  "version": "8.1.1",
+  "author": "webfansplz",
+  "license": "MIT",
+  "repository": {
+    "directory": "packages/core",
+    "type": "git",
+    "url": "git+https://github.com/vuejs/devtools.git"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "files": [
+    "dist",
+    "server.d.ts"
+  ],
+  "peerDependencies": {
+    "vue": "^3.0.0"
+  },
+  "dependencies": {
+    "@vue/devtools-kit": "^8.1.1",
+    "@vue/devtools-shared": "^8.1.1"
+  },
+  "devDependencies": {
+    "vue": "^3.5.22"
+  },
+  "scripts": {
+    "build": "tsdown --clean",
+    "prepare:type": "tsdown --dts-only",
+    "stub": "tsdown --watch --onSuccess 'tsdown --dts-only'"
+  }
+}

@@ -1,0 +1,1 @@
+function e(e,t=65,n=50,r=1){let i=0;for(let t=0;t<e.length;t++)i=e.charCodeAt(t)+((i<<5)-i);return`hsla(${i%360}, ${t}%, ${n}%, ${r})`}export{e as t};

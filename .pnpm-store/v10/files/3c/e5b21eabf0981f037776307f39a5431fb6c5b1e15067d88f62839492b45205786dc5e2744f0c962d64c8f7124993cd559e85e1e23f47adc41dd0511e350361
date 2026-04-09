@@ -1,0 +1,59 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getLiteralsByHTMLAttribute = getLiteralsByHTMLAttribute;
+exports.getAttributesByHTMLTag = getAttributesByHTMLTag;
+exports.getLiteralsByHTMLAttributeNode = getLiteralsByHTMLAttributeNode;
+const matchers_js_1 = require("../utils/matchers.js");
+const utils_js_1 = require("../utils/utils.js");
+function getLiteralsByHTMLAttribute(ctx, attribute, attributes) {
+    const literals = attributes.reduce((literals, attributes) => {
+        if ((0, matchers_js_1.isAttributesName)(attributes)) {
+            if (!(0, utils_js_1.matchesName)(attributes.toLowerCase(), attribute.key.value.toLowerCase())) {
+                return literals;
+            }
+            literals.push(...getLiteralsByHTMLAttributeNode(ctx, attribute));
+        }
+        else if ((0, matchers_js_1.isAttributesRegex)(attributes)) {
+            // console.warn("Regex not supported in HTML");
+        }
+        else if ((0, matchers_js_1.isAttributesMatchers)(attributes)) {
+            // console.warn("Matchers not supported in HTML");
+        }
+        return literals;
+    }, []);
+    return (0, utils_js_1.deduplicateLiterals)(literals);
+}
+function getAttributesByHTMLTag(ctx, node) {
+    return node.attributes;
+}
+function getLiteralsByHTMLAttributeNode(ctx, attribute) {
+    const value = attribute.value;
+    if (!value) {
+        return [];
+    }
+    const line = ctx.sourceCode.lines[attribute.loc.start.line - 1];
+    const raw = attribute.startWrapper?.value + value.value + attribute.endWrapper?.value;
+    const quotes = getQuotesByHTMLAttribute(ctx, attribute);
+    const indentation = (0, utils_js_1.getIndentation)(line);
+    const content = (0, utils_js_1.getContent)(raw, quotes);
+    return [{
+            ...quotes,
+            content,
+            indentation,
+            isInterpolated: false,
+            loc: value.loc,
+            range: [value.range[0] - 1, value.range[1] + 1], // include quotes in range
+            raw,
+            supportsMultiline: true,
+            type: "StringLiteral"
+        }];
+}
+function getQuotesByHTMLAttribute(ctx, attribute) {
+    const openingQuote = attribute.startWrapper?.value;
+    const closingQuote = attribute.endWrapper?.value;
+    return {
+        closingQuote: closingQuote === "'" || closingQuote === '"' ? closingQuote : undefined,
+        openingQuote: openingQuote === "'" || openingQuote === '"' ? openingQuote : undefined
+    };
+}
+//# sourceMappingURL=html.js.map

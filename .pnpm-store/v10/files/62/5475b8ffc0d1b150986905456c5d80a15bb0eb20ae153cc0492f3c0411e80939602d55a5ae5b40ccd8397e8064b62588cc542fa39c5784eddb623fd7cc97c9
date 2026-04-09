@@ -1,0 +1,75 @@
+{
+  "name": "refa",
+  "version": "0.12.1",
+  "description": "A library for finite automata and regular expressions in the context of JS RegExp",
+  "main": "index",
+  "scripts": {
+    "check": "npm run lint && npm run check:dependencies && npx tsc --noEmit && cd tests && npx tsc --noEmit && cd ../scripts && npx tsc --noEmit",
+    "check:dependencies": "npx depcruise --validate .dependency-cruiser.js src",
+    "lint": "npx eslint --ignore-path .gitignore **/*.ts",
+    "test": "cd tests && mocha -r ts-node/register '**/*.ts'",
+    "test:all": "npm run test -- --reporter=dot --run-transformers --run-stress-test",
+    "test:update": "npm run test -- --update --run-transformers",
+    "build": "npx rimraf ./index.* .out/** && npx tsc && rollup -c && npm run build:dts",
+    "build:dts": "dts-bundle --main ./.out/index.d.ts --name refa --out ../index.d.ts && npm run scripts:flat-dts && prettier --write ./index.d.ts",
+    "build:docs": "typedoc --treatWarningsAsErrors",
+    "coverage": "npx nyc --reporter=html --reporter=text npm run test",
+    "scripts:create-case-folding": "npx ts-node --project scripts/tsconfig.json scripts/create-case-folding.ts",
+    "scripts:create-unicode": "npx ts-node --project scripts/tsconfig.json scripts/create-unicode.ts",
+    "scripts:debug": "npx ts-node --project scripts/tsconfig.json scripts/debug.ts",
+    "scripts:flat-dts": "npx ts-node --project scripts/tsconfig.json scripts/flat-dts.ts",
+    "scripts:perf": "npx ts-node --project scripts/tsconfig.json scripts/perf.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "dfa",
+    "nfa",
+    "regex",
+    "regexp",
+    "regular",
+    "expression"
+  ],
+  "author": "Michael Schmidt",
+  "homepage": "https://github.com/RunDevelopment/refa#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RunDevelopment/refa.git"
+  },
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "index.mjs",
+    "index.d.ts"
+  ],
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^9.0.0",
+    "@types/chai": "^4.2.22",
+    "@types/mocha": "^9.0.0",
+    "@types/node": "^12.20.13",
+    "@typescript-eslint/eslint-plugin": "^6.4.1",
+    "@typescript-eslint/parser": "^6.4.1",
+    "@unicode/unicode-15.0.0": "^1.4.2",
+    "chai": "^4.3.4",
+    "dependency-cruiser": "^12.3.0",
+    "dts-bundle": "^0.7.3",
+    "eslint": "^8.47.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-jsdoc": "^46.5.0",
+    "eslint-plugin-prettier": "^4.2.1",
+    "mocha": "^9.1.3",
+    "nyc": "^15.1.0",
+    "prettier": "^2.8.7",
+    "rimraf": "^3.0.2",
+    "rollup": "^2.47.0",
+    "rollup-plugin-terser": "^7.0.2",
+    "ts-node": "^10.9.1",
+    "typedoc": "^0.24.8",
+    "typescript": "^5.0.2"
+  },
+  "dependencies": {
+    "@eslint-community/regexpp": "^4.8.0"
+  },
+  "engines": {
+    "node": "^12.0.0 || ^14.0.0 || >=16.0.0"
+  }
+}

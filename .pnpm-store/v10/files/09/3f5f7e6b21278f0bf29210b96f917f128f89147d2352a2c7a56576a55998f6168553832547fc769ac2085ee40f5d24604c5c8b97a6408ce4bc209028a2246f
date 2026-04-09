@@ -1,0 +1,39 @@
+{
+  "name": "ofetch",
+  "version": "2.0.0-alpha.3",
+  "description": "A better fetch API. Works on node, browser and workers.",
+  "repository": "unjs/ofetch",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": "./dist/index.mjs",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "obuild src/index.ts",
+    "dev": "vitest",
+    "lint": "eslint . && prettier -c src test examples",
+    "lint:fix": "eslint --fix . && prettier -w src test examples",
+    "prepack": "pnpm build",
+    "release": "pnpm test && pnpm build && changelogen --release --prerelease --publish --publishTag alpha --push",
+    "test": "pnpm lint && vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "@vitest/coverage-v8": "^4.0.4",
+    "automd": "^0.4.2",
+    "changelogen": "^0.6.2",
+    "eslint": "^9.38.0",
+    "eslint-config-unjs": "^0.5.0",
+    "h3": "^2.0.1-rc.5",
+    "obuild": "^0.3.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "undici": "^7.16.0",
+    "vitest": "^4.0.4"
+  },
+  "packageManager": "pnpm@10.19.0"
+}

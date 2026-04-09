@@ -1,0 +1,145 @@
+{
+    "name": "eslint-plugin-regexp",
+    "version": "3.1.0",
+    "description": "ESLint plugin for finding RegExp mistakes and RegExp style guide violations.",
+    "engines": {
+        "node": "^20.19.0 || ^22.13.0 || >=24"
+    },
+    "type": "module",
+    "main": "./dist/index.js",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "prebuild": "npm run -s clean",
+        "build": "tsdown",
+        "clean": "rimraf .nyc_output dist coverage",
+        "lint": "npm-run-all \"lint:*\"",
+        "lint:js": "eslint . --config=./eslint.config.mjs --no-config-lookup",
+        "lint:docs": "markdownlint \"**/*.md\"",
+        "eslint-fix": "eslint . --config=./eslint.config.mjs --no-config-lookup --fix",
+        "pretest": "npm run build",
+        "test:base": "npm run mocha -- \"tests/**/*.ts\" --reporter dot --timeout 60000",
+        "test:c8": "c8 --reporter=lcov npm run test:base",
+        "test": "npm run test:c8",
+        "test:watch": "npm run test:base -- --watch",
+        "test:update": "npm run test:base -- --update",
+        "typecheck": "tsc -p ./tsconfig.build.json --noEmit",
+        "update": "npm run ts -- ./tools/update.ts && npm run eslint-fix && npm run update:eslint-docs",
+        "update:eslint-docs": "npm run build && eslint-doc-generator",
+        "update:unicode-alias": "npm run ts -- ./tools/update-unicode-alias.ts",
+        "new": "npm run ts -- ./tools/new-rule.ts",
+        "ts": "node --import @oxc-node/core/register",
+        "mocha": "npm run ts -- ./node_modules/mocha/bin/mocha.js",
+        "docs:watch": "vitepress dev docs",
+        "docs:build": "vitepress build docs",
+        "docs:build-and-preview": "npm run docs:build && npx http-server docs/.vitepress/dist",
+        "preversion": "npm test && git add .",
+        "version": "env-cmd -e version -- npm run update && git add .",
+        "preversion:ci": "npm test",
+        "version:ci": "env-cmd -e version-ci -- npm run update && changeset version",
+        "prerelease": "npm run clean && npm run build",
+        "release": "changeset publish"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ota-meshi/eslint-plugin-regexp.git"
+    },
+    "keywords": [
+        "eslint",
+        "eslintplugin",
+        "eslint-plugin",
+        "regexp",
+        "regex"
+    ],
+    "author": "Yosuke Ota (https://github.com/ota-meshi)",
+    "contributors": [
+        "Michael Schmidt (https://github.com/RunDevelopment)"
+    ],
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/ota-meshi/eslint-plugin-regexp/issues"
+    },
+    "homepage": "https://github.com/ota-meshi/eslint-plugin-regexp#readme",
+    "peerDependencies": {
+        "eslint": ">=9.38.0"
+    },
+    "devDependencies": {
+        "@changesets/cli": "^2.26.2",
+        "@changesets/get-release-plan": "^4.0.2",
+        "@eslint-community/eslint-plugin-eslint-comments": "^4.7.1",
+        "@eslint/eslintrc": "^3.1.0",
+        "@eslint/js": "^10.0.0",
+        "@ota-meshi/eslint-plugin": "^0.20.0",
+        "@ota-meshi/site-kit-eslint-editor-vue": "^0.2.4",
+        "@oxc-node/core": "^0.0.35",
+        "@svitejs/changesets-changelog-github-compact": "^1.1.0",
+        "@types/chai": "^5.0.0",
+        "@types/eslint": "^9.0.0",
+        "@types/estree": "^1.0.6",
+        "@types/mocha": "^10.0.0",
+        "@types/node": "^24.0.0",
+        "@types/pako": "^2.0.3",
+        "@typescript-eslint/eslint-plugin": "~8.56.0",
+        "@typescript-eslint/parser": "~8.56.0",
+        "assert": "^2.0.0",
+        "c8": "^11.0.0",
+        "chai": "^6.0.0",
+        "env-cmd": "^11.0.0",
+        "eslint": "^10.0.0",
+        "eslint-config-prettier": "^10.0.0",
+        "eslint-doc-generator": "^3.0.0",
+        "eslint-import-resolver-typescript": "^4.0.0",
+        "eslint-plugin-eslint-plugin": "^7.0.0",
+        "eslint-plugin-import": "^2.32.0",
+        "eslint-plugin-jsdoc": "^62.0.0",
+        "eslint-plugin-json-schema-validator": "^6.0.0",
+        "eslint-plugin-jsonc": "^3.0.0",
+        "eslint-plugin-markdown": "^5.0.0",
+        "eslint-plugin-n": "^17.23.2",
+        "eslint-plugin-pere": "^0.0.1",
+        "eslint-plugin-prettier": "^5.1.3",
+        "eslint-plugin-regexp": "~3.0.0",
+        "eslint-plugin-unicorn": "^63.0.0",
+        "eslint-plugin-vue": "^10.8.0",
+        "eslint-plugin-yml": "^3.0.0",
+        "eslint-snapshot-rule-tester": "^0.1.0",
+        "magic-string": "^0.30.21",
+        "markdownlint-cli": "^0.48.0",
+        "mocha": "^11.0.0",
+        "npm-run-all2": "^8.0.0",
+        "pako": "^2.1.0",
+        "prettier": "~3.8.0",
+        "rimraf": "^6.0.1",
+        "semver": "^7.5.4",
+        "stylelint": "^17.0.0",
+        "stylelint-config-recommended": "^18.0.0",
+        "stylelint-config-recommended-vue": "^1.5.0",
+        "tsdown": "^0.21.0",
+        "typescript": "~5.9.0",
+        "typescript-eslint": "~8.56.0",
+        "vite-plugin-eslint4b": "^0.7.0",
+        "vitepress": "^1.0.0",
+        "vue-eslint-parser": "^10.4.0"
+    },
+    "dependencies": {
+        "@eslint-community/eslint-utils": "^4.2.0",
+        "@eslint-community/regexpp": "^4.11.0",
+        "comment-parser": "^1.4.0",
+        "jsdoc-type-pratt-parser": "^7.0.0",
+        "refa": "^0.12.1",
+        "regexp-ast-analysis": "^0.7.1",
+        "scslre": "^0.3.0"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}

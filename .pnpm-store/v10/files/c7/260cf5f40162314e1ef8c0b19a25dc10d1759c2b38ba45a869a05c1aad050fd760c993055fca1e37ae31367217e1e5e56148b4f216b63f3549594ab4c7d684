@@ -1,0 +1,120 @@
+{
+  "name": "vite-plugin-inspect",
+  "type": "module",
+  "version": "11.3.3",
+  "description": "Inspect the intermediate state of Vite plugins",
+  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/antfu",
+  "homepage": "https://github.com/antfu/vite-plugin-inspect#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antfu/vite-plugin-inspect.git"
+  },
+  "bugs": {
+    "url": "https://github.com/antfu/vite-plugin-inspect/issues"
+  },
+  "keywords": [
+    "vite-plugin"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./nuxt": "./dist/nuxt.mjs",
+    "./*": "./*"
+  },
+  "main": "dist/index.mjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0 || ^7.0.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@nuxt/kit": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "ansis": "^4.1.0",
+    "debug": "^4.4.1",
+    "error-stack-parser-es": "^1.0.5",
+    "ohash": "^2.0.11",
+    "open": "^10.2.0",
+    "perfect-debounce": "^2.0.0",
+    "sirv": "^3.0.1",
+    "unplugin-utils": "^0.3.0",
+    "vite-dev-rpc": "^1.1.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^5.2.1",
+    "@antfu/ni": "^25.0.0",
+    "@antfu/utils": "^9.2.0",
+    "@iconify/json": "^2.2.377",
+    "@nuxt/kit": "^4.0.3",
+    "@types/codemirror": "^5.60.16",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^24.3.0",
+    "@unocss/eslint-config": "^66.4.2",
+    "@unocss/eslint-plugin": "^66.4.2",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/compiler-sfc": "^3.5.19",
+    "@vueuse/core": "^13.7.0",
+    "@vueuse/router": "^13.7.0",
+    "bumpp": "^10.2.3",
+    "codemirror": "^5.65.16",
+    "codemirror-theme-vars": "^0.1.2",
+    "comlink": "^4.4.2",
+    "diff-match-patch-es": "^1.0.1",
+    "echarts": "^5.6.0",
+    "eslint": "^9.34.0",
+    "floating-vue": "^5.2.2",
+    "fuse.js": "^7.1.0",
+    "lint-staged": "^16.1.5",
+    "pathe": "^2.0.3",
+    "pinia": "^3.0.3",
+    "rimraf": "^6.0.1",
+    "simple-git-hooks": "^2.13.1",
+    "splitpanes": "^4.0.4",
+    "typescript": "^5.9.2",
+    "unbuild": "^3.6.1",
+    "unocss": "^66.4.2",
+    "unplugin-auto-import": "^20.0.0",
+    "unplugin-vue-components": "^29.0.0",
+    "unplugin-vue-router": "^0.15.0",
+    "vis-data": "^8.0.1",
+    "vis-network": "^10.0.1",
+    "vite": "npm:rolldown-vite@6.3.0-beta.5",
+    "vite-hot-client": "^2.1.0",
+    "vue": "^3.5.19",
+    "vue-echarts": "^7.0.3",
+    "vue-router": "^4.5.1",
+    "vue-tsc": "^3.0.6"
+  },
+  "resolutions": {
+    "vite": "catalog:dev"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.{js,ts,vue,md}": [
+      "eslint --cache --fix"
+    ]
+  },
+  "scripts": {
+    "build": "rimraf dist && pnpm run --sequential /^build:/",
+    "build:client": "vite build src/client",
+    "build:js": "unbuild",
+    "dev": "nr stub && INSPECT_DEV=true vite src/client",
+    "dev:client": "vite build src/client --watch",
+    "stub": "unbuild --stub",
+    "lint": "eslint .",
+    "typecheck": "vue-tsc --noEmit",
+    "release": "bumpp && pnpm publish"
+  }
+}

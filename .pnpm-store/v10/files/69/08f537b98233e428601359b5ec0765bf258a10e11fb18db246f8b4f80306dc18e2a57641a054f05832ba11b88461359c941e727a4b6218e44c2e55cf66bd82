@@ -1,0 +1,473 @@
+import { MatcherType } from "../types/rule.js";
+import { findMatchingParentNodes, getLiteralNodesByMatchers, isCalleeMatchers, isCalleeName, isCalleeRegex, isInsideBinaryExpression, isInsideConditionalExpressionTest, isInsideLogicalExpressionLeft, isInsideMemberExpression, isTagMatchers, isTagName, isTagRegex, isVariableMatchers, isVariableName, isVariableRegex, matchesPathPattern } from "../utils/matchers.js";
+import { getLiteralsByNodeAndRegex } from "../utils/regex.js";
+import { createObjectPathElement, deduplicateLiterals, getContent, getIndentation, getQuotes, getWhitespace, isGenericNodeWithParent, matchesName } from "../utils/utils.js";
+export const ES_CONTAINER_TYPES_TO_REPLACE_QUOTES = [
+    "ArrayExpression",
+    "Property",
+    "CallExpression",
+    "VariableDeclarator",
+    "ConditionalExpression",
+    "LogicalExpression"
+];
+export const ES_CONTAINER_TYPES_TO_INSERT_BRACES = [];
+export function getLiteralsByESVariableDeclarator(ctx, node, variables) {
+    const literals = variables.reduce((literals, variable) => {
+        if (!node.init) {
+            return literals;
+        }
+        if (!isESVariableSymbol(node.id)) {
+            return literals;
+        }
+        if (isVariableName(variable)) {
+            if (!matchesName(variable, node.id.name)) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESExpression(ctx, [node.init]));
+        }
+        else if (isVariableRegex(variable)) {
+            literals.push(...getLiteralsByESNodeAndRegex(ctx, node, variable));
+        }
+        else if (isVariableMatchers(variable)) {
+            if (!matchesName(variable[0], node.id.name)) {
+                return literals;
+            }
+            if (isESArrowFunctionExpression(node.init) || isESCallExpression(node.init)) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESMatchers(ctx, node.init, variable[1]));
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+export function getLiteralsByESCallExpression(ctx, node, callees) {
+    const literals = callees.reduce((literals, callee) => {
+        if (!isESCalleeSymbol(node.callee)) {
+            return literals;
+        }
+        if (isCalleeName(callee)) {
+            if (!matchesName(callee, node.callee.name)) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESExpression(ctx, node.arguments));
+        }
+        else if (isCalleeRegex(callee)) {
+            literals.push(...getLiteralsByESNodeAndRegex(ctx, node, callee));
+        }
+        else if (isCalleeMatchers(callee)) {
+            if (!matchesName(callee[0], node.callee.name)) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESMatchers(ctx, node, callee[1]));
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+export function getLiteralsByTaggedTemplateExpression(ctx, node, tags) {
+    const literals = tags.reduce((literals, tag) => {
+        if (!isTaggedTemplateSymbol(node.tag)) {
+            return literals;
+        }
+        if (isTagName(tag)) {
+            if (tag !== node.tag.name) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESTemplateLiteral(ctx, node.quasi));
+        }
+        else if (isTagRegex(tag)) {
+            literals.push(...getLiteralsByESNodeAndRegex(ctx, node, tag));
+        }
+        else if (isTagMatchers(tag)) {
+            if (tag[0] !== node.tag.name) {
+                return literals;
+            }
+            literals.push(...getLiteralsByESMatchers(ctx, node, tag[1]));
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+export function getLiteralsByESLiteralNode(ctx, node) {
+    if (isESSimpleStringLiteral(node)) {
+        const literal = getStringLiteralByESStringLiteral(ctx, node);
+        return literal ? [literal] : [];
+    }
+    if (isESTemplateLiteral(node)) {
+        return getLiteralsByESTemplateLiteral(ctx, node);
+    }
+    if (isESTemplateElement(node) && hasESNodeParentExtension(node)) {
+        const literal = getLiteralByESTemplateElement(ctx, node);
+        return literal ? [literal] : [];
+    }
+    return [];
+}
+export function getLiteralsByESMatchers(ctx, node, matchers) {
+    const matcherFunctions = getESMatcherFunctions(matchers);
+    const literalNodes = getLiteralNodesByMatchers(ctx, node, matcherFunctions);
+    const literals = literalNodes.flatMap(literalNode => getLiteralsByESLiteralNode(ctx, literalNode));
+    return deduplicateLiterals(literals);
+}
+export function getLiteralsByESNodeAndRegex(ctx, node, regex) {
+    if (!hasESNodeParentExtension(node)) {
+        return [];
+    }
+    return getLiteralsByNodeAndRegex(ctx, node, regex, {
+        getLiteralsByMatchingNode: (node) => {
+            if (!isESNode(node)) {
+                return;
+            }
+            if (isESSimpleStringLiteral(node)) {
+                const literal = getStringLiteralByESStringLiteral(ctx, node);
+                return literal ? [literal] : [];
+            }
+            if (isESTemplateElement(node) && hasESNodeParentExtension(node)) {
+                const templateLiteralNode = findParentESTemplateLiteralByESTemplateElement(node);
+                return templateLiteralNode && getLiteralsByESTemplateLiteral(ctx, templateLiteralNode);
+            }
+        },
+        getNodeByRangeStart: (start) => ctx.sourceCode.getNodeByRangeIndex(start),
+        getNodeRange: node => isESNode(node) ? [node.range?.[0], node.range?.[1]] : undefined,
+        getNodeSourceCode: node => isESNode(node) ? ctx.sourceCode.getText(node) : undefined
+    });
+}
+export function getStringLiteralByESStringLiteral(ctx, node) {
+    const raw = node.raw;
+    if (!raw || !node.loc || !node.range || !node.parent.loc || !node.parent.range) {
+        return;
+    }
+    const line = ctx.sourceCode.lines[node.loc.start.line - 1];
+    const quotes = getQuotes(raw);
+    const priorLiterals = findPriorLiterals(ctx, node);
+    const content = getContent(raw, quotes);
+    const whitespaces = getWhitespace(content);
+    const indentation = getIndentation(line);
+    const multilineQuotes = getMultilineQuotes(node);
+    const supportsMultiline = !isESObjectKey(node);
+    return {
+        ...quotes,
+        ...whitespaces,
+        ...multilineQuotes,
+        content,
+        indentation,
+        isInterpolated: false,
+        loc: node.loc,
+        priorLiterals,
+        range: node.range,
+        raw,
+        supportsMultiline,
+        type: "StringLiteral"
+    };
+}
+function getLiteralByESTemplateElement(ctx, node) {
+    const raw = ctx.sourceCode.getText(node);
+    if (!raw || !node.loc || !node.range || !node.parent.loc || !node.parent.range) {
+        return;
+    }
+    const line = ctx.sourceCode.lines[node.parent.loc.start.line - 1];
+    const quotes = getQuotes(raw);
+    const braces = getBracesByString(ctx, raw);
+    const isInterpolated = getIsInterpolated(ctx, raw);
+    const priorLiterals = findPriorLiterals(ctx, node);
+    const content = getContent(raw, quotes, braces);
+    const whitespaces = getWhitespace(content);
+    const indentation = getIndentation(line);
+    const multilineQuotes = getMultilineQuotes(node);
+    return {
+        ...whitespaces,
+        ...quotes,
+        ...braces,
+        ...multilineQuotes,
+        content,
+        indentation,
+        isInterpolated,
+        loc: node.loc,
+        priorLiterals,
+        range: node.range,
+        raw,
+        supportsMultiline: true,
+        type: "TemplateLiteral"
+    };
+}
+function getMultilineQuotes(node) {
+    const surroundingBraces = ES_CONTAINER_TYPES_TO_INSERT_BRACES.includes(node.parent.type);
+    const multilineQuotes = ES_CONTAINER_TYPES_TO_REPLACE_QUOTES.includes(node.parent.type)
+        ? ["`"]
+        : [];
+    return {
+        multilineQuotes,
+        surroundingBraces
+    };
+}
+function getLiteralsByESExpression(ctx, args) {
+    return args.reduce((acc, node) => {
+        if (node.type === "SpreadElement") {
+            return acc;
+        }
+        acc.push(...getLiteralsByESLiteralNode(ctx, node));
+        return acc;
+    }, []);
+}
+export function getLiteralsByESTemplateLiteral(ctx, node) {
+    return node.quasis.map(quasi => {
+        if (!hasESNodeParentExtension(quasi)) {
+            return;
+        }
+        return getLiteralByESTemplateElement(ctx, quasi);
+    }).filter((literal) => literal !== undefined);
+}
+export function findParentESTemplateLiteralByESTemplateElement(node) {
+    if (!hasESNodeParentExtension(node)) {
+        return;
+    }
+    if (node.parent.type === "TemplateLiteral") {
+        return node.parent;
+    }
+    return findParentESTemplateLiteralByESTemplateElement(node.parent);
+}
+function findPriorLiterals(ctx, node) {
+    if (!hasESNodeParentExtension(node)) {
+        return;
+    }
+    const priorLiterals = [];
+    let currentNode = node;
+    while (hasESNodeParentExtension(currentNode)) {
+        const parent = currentNode.parent;
+        if (isESCallExpression(parent)) {
+            break;
+        }
+        if (isESArrowFunctionExpression(parent)) {
+            break;
+        }
+        if (isESVariableDeclarator(parent)) {
+            break;
+        }
+        if (parent.type === "TemplateLiteral") {
+            for (const quasi of parent.quasis) {
+                if (quasi.range === node.range) {
+                    break;
+                }
+                if (quasi.type === "TemplateElement" && hasESNodeParentExtension(quasi)) {
+                    const literal = getLiteralByESTemplateElement(ctx, quasi);
+                    if (!literal) {
+                        continue;
+                    }
+                    priorLiterals.push(literal);
+                }
+            }
+        }
+        if (parent.type === "TemplateElement") {
+            const literal = getLiteralByESTemplateElement(ctx, parent);
+            if (!literal) {
+                continue;
+            }
+            priorLiterals.push(literal);
+        }
+        if (parent.type === "Literal") {
+            const literal = getLiteralsByESLiteralNode(ctx, parent);
+            if (!literal) {
+                continue;
+            }
+            priorLiterals.push(...literal);
+        }
+        currentNode = parent;
+    }
+    return priorLiterals;
+}
+export function getESObjectPath(node) {
+    if (!isGenericNodeWithParent(node)) {
+        return;
+    }
+    if (!hasESNodeParentExtension(node)) {
+        return;
+    }
+    if (node.type !== "Property" &&
+        node.type !== "ObjectExpression" &&
+        node.type !== "ArrayExpression" &&
+        node.type !== "Identifier" &&
+        node.type !== "Literal" &&
+        node.type !== "TemplateElement") {
+        return;
+    }
+    const paths = [];
+    if (node.type === "Property") {
+        if (node.key.type === "Identifier") {
+            paths.unshift(createObjectPathElement(node.key.name));
+        }
+        else if (node.key.type === "Literal") {
+            paths.unshift(createObjectPathElement(node.key.value?.toString() ?? node.key.raw));
+        }
+        else {
+            return "";
+        }
+    }
+    if (isESStringLike(node) && isInsideObjectValue(node)) {
+        const property = findMatchingParentNodes(node, [(node) => {
+                return isESNode(node) && node.type === "Property";
+            }])[0];
+        return getESObjectPath(property);
+    }
+    if (isESObjectKey(node)) {
+        const property = node.parent;
+        return getESObjectPath(property);
+    }
+    if (node.parent.type === "ArrayExpression" && node.type !== "Property" && node.type !== "TemplateElement") {
+        const index = node.parent.elements.indexOf(node);
+        paths.unshift(`[${index}]`);
+    }
+    paths.unshift(getESObjectPath(node.parent));
+    return paths.reduce((paths, currentPath) => {
+        if (!currentPath) {
+            return paths;
+        }
+        if (paths.length === 0) {
+            return [currentPath];
+        }
+        if (currentPath.startsWith("[") && currentPath.endsWith("]")) {
+            return [...paths, currentPath];
+        }
+        return [...paths, ".", currentPath];
+    }, []).join("");
+}
+export function isESObjectKey(node) {
+    return (node.parent.type === "Property" &&
+        node.parent.parent.type === "ObjectExpression" &&
+        node.parent.key === node);
+}
+export function isInsideObjectValue(node) {
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    // #34 allow call expressions as object values
+    if (isESCallExpression(node)) {
+        return false;
+    }
+    if (isESArrowFunctionExpression(node)) {
+        return false;
+    }
+    if (node.parent.type === "Property" &&
+        node.parent.parent.type === "ObjectExpression" &&
+        node.parent.value === node) {
+        return true;
+    }
+    return isInsideObjectValue(node.parent);
+}
+export function isESSimpleStringLiteral(node) {
+    return (node.type === "Literal" &&
+        "value" in node &&
+        typeof node.value === "string");
+}
+export function isESStringLike(node) {
+    return isESSimpleStringLiteral(node) || isESTemplateElement(node);
+}
+export function isESTemplateLiteral(node) {
+    return node.type === "TemplateLiteral";
+}
+export function isESTemplateElement(node) {
+    return node.type === "TemplateElement";
+}
+export function isESNode(node) {
+    return (node !== null &&
+        typeof node === "object" &&
+        "type" in node);
+}
+export function isESCallExpression(node) {
+    return node.type === "CallExpression";
+}
+export function isESArrowFunctionExpression(node) {
+    return node.type === "ArrowFunctionExpression";
+}
+function isESCalleeSymbol(node) {
+    return node.type === "Identifier" && !!node.parent && isESCallExpression(node.parent);
+}
+function isTaggedTemplateExpression(node) {
+    return node.type === "TaggedTemplateExpression";
+}
+function isTaggedTemplateSymbol(node) {
+    return node.type === "Identifier" && !!node.parent && isTaggedTemplateExpression(node.parent);
+}
+export function isESVariableDeclarator(node) {
+    return node.type === "VariableDeclarator";
+}
+function isESVariableSymbol(node) {
+    return node.type === "Identifier" && !!node.parent && isESVariableDeclarator(node.parent);
+}
+export function hasESNodeParentExtension(node) {
+    return "parent" in node && !!node.parent;
+}
+function getBracesByString(ctx, raw) {
+    const closingBraces = raw.trim().startsWith("}") ? "}" : undefined;
+    const openingBraces = raw.trim().endsWith("${") ? "${" : undefined;
+    return {
+        closingBraces,
+        openingBraces
+    };
+}
+function getIsInterpolated(ctx, raw) {
+    const braces = getBracesByString(ctx, raw);
+    return !!braces.closingBraces || !!braces.openingBraces;
+}
+function getESMatcherFunctions(matchers) {
+    return matchers.reduce((matcherFunctions, matcher) => {
+        switch (matcher.match) {
+            case MatcherType.String: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node) ||
+                        isESObjectKey(node) ||
+                        isInsideObjectValue(node)) {
+                        return false;
+                    }
+                    return isESStringLike(node);
+                });
+                break;
+            }
+            case MatcherType.ObjectKey: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isESObjectKey(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+            case MatcherType.ObjectValue: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isInsideObjectValue(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isESObjectKey(node) ||
+                        !isESStringLike(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+        }
+        return matcherFunctions;
+    }, []);
+}
+//# sourceMappingURL=es.js.map

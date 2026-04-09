@@ -1,0 +1,570 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.enforceConsistentLineWrapping = void 0;
+const default_options_js_1 = require("../options/default-options.js");
+const descriptions_js_1 = require("../options/descriptions.js");
+const prefix_js_1 = require("../tailwindcss/prefix.js");
+const escape_js_1 = require("../async-utils/escape.js");
+const options_js_1 = require("../utils/options.js");
+const quotes_js_1 = require("../utils/quotes.js");
+const rule_js_1 = require("../utils/rule.js");
+const utils_js_1 = require("../utils/utils.js");
+const defaultOptions = {
+    attributes: default_options_js_1.DEFAULT_ATTRIBUTE_NAMES,
+    callees: default_options_js_1.DEFAULT_CALLEE_NAMES,
+    classesPerLine: 0,
+    group: "newLine",
+    indent: 2,
+    lineBreakStyle: "unix",
+    preferSingleLine: false,
+    printWidth: 80,
+    tags: default_options_js_1.DEFAULT_TAG_NAMES,
+    variables: default_options_js_1.DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/enforce-consistent-line-wrapping.md";
+exports.enforceConsistentLineWrapping = {
+    name: "enforce-consistent-line-wrapping",
+    rule: {
+        create: ctx => (0, rule_js_1.createRuleListener)(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                category: "Stylistic Issues",
+                description: "Enforce consistent line wrapping for tailwind classes.",
+                recommended: true,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...descriptions_js_1.CALLEE_SCHEMA,
+                        ...descriptions_js_1.ATTRIBUTE_SCHEMA,
+                        ...descriptions_js_1.VARIABLE_SCHEMA,
+                        ...descriptions_js_1.TAG_SCHEMA,
+                        ...descriptions_js_1.ENTRYPOINT_SCHEMA,
+                        ...descriptions_js_1.TAILWIND_CONFIG_SCHEMA,
+                        ...descriptions_js_1.TSCONFIG_SCHEMA,
+                        classesPerLine: {
+                            default: defaultOptions.classesPerLine,
+                            description: "The maximum amount of classes per line. Lines are wrapped appropriately to stay within this limit . The value `0` disables line wrapping by `classesPerLine`.",
+                            type: "integer"
+                        },
+                        group: {
+                            default: defaultOptions.group,
+                            description: "Defines how different groups of classes should be separated. A group is a set of classes that share the same variant.",
+                            enum: ["emptyLine", "never", "newLine"],
+                            type: "string"
+                        },
+                        indent: {
+                            default: defaultOptions.indent,
+                            description: "Determines how the code should be indented.",
+                            oneOf: [
+                                {
+                                    enum: ["tab"],
+                                    type: "string"
+                                },
+                                {
+                                    minimum: 0,
+                                    type: "integer"
+                                }
+                            ]
+                        },
+                        lineBreakStyle: {
+                            default: defaultOptions.lineBreakStyle,
+                            description: "The line break style. The style `windows` will use `\\r\\n` as line breaks and `unix` will use `\\n`.",
+                            enum: ["unix", "windows"],
+                            type: "string"
+                        },
+                        preferSingleLine: {
+                            default: defaultOptions.preferSingleLine,
+                            description: "Prefer a single line for the classes. When set to `true`, the rule will keep all classes on a single line until the line exceeds the `printWidth` or `classesPerLine` limit.",
+                            type: "boolean"
+                        },
+                        printWidth: {
+                            default: defaultOptions.printWidth,
+                            description: "The maximum line length. Lines are wrapped appropriately to stay within this limit. The value `0` disables line wrapping by `printWidth`.",
+                            type: "integer"
+                        }
+                    },
+                    type: "object"
+                }
+            ],
+            type: "layout"
+        }
+    }
+};
+function initialize() {
+    (0, prefix_js_1.createGetPrefix)();
+}
+function lintLiterals(ctx, literals) {
+    const getPrefix = (0, prefix_js_1.createGetPrefix)();
+    const options = getOptions(ctx);
+    const { classesPerLine, group: groupSeparator, indent, lineBreakStyle, preferSingleLine, printWidth, tailwindConfig, tsconfig } = options;
+    const { prefix, suffix } = getPrefix({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    for (const literal of literals) {
+        if (!literal.supportsMultiline) {
+            continue;
+        }
+        const lineStartPosition = literal.indentation + getIndentation(ctx, indent);
+        const literalStartPosition = literal.loc.start.column;
+        const classChunks = (0, utils_js_1.splitClasses)(literal.content);
+        const groupedClasses = groupClasses(ctx, classChunks, prefix, suffix);
+        const multilineClasses = new Lines(ctx, lineStartPosition);
+        const singlelineClasses = new Lines(ctx, lineStartPosition);
+        if (literal.openingQuote) {
+            if (literal.multilineQuotes?.includes("\\`")) {
+                multilineClasses.line.addMeta({ openingQuote: "\\`" });
+            }
+            else if (literal.multilineQuotes?.includes("`")) {
+                multilineClasses.line.addMeta({ openingQuote: "`" });
+            }
+            else {
+                multilineClasses.line.addMeta({ openingQuote: literal.openingQuote });
+            }
+        }
+        if (literal.openingQuote && literal.closingQuote) {
+            singlelineClasses.line.addMeta({ closingQuote: literal.closingQuote, openingQuote: literal.openingQuote });
+        }
+        leadingTemplateLiteralNewLine: if (literal.isInterpolated && literal.closingBraces) {
+            multilineClasses.line.addMeta({ closingBraces: literal.closingBraces });
+            // skip newline for sticky classes
+            if (literal.leadingWhitespace === "" && groupedClasses) {
+                break leadingTemplateLiteralNewLine;
+            }
+            // skip if no classes are present
+            if (!groupedClasses) {
+                break leadingTemplateLiteralNewLine;
+            }
+            if (groupSeparator === "emptyLine") {
+                multilineClasses.addLine();
+            }
+            if (groupSeparator === "emptyLine" ||
+                groupSeparator === "newLine" ||
+                groupSeparator === "never") {
+                multilineClasses.addLine();
+                multilineClasses.line.indent();
+            }
+        }
+        if (groupedClasses) {
+            for (let g = 0; g < groupedClasses.length; g++) {
+                const group = groupedClasses.at(g);
+                const isFirstGroup = g === 0;
+                if (group.classCount === 0) {
+                    continue;
+                }
+                if (isFirstGroup && (literal.isInterpolated && !literal.closingBraces ||
+                    !literal.isInterpolated)) {
+                    multilineClasses.addLine();
+                    multilineClasses.line.indent();
+                }
+                if (!isFirstGroup) {
+                    if (groupSeparator === "emptyLine") {
+                        multilineClasses.addLine();
+                    }
+                    if (groupSeparator === "emptyLine" || groupSeparator === "newLine") {
+                        multilineClasses.addLine();
+                        multilineClasses.line.indent();
+                    }
+                }
+                for (let i = 0; i < group.classCount; i++) {
+                    const isFirstClass = i === 0;
+                    const isLastClass = i === group.classCount - 1;
+                    const className = group.at(i);
+                    const simulatedLine = multilineClasses.line
+                        .clone()
+                        .addClass(className)
+                        .toString();
+                    // wrap after the first sticky class
+                    if (isFirstClass &&
+                        literal.leadingWhitespace === "" &&
+                        literal.isInterpolated &&
+                        literal.closingBraces) {
+                        multilineClasses.line.addClass(className);
+                        // don't add a new line if the first class is also the last
+                        if (isLastClass) {
+                            break;
+                        }
+                        if (groupSeparator === "emptyLine") {
+                            multilineClasses.addLine();
+                        }
+                        if (groupSeparator === "emptyLine" || groupSeparator === "newLine") {
+                            multilineClasses.addLine();
+                            multilineClasses.line.indent();
+                        }
+                        continue;
+                    }
+                    // wrap before the last sticky class
+                    if (isLastClass &&
+                        literal.trailingWhitespace === "" &&
+                        literal.isInterpolated &&
+                        literal.openingBraces) {
+                        // skip wrapping for the first class of a group
+                        if (isFirstClass) {
+                            multilineClasses.line.addClass(className);
+                            continue;
+                        }
+                        if (groupSeparator === "emptyLine") {
+                            multilineClasses.addLine();
+                        }
+                        if (groupSeparator === "emptyLine" || groupSeparator === "newLine") {
+                            multilineClasses.addLine();
+                            multilineClasses.line.indent();
+                        }
+                        multilineClasses.line.addClass(className);
+                        continue;
+                    }
+                    // wrap if the length exceeds the limits
+                    if (simulatedLine.length > printWidth && printWidth !== 0 ||
+                        multilineClasses.line.classCount >= classesPerLine && classesPerLine !== 0) {
+                        // but only if it is not the first class of a group or classes are not grouped
+                        if (!isFirstClass || groupSeparator === "never") {
+                            multilineClasses.addLine();
+                            multilineClasses.line.indent();
+                        }
+                    }
+                    multilineClasses.line.addClass(className);
+                    singlelineClasses.line.addClass(className);
+                }
+            }
+        }
+        trailingTemplateLiteralNewLine: if (literal.isInterpolated && literal.openingBraces) {
+            // skip newline for sticky classes
+            if (literal.trailingWhitespace === "" && groupedClasses) {
+                multilineClasses.line.addMeta({
+                    openingBraces: literal.openingBraces
+                });
+                break trailingTemplateLiteralNewLine;
+            }
+            if (groupSeparator === "emptyLine" && groupedClasses) {
+                multilineClasses.addLine();
+            }
+            if (groupSeparator === "emptyLine" ||
+                groupSeparator === "newLine" ||
+                groupSeparator === "never") {
+                multilineClasses.addLine();
+                multilineClasses.line.indent();
+            }
+            multilineClasses.line.addMeta({
+                openingBraces: literal.openingBraces
+            });
+        }
+        if (literal.closingQuote) {
+            multilineClasses.addLine();
+            multilineClasses.line.indent(lineStartPosition - getIndentation(ctx, indent));
+            if (literal.multilineQuotes?.includes("\\`")) {
+                multilineClasses.line.addMeta({ closingQuote: "\\`" });
+            }
+            else if (literal.multilineQuotes?.includes("`")) {
+                multilineClasses.line.addMeta({ closingQuote: "`" });
+            }
+            else {
+                multilineClasses.line.addMeta({ closingQuote: literal.closingQuote });
+            }
+        }
+        // collapse lines if there is no reason for line wrapping or if preferSingleLine is enabled
+        collapse: {
+            // disallow collapsing if the literal contains variants, except preferSingleLine is enabled
+            if (groupedClasses?.length !== 1 && !preferSingleLine) {
+                break collapse;
+            }
+            // disallow collapsing for interpolated literals
+            if (literal.isInterpolated && (literal.openingBraces || literal.closingBraces)) {
+                break collapse;
+            }
+            // disallow collapsing if the original literal was a single line (keeps original whitespace)
+            if (!literal.content.includes(getLineBreaks(lineBreakStyle))) {
+                break collapse;
+            }
+            // disallow collapsing if the single line contains more classes than the classesPerLine
+            if (singlelineClasses.line.classCount > classesPerLine && classesPerLine !== 0) {
+                break collapse;
+            }
+            // disallow collapsing if the single line including the element and all previous characters is longer than the printWidth
+            if (literalStartPosition + singlelineClasses.line.length > printWidth && printWidth !== 0) {
+                break collapse;
+            }
+            const fixedClasses = singlelineClasses.line.toString(false);
+            if (literal.raw === fixedClasses) {
+                continue;
+            }
+            ctx.report({
+                data: {
+                    notReadable: (0, utils_js_1.display)(literal.raw),
+                    readable: (0, utils_js_1.display)(fixedClasses)
+                },
+                fix(fixer) {
+                    return fixer.replaceTextRange(literal.range, fixedClasses);
+                },
+                loc: literal.loc,
+                message: augmentMessage(literal.raw, options, "Unnecessary line wrapping. Expected\n\n{{ notReadable }}\n\nto be\n\n{{ readable }}")
+            });
+            return;
+        }
+        // skip if class string was empty
+        if (multilineClasses.length === 2) {
+            if (!literal.openingBraces && !literal.closingBraces && literal.content.trim() === "") {
+                continue;
+            }
+        }
+        // skip line wrapping if preferSingleLine is enabled and the single line does not exceed the printWidth or classesPerLine
+        if (preferSingleLine &&
+            (literalStartPosition + singlelineClasses.line.length <= printWidth && printWidth !== 0 ||
+                singlelineClasses.line.classCount <= classesPerLine && classesPerLine !== 0) ||
+            printWidth === 0 && classesPerLine === 0) {
+            continue;
+        }
+        // skip line wrapping if it is not necessary
+        skip: {
+            // disallow skipping if class string contains multiple groups
+            if (groupedClasses && groupedClasses.length > 1) {
+                break skip;
+            }
+            // disallow skipping if the original literal was longer than the printWidth
+            if (literalStartPosition + singlelineClasses.line.length > printWidth && printWidth !== 0 ||
+                singlelineClasses.line.classCount > classesPerLine && classesPerLine !== 0) {
+                break skip;
+            }
+            // disallow skipping for interpolated literals
+            if (literal.isInterpolated && (literal.openingBraces || literal.closingBraces)) {
+                break skip;
+            }
+            const openingQuoteLength = literal.openingQuote?.length ?? 0;
+            const closingBracesLength = literal.closingBraces?.length ?? 0;
+            const firstLineLength = multilineClasses
+                .at(1)
+                .toString()
+                .trim()
+                .length +
+                openingQuoteLength +
+                closingBracesLength;
+            // disallow skipping if the first line including the element and all previous characters is longer than the printWidth
+            if (literalStartPosition + firstLineLength > printWidth && printWidth !== 0) {
+                break skip;
+            }
+            // disallow skipping if the first line contains more classes than the classesPerLine
+            if (multilineClasses.at(1).classCount > classesPerLine && classesPerLine !== 0) {
+                break skip;
+            }
+            continue;
+        }
+        const fixedClasses = multilineClasses.toString(lineBreakStyle);
+        if (literal.raw === fixedClasses) {
+            continue;
+        }
+        ctx.report({
+            data: {
+                notReadable: (0, utils_js_1.display)(literal.raw),
+                readable: (0, utils_js_1.display)(fixedClasses)
+            },
+            fix(fixer) {
+                return literal.surroundingBraces
+                    ? fixer.replaceTextRange(literal.range, `{${fixedClasses}}`)
+                    : fixer.replaceTextRange(literal.range, fixedClasses);
+            },
+            loc: literal.loc,
+            message: augmentMessage(literal.raw, options, "Incorrect line wrapping. Expected\n\n{{ notReadable }}\n\nto be\n\n{{ readable }}")
+        });
+    }
+}
+function getIndentation(ctx, indentation) {
+    return indentation === "tab" ? 1 : indentation ?? 0;
+}
+function getOptions(ctx) {
+    const options = ctx.options[0] ?? {};
+    const common = (0, options_js_1.getCommonOptions)(ctx);
+    const printWidth = options.printWidth ?? defaultOptions.printWidth;
+    const classesPerLine = options.classesPerLine ?? defaultOptions.classesPerLine;
+    const indent = options.indent ?? defaultOptions.indent;
+    const group = options.group ?? defaultOptions.group;
+    const preferSingleLine = options.preferSingleLine ?? defaultOptions.preferSingleLine;
+    const lineBreakStyle = options.lineBreakStyle ?? defaultOptions.lineBreakStyle;
+    return {
+        ...common,
+        classesPerLine,
+        group,
+        indent,
+        lineBreakStyle,
+        preferSingleLine,
+        printWidth
+    };
+}
+class Lines {
+    constructor(ctx, indentation) {
+        this.lines = [];
+        this.indentation = 0;
+        this.ctx = ctx;
+        this.indentation = indentation;
+        this.addLine();
+    }
+    at(index) {
+        return index >= 0
+            ? this.lines[index]
+            : this.lines[this.lines.length + index];
+    }
+    get line() {
+        return this.currentLine;
+    }
+    get length() {
+        return this.lines.length;
+    }
+    addLine() {
+        const line = new Line(this.ctx, this.indentation);
+        this.lines.push(line);
+        this.currentLine = line;
+        return this;
+    }
+    toString(lineBreakStyle = "unix") {
+        const lineBreaks = getLineBreaks(lineBreakStyle);
+        return this.lines.map(line => line.toString()).join(lineBreaks);
+    }
+}
+class Line {
+    constructor(ctx, indentation) {
+        this.classes = [];
+        this.meta = {};
+        this.indentation = 0;
+        this.ctx = ctx;
+        this.indentation = indentation;
+    }
+    indent(start = this.indentation) {
+        const indent = getOptions(this.ctx).indent;
+        if (indent === "tab") {
+            this.meta.indentation = "\t".repeat(start);
+        }
+        else {
+            this.meta.indentation = " ".repeat(start);
+        }
+        return this;
+    }
+    get length() {
+        return this.toString().length;
+    }
+    get classCount() {
+        return this.classes.length;
+    }
+    get printWidth() {
+        return this.toString().length;
+    }
+    addMeta(meta) {
+        this.meta = { ...this.meta, ...meta };
+        return this;
+    }
+    addClass(className) {
+        this.classes.push(className);
+        return this;
+    }
+    clone() {
+        const line = new Line(this.ctx, this.indentation);
+        line.classes = [...this.classes];
+        line.meta = { ...this.meta };
+        return line;
+    }
+    toString(indent = true) {
+        return this.join([
+            indent ? this.meta.indentation : "",
+            this.meta.openingQuote,
+            this.meta.closingBraces,
+            this.meta.leadingWhitespace ?? "",
+            (0, quotes_js_1.escapeNestedQuotes)(this.join(this.classes), this.meta.openingQuote ?? this.meta.closingQuote ?? "`"),
+            this.meta.trailingWhitespace ?? "",
+            this.meta.openingBraces,
+            this.meta.closingQuote
+        ], "");
+    }
+    join(content, separator = " ") {
+        return content
+            .filter(content => content !== undefined)
+            .join(separator);
+    }
+}
+function groupClasses(ctx, classes, prefix, suffix) {
+    if (classes.length === 0) {
+        return;
+    }
+    const prefixRegex = new RegExp(`^${(0, escape_js_1.escapeForRegex)(`${prefix}${suffix}`)}`);
+    const groups = new Groups();
+    for (const className of classes) {
+        const isFirstClass = classes.indexOf(className) === 0;
+        const isFirstGroup = groups.length === 1;
+        const lastGroup = groups.at(-1);
+        const lastClassName = lastGroup?.at(-1);
+        const unprefixedLastClassName = lastClassName?.replace(prefixRegex, "");
+        const unprefixedClassName = className.replace(prefixRegex, "");
+        const lastVariant = unprefixedLastClassName?.match(/^.*?:/)?.[0];
+        const variant = unprefixedClassName.match(/^.*?:/)?.[0];
+        if (lastVariant !== variant && !(isFirstClass && isFirstGroup)) {
+            groups.addGroup();
+        }
+        groups.group.addClass(className);
+    }
+    return groups;
+}
+class Groups {
+    constructor() {
+        this.groups = [];
+        this.addGroup();
+    }
+    get group() {
+        return this.currentGroup;
+    }
+    at(index) {
+        return this.groups.at(index);
+    }
+    get length() {
+        return this.groups.length;
+    }
+    addGroup() {
+        const group = new Group();
+        this.currentGroup = group;
+        this.groups.push(this.currentGroup);
+        return this;
+    }
+}
+class Group {
+    constructor() {
+        this.classes = [];
+    }
+    get classCount() {
+        return this.classes.length;
+    }
+    at(index) {
+        return this.classes.at(index);
+    }
+    addClass(className) {
+        this.classes.push(className);
+        return this;
+    }
+}
+function getLineBreaks(lineBreakStyle) {
+    return lineBreakStyle === "unix" ? "\n" : "\r\n";
+}
+function augmentMessage(original, options, message) {
+    const invalidLineBreaks = isLineBreakStyleLikelyMisconfigured(original, options);
+    const invalidIndentations = isIndentationLikelyMisconfigured(original, options);
+    const warnings = [];
+    if (invalidLineBreaks) {
+        warnings.push({
+            option: "lineBreakStyle",
+            title: "Inconsistent line endings detected",
+            url: `${DOCUMENTATION_URL}#linebreakstyle`
+        });
+    }
+    if (invalidIndentations) {
+        warnings.push({
+            option: "indent",
+            title: "Inconsistent indentation detected",
+            url: `${DOCUMENTATION_URL}#indent`
+        });
+    }
+    return (0, utils_js_1.augmentMessageWithWarnings)(message, DOCUMENTATION_URL, warnings);
+}
+function isLineBreakStyleLikelyMisconfigured(original, options) {
+    return (original.includes("\r") && options.lineBreakStyle === "unix" ||
+        !original.includes("\r") && options.lineBreakStyle === "windows");
+}
+function isIndentationLikelyMisconfigured(original, options) {
+    return (original.includes("  ") && options.indent === "tab" ||
+        original.includes("\t") && typeof options.indent === "number");
+}
+//# sourceMappingURL=enforce-consistent-line-wrapping.js.map

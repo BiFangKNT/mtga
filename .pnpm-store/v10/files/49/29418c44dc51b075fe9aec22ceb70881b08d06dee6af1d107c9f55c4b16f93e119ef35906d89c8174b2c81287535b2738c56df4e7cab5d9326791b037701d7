@@ -1,0 +1,60 @@
+{
+  "name": "httpxy",
+  "version": "0.3.1",
+  "description": "A full-featured HTTP proxy for Node.js.",
+  "license": "MIT",
+  "repository": "unjs/httpxy",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "unbuild",
+    "dev": "vitest",
+    "lint": "oxlint . && oxfmt --check",
+    "fmt": "oxlint . --fix && oxfmt",
+    "prepack": "pnpm run build",
+    "release": "pnpm test && pnpm build && changelogen --release && npm publish && git push --follow-tags",
+    "test": "pnpm lint && pnpm typecheck && vitest run --coverage",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@types/async": "^3.2.25",
+    "@types/concat-stream": "^2.0.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.3",
+    "@types/semver": "^7.7.1",
+    "@types/sse": "^0.0.0",
+    "@types/ws": "^8.18.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260218.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "async": "^3.2.6",
+    "changelogen": "^0.6.2",
+    "concat-stream": "^2.0.0",
+    "eslint-config-unjs": "^0.6.2",
+    "expect.js": "^0.3.1",
+    "ofetch": "^1.5.1",
+    "oxfmt": "^0.33.0",
+    "oxlint": "^1.48.0",
+    "semver": "^7.7.4",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "sse": "^0.0.8",
+    "typescript": "^5.9.3",
+    "unbuild": "^3.6.1",
+    "vitest": "^4.0.18",
+    "ws": "^8.19.0"
+  },
+  "packageManager": "pnpm@10.30.0"
+}

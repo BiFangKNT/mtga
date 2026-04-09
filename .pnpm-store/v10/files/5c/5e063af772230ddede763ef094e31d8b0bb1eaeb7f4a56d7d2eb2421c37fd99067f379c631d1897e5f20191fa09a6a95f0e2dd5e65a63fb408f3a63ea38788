@@ -1,0 +1,51 @@
+{
+  "name": "errx",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Zero dependency library to capture and parse stack traces in Node, Bun and Deno",
+  "license": "MIT",
+  "repository": "danielroe/errx",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@antfu/eslint-config": "latest",
+    "@types/node": "^20.14.9",
+    "@vitest/coverage-v8": "latest",
+    "bumpp": "latest",
+    "eslint": "latest",
+    "lint-staged": "latest",
+    "simple-git-hooks": "latest",
+    "typescript": "latest",
+    "unbuild": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  },
+  "resolutions": {
+    "errx": "link:."
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.{js,ts,mjs,cjs,json,.*rc}": [
+      "pnpm eslint --fix"
+    ]
+  },
+  "scripts": {
+    "build": "unbuild",
+    "dev": "vitest dev",
+    "lint": "eslint . --fix",
+    "release": "bumpp && pnpm publish",
+    "test": "pnpm test:unit && pnpm test:types",
+    "test:unit": "vitest",
+    "test:types": "tsc --noEmit"
+  }
+}

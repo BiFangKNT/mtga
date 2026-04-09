@@ -1,0 +1,89 @@
+{
+  "===== INFO =====": "",
+  "name": "fzf",
+  "version": "0.5.2",
+  "description": "Do fuzzy matching using FZF algorithm in JavaScript",
+  "license": "BSD-3-Clause",
+  "keywords": [
+    "fzf",
+    "fuzzy-search",
+    "fuzzy-match",
+    "fuzzy",
+    "search",
+    "find"
+  ],
+  "homepage": "https://fzf.netlify.app",
+  "repository": "ajitid/fzf-for-js",
+  "author": {
+    "name": "Ajit",
+    "email": "zlksnkwork+pkgnfo@gmail.com",
+    "url": "https://hemarkable.com"
+  },
+  "===== SCRIPTS =====": "",
+  "scripts": {
+    "dev": "vite -c vite-for-docs.config.ts",
+    "build": "npm run build:modules && npm run build:types",
+    "postbuild": "node scripts/postbuild.js",
+    "build:modules": "tsc && vite build && vite build -c vite-legacy.config.ts",
+    "build:types": "tsc -p tsconfig-to-build-types.json --outDir dist/types",
+    "build:only-docs": "tsc && vite build -c vite-for-docs.config.ts",
+    "build:docs": "npm run fill-with-old-docs && npm run build:only-docs",
+    "fill-with-old-docs": "node scripts/fill-with-old-docs.js",
+    "prepack": "node scripts/prepack.cjs",
+    "postpack": "node scripts/postpack.cjs",
+    "test": "jest",
+    "test:watch": "jest --watch -o",
+    "test:cov": "jest --coverage",
+    "format": "prettier --write ."
+  },
+  "===== BUILD =====": "",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/fzf.umd.js",
+  "module": "./dist/fzf.es.js",
+  "exports": {
+    ".": {
+      "types": "./dist/types/main.d.ts",
+      "import": "./dist/fzf.es.js",
+      "require": "./dist/fzf.umd.js"
+    }
+  },
+  "types": "./dist/types/main.d.ts",
+  "===== HINTING =====": "",
+  "sideEffects": false,
+  "===== DEPS =====": "",
+  "devDependencies": {
+    "@mdx-js/mdx": "^2.1.1",
+    "@mdx-js/react": "^2.1.1",
+    "@mdx-js/rollup": "^2.1.1",
+    "@tailwindcss/typography": "^0.5.2",
+    "@types/jest": "^29.4.0",
+    "@types/mdx": "^2.0.1",
+    "@types/react": "^17.0.0",
+    "@types/react-dom": "^17.0.0",
+    "@vitejs/plugin-react-refresh": "^1.3.1",
+    "autoprefixer": "^10.2.6",
+    "glob": "^7.1.7",
+    "history": "^5.0.0",
+    "jest": "^29.4.3",
+    "jest-expect-message": "^1.1.3",
+    "postcss": "^8.3.5",
+    "prettier": "^2.6.2",
+    "preval.macro": "^5.0.0",
+    "prism-react-renderer": "^1.2.1",
+    "react": "^17.0.0",
+    "react-dom": "^17.0.0",
+    "react-git-info": "^2.0.0",
+    "react-router": "^6.8.1",
+    "react-router-dom": "^6.8.1",
+    "remark-gfm": "^3.0.1",
+    "shelljs": "^0.8.4",
+    "tailwindcss": "^3.0.24",
+    "ts-jest": "^29.0.5",
+    "typescript": "^4.9.4",
+    "vite": "^2.9.13",
+    "vite-plugin-babel-macros": "^1.0.5"
+  },
+  "type": "module"
+}

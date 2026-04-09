@@ -1,0 +1,129 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.noDeprecatedClasses = void 0;
+exports.getOptions = getOptions;
+const default_options_js_1 = require("../options/default-options.js");
+const descriptions_js_1 = require("../options/descriptions.js");
+const dissect_classes_js_1 = require("../tailwindcss/dissect-classes.js");
+const class_js_1 = require("../utils/class.js");
+const lint_js_1 = require("../utils/lint.js");
+const options_js_1 = require("../utils/options.js");
+const rule_js_1 = require("../utils/rule.js");
+const tailwindcss_js_1 = require("../async-utils/tailwindcss.js");
+const utils_js_1 = require("../utils/utils.js");
+const defaultOptions = {
+    attributes: default_options_js_1.DEFAULT_ATTRIBUTE_NAMES,
+    callees: default_options_js_1.DEFAULT_CALLEE_NAMES,
+    tags: default_options_js_1.DEFAULT_TAG_NAMES,
+    variables: default_options_js_1.DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/no-deprecated-classes.md";
+exports.noDeprecatedClasses = {
+    name: "no-deprecated-classes",
+    rule: {
+        create: ctx => (0, rule_js_1.createRuleListener)(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                description: "Disallow the use of deprecated Tailwind CSS classes.",
+                recommended: false,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...descriptions_js_1.CALLEE_SCHEMA,
+                        ...descriptions_js_1.ATTRIBUTE_SCHEMA,
+                        ...descriptions_js_1.VARIABLE_SCHEMA,
+                        ...descriptions_js_1.TAG_SCHEMA,
+                        ...descriptions_js_1.ENTRYPOINT_SCHEMA,
+                        ...descriptions_js_1.TAILWIND_CONFIG_SCHEMA,
+                        ...descriptions_js_1.TSCONFIG_SCHEMA
+                    },
+                    type: "object"
+                }
+            ],
+            type: "problem"
+        }
+    }
+};
+const deprecations = [
+    [
+        { major: 4, minor: 0 }, [
+            [/^shadow$/, "shadow-sm"],
+            [/^inset-shadow$/, "inset-shadow-sm"],
+            [/^drop-shadow$/, "drop-shadow-sm"],
+            [/^blur$/, "blur-sm"],
+            [/^backdrop-blur$/, "backdrop-blur-sm"],
+            [/^rounded$/, "rounded-sm"],
+            [/^bg-opacity-(.*)$/],
+            [/^text-opacity-(.*)$/],
+            [/^border-opacity-(.*)$/],
+            [/^divide-opacity-(.*)$/],
+            [/^ring-opacity-(.*)$/],
+            [/^placeholder-opacity-(.*)$/],
+            [/^flex-shrink$/, "shrink"],
+            [/^flex-shrink-(.*)$/, "shrink-$1"],
+            [/^flex-grow$/, "grow"],
+            [/^flex-grow-(.*)$/, "grow-$1"],
+            [/^overflow-ellipsis$/, "text-ellipsis"],
+            [/^decoration-slice$/, "box-decoration-slice"],
+            [/^decoration-clone$/, "box-decoration-clone"]
+        ]
+    ], [
+        { major: 4, minor: 1 }, [
+            [/^bg-left-top$/, "bg-top-left"],
+            [/^bg-left-bottom$/, "bg-bottom-left"],
+            [/^bg-right-top$/, "bg-top-right"],
+            [/^bg-right-bottom$/, "bg-bottom-right"],
+            [/^object-left-top$/, "object-top-left"],
+            [/^object-left-bottom$/, "object-bottom-left"],
+            [/^object-right-top$/, "object-top-right"],
+            [/^object-right-bottom$/, "object-bottom-right"]
+        ]
+    ]
+];
+function initialize() {
+    (0, dissect_classes_js_1.createGetDissectedClasses)();
+}
+function lintLiterals(ctx, literals) {
+    const getDissectedClasses = (0, dissect_classes_js_1.createGetDissectedClasses)();
+    const { tailwindConfig, tsconfig } = getOptions(ctx);
+    const { major, minor } = (0, tailwindcss_js_1.getTailwindcssVersion)();
+    for (const literal of literals) {
+        const classes = (0, utils_js_1.splitClasses)(literal.content);
+        const { dissectedClasses, warnings } = getDissectedClasses({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+        (0, lint_js_1.lintClasses)(ctx, literal, className => {
+            const dissectedClass = dissectedClasses.find(dissectedClass => dissectedClass.className === className);
+            if (!dissectedClass) {
+                return;
+            }
+            for (const [version, deprecation] of deprecations) {
+                if (major < version.major || major === version.major && minor < version.minor) {
+                    continue;
+                }
+                for (const [pattern, replacement] of deprecation) {
+                    const match = dissectedClass.base.match(pattern);
+                    if (!match) {
+                        continue;
+                    }
+                    if (!replacement) {
+                        return {
+                            message: (0, utils_js_1.augmentMessageWithWarnings)(`Class "${className}" is deprecated. Check the tailwindcss documentation for more information: https://tailwindcss.com/docs/upgrade-guide#removed-deprecated-utilities`, DOCUMENTATION_URL, warnings)
+                        };
+                    }
+                    const fix = (0, class_js_1.buildClass)({ ...dissectedClass, base: (0, utils_js_1.replacePlaceholders)(replacement, match) });
+                    return {
+                        fix,
+                        message: (0, utils_js_1.augmentMessageWithWarnings)(`Deprecated class detected. Replace "${className}" with ${fix}.`, DOCUMENTATION_URL, warnings)
+                    };
+                }
+            }
+        });
+    }
+}
+function getOptions(ctx) {
+    return (0, options_js_1.getCommonOptions)(ctx);
+}
+//# sourceMappingURL=no-deprecated-classes.js.map

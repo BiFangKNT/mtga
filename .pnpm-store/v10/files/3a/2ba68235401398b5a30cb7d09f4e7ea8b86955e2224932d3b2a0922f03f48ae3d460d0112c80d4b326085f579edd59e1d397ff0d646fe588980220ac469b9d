@@ -1,0 +1,82 @@
+{
+  "name": "vite-plugin-vue-tracer",
+  "type": "module",
+  "version": "1.3.0",
+  "description": "Tracer for the source code of elements and vdoms in Vue SFC",
+  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/antfu",
+  "homepage": "https://github.com/antfu/vite-plugin-vue-tracer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antfu/vite-plugin-vue-tracer.git"
+  },
+  "bugs": "https://github.com/antfu/vite-plugin-vue-tracer/issues",
+  "keywords": [
+    "vue",
+    "vite-plugin",
+    "devtools"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./client/record": "./dist/client/record.mjs",
+    "./client/overlay": "./dist/client/overlay.mjs",
+    "./client/listeners": "./dist/client/listeners.mjs",
+    "./client/vite-devtools": "./dist/client/vite-devtools.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "vite": "^6.0.0 || ^7.0.0",
+    "vue": "^3.5.0"
+  },
+  "dependencies": {
+    "estree-walker": "^3.0.3",
+    "exsolve": "^1.0.8",
+    "magic-string": "^0.30.21",
+    "pathe": "^2.0.3",
+    "source-map-js": "^1.2.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^7.7.2",
+    "@antfu/ni": "^28.3.0",
+    "@antfu/utils": "^9.3.0",
+    "@types/node": "^25.5.0",
+    "@vitejs/devtools": "^0.1.0",
+    "@vitejs/devtools-kit": "^0.1.0",
+    "baseline-browser-mapping": "^2.10.7",
+    "bumpp": "^10.4.1",
+    "eslint": "^10.0.3",
+    "nano-staged": "^0.9.0",
+    "nanoevents": "^9.1.0",
+    "simple-git-hooks": "^2.13.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "unbuild": "^3.6.1",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0",
+    "vue": "^3.5.30",
+    "vue-tsc": "^3.2.5",
+    "vite-plugin-vue-tracer": "1.3.0"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm nano-staged"
+  },
+  "nano-staged": {
+    "*": "eslint --fix"
+  },
+  "scripts": {
+    "build": "unbuild",
+    "dev": "unbuild --stub",
+    "lint": "eslint .",
+    "play": "nr -C playground play",
+    "release": "bumpp",
+    "start": "tsx src/index.ts",
+    "test": "vitest",
+    "typecheck": "vue-tsc --noEmit"
+  }
+}

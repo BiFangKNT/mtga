@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import opn from "open";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+import { renderTemplate } from "../plugin/render-template.js";
+import TEMPLATE from "../plugin/template-types.js";
+import { warn } from "../plugin/warn.js";
+import { version } from "../plugin/version.js";
+const argv = yargs(hideBin(process.argv))
+    .option("filename", {
+    describe: "Output file name",
+    type: "string",
+    default: "./stats.html",
+})
+    .option("title", {
+    describe: "Output file title",
+    type: "string",
+    default: "Rollup Visualizer",
+})
+    .option("template", {
+    describe: "Template type",
+    type: "string",
+    choices: TEMPLATE,
+    default: "treemap",
+})
+    .option("sourcemap", {
+    describe: "Provided files is sourcemaps",
+    type: "boolean",
+    default: false,
+})
+    .option("open", {
+    describe: "Open generated tempate in default user agent",
+    type: "boolean",
+    default: false,
+})
+    .help()
+    .parseSync();
+const listOfFiles = argv._;
+const runForPluginJson = async ({ title, template, filename, open }, files) => {
+    if (files.length === 0) {
+        throw new Error("Empty file list");
+    }
+    const fileContents = await Promise.all(files.map(async (file) => {
+        const textContent = await fs.readFile(file, { encoding: "utf-8" });
+        const data = JSON.parse(textContent);
+        return { file, data };
+    }));
+    const tree = {
+        name: "root",
+        children: [],
+    };
+    const nodeParts = {};
+    const nodeMetas = {};
+    for (const { file, data } of fileContents) {
+        if (data.version !== version) {
+            warn(`Version in ${file} is not supported (${data.version}). Current version ${version}. Skipping...`);
+            continue;
+        }
+        if (data.tree.name === "root") {
+            tree.children = tree.children.concat(data.tree.children);
+        }
+        else {
+            tree.children.push(data.tree);
+        }
+        Object.assign(nodeParts, data.nodeParts);
+        Object.assign(nodeMetas, data.nodeMetas);
+    }
+    const data = {
+        version,
+        tree,
+        nodeParts,
+        nodeMetas,
+        env: fileContents[0].data.env,
+        options: fileContents[0].data.options,
+    };
+    const fileContent = await renderTemplate(template, {
+        title,
+        data: JSON.stringify(data),
+    });
+    await fs.mkdir(path.dirname(filename), { recursive: true });
+    try {
+        await fs.unlink(filename);
+    }
+    catch (err) {
+        // ignore
+    }
+    await fs.writeFile(filename, fileContent);
+    if (open) {
+        await opn(filename);
+    }
+};
+runForPluginJson(argv, listOfFiles).catch((err) => {
+    warn(err.message);
+    process.exit(1);
+});

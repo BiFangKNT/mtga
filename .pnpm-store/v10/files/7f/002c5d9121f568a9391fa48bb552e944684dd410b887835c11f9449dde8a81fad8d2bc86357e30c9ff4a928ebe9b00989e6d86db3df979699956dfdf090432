@@ -1,0 +1,7 @@
+import button from './object.js';
+import { addPrefix } from '../../functions/addPrefix.js';
+
+export default ({ addComponents, prefix = '' }) => {
+  const prefixedbutton = addPrefix(button, prefix);
+  addComponents({ ...prefixedbutton });
+};

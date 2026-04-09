@@ -1,0 +1,161 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.enforceConsistentClassOrder = void 0;
+exports.getOptions = getOptions;
+const default_options_js_1 = require("../options/default-options.js");
+const descriptions_js_1 = require("../options/descriptions.js");
+const class_order_js_1 = require("../tailwindcss/class-order.js");
+const dissect_classes_js_1 = require("../tailwindcss/dissect-classes.js");
+const options_js_1 = require("../utils/options.js");
+const quotes_js_1 = require("../utils/quotes.js");
+const rule_js_1 = require("../utils/rule.js");
+const utils_js_1 = require("../utils/utils.js");
+const defaultOptions = {
+    attributes: default_options_js_1.DEFAULT_ATTRIBUTE_NAMES,
+    callees: default_options_js_1.DEFAULT_CALLEE_NAMES,
+    order: "improved",
+    tags: default_options_js_1.DEFAULT_TAG_NAMES,
+    variables: default_options_js_1.DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/enforce-consistent-class-order.md";
+exports.enforceConsistentClassOrder = {
+    name: "enforce-consistent-class-order",
+    rule: {
+        create: ctx => (0, rule_js_1.createRuleListener)(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                category: "Stylistic Issues",
+                description: "Enforce a consistent order for tailwind classes.",
+                recommended: true,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...descriptions_js_1.CALLEE_SCHEMA,
+                        ...descriptions_js_1.ATTRIBUTE_SCHEMA,
+                        ...descriptions_js_1.VARIABLE_SCHEMA,
+                        ...descriptions_js_1.TAG_SCHEMA,
+                        ...descriptions_js_1.ENTRYPOINT_SCHEMA,
+                        ...descriptions_js_1.TAILWIND_CONFIG_SCHEMA,
+                        ...descriptions_js_1.TSCONFIG_SCHEMA,
+                        order: {
+                            default: defaultOptions.order,
+                            description: "The algorithm to use when sorting classes.",
+                            enum: [
+                                "asc",
+                                "desc",
+                                "official",
+                                "improved"
+                            ],
+                            type: "string"
+                        }
+                    },
+                    type: "object"
+                }
+            ],
+            type: "layout"
+        }
+    }
+};
+function initialize() {
+    (0, class_order_js_1.createGetClassOrder)();
+    (0, dissect_classes_js_1.createGetDissectedClasses)();
+}
+function lintLiterals(ctx, literals) {
+    for (const literal of literals) {
+        const classChunks = (0, utils_js_1.splitClasses)(literal.content);
+        const whitespaceChunks = (0, utils_js_1.splitWhitespaces)(literal.content);
+        const unsortableClasses = ["", ""];
+        // remove sticky classes
+        if (literal.closingBraces && whitespaceChunks[0] === "") {
+            whitespaceChunks.shift();
+            unsortableClasses[0] = classChunks.shift() ?? "";
+        }
+        if (literal.openingBraces && whitespaceChunks[whitespaceChunks.length - 1] === "") {
+            whitespaceChunks.pop();
+            unsortableClasses[1] = classChunks.pop() ?? "";
+        }
+        const [sortedClassChunks, warnings] = sortClassNames(ctx, classChunks);
+        const classes = [];
+        for (let i = 0; i < Math.max(sortedClassChunks.length, whitespaceChunks.length); i++) {
+            whitespaceChunks[i] && classes.push(whitespaceChunks[i]);
+            sortedClassChunks[i] && classes.push(sortedClassChunks[i]);
+        }
+        const escapedClasses = (0, quotes_js_1.escapeNestedQuotes)([
+            unsortableClasses[0],
+            ...classes,
+            unsortableClasses[1]
+        ].join(""), literal.openingQuote ?? literal.closingQuote ?? "`");
+        const fixedClasses = [
+            literal.openingQuote ?? "",
+            literal.isInterpolated && literal.closingBraces ? literal.closingBraces : "",
+            escapedClasses,
+            literal.isInterpolated && literal.openingBraces ? literal.openingBraces : "",
+            literal.closingQuote ?? ""
+        ].join("");
+        if (literal.raw === fixedClasses) {
+            continue;
+        }
+        ctx.report({
+            data: {
+                notSorted: (0, utils_js_1.display)(literal.raw),
+                sorted: (0, utils_js_1.display)(fixedClasses)
+            },
+            fix(fixer) {
+                return fixer.replaceTextRange(literal.range, fixedClasses);
+            },
+            loc: literal.loc,
+            message: (0, utils_js_1.augmentMessageWithWarnings)("Incorrect class order. Expected\n\n{{ notSorted }}\n\nto be\n\n{{ sorted }}", DOCUMENTATION_URL, warnings)
+        });
+    }
+}
+function sortClassNames(ctx, classes) {
+    const getClassOrder = (0, class_order_js_1.createGetClassOrder)();
+    const getDissectedClasses = (0, dissect_classes_js_1.createGetDissectedClasses)();
+    const { order, tailwindConfig, tsconfig } = getOptions(ctx);
+    if (order === "asc") {
+        return [classes.toSorted((a, b) => a.localeCompare(b))];
+    }
+    if (order === "desc") {
+        return [classes.toSorted((a, b) => b.localeCompare(a))];
+    }
+    const { classOrder, warnings } = getClassOrder({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const { dissectedClasses } = getDissectedClasses({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const officiallySortedClasses = classOrder
+        .toSorted(([, a], [, z]) => {
+        if (a === z) {
+            return 0;
+        }
+        if (a === null) {
+            return -1;
+        }
+        if (z === null) {
+            return +1;
+        }
+        return +(a - z > 0n) - +(a - z < 0n);
+    })
+        .map(([className]) => className);
+    if (order === "official") {
+        return [officiallySortedClasses, warnings];
+    }
+    const groupedByVariant = new Map();
+    for (const className of officiallySortedClasses) {
+        const dissectedClass = dissectedClasses.find(dissectedClass => dissectedClass.className === className);
+        const variants = dissectedClass?.variants.join(":") ?? "";
+        groupedByVariant.set(variants, [...groupedByVariant.get(variants) ?? [], className]);
+    }
+    return [Array.from(groupedByVariant.values()).flat(), warnings];
+}
+function getOptions(ctx) {
+    const options = ctx.options[0] ?? {};
+    const common = (0, options_js_1.getCommonOptions)(ctx);
+    const order = options.order ?? defaultOptions.order;
+    return {
+        ...common,
+        order
+    };
+}
+//# sourceMappingURL=enforce-consistent-class-order.js.map

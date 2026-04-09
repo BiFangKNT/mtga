@@ -1,0 +1,65 @@
+import pg from "pg";
+import { BoundableStatement } from "./_internal/statement.mjs";
+import { getHyperdrive } from "./_internal/cloudflare.mjs";
+export default function cloudflareHyperdrivePostgresqlConnector(opts) {
+	let _client;
+	async function getClient() {
+		if (_client) {
+			return _client;
+		}
+		const hyperdrive = await getHyperdrive(opts.bindingName);
+		const client = new pg.Client({
+			...opts,
+			connectionString: hyperdrive.connectionString
+		});
+		_client = client.connect().then(() => {
+			_client = client;
+			return _client;
+		});
+		return _client;
+	}
+	const query = async (sql, params) => {
+		const client = await getClient();
+		return client.query(normalizeParams(sql), params);
+	};
+	return {
+		name: "cloudflare-hyperdrive-postgresql",
+		dialect: "postgresql",
+		getInstance: () => getClient(),
+		exec: (sql) => query(sql),
+		prepare: (sql) => new StatementWrapper(sql, query),
+		dispose: async () => {
+			await (await _client)?.end?.();
+			_client = undefined;
+		}
+	};
+}
+// https://www.postgresql.org/docs/9.3/sql-prepare.html
+function normalizeParams(sql) {
+	let i = 0;
+	return sql.replace(/\?/g, () => `$${++i}`);
+}
+class StatementWrapper extends BoundableStatement {
+	#query;
+	#sql;
+	constructor(sql, query) {
+		super();
+		this.#sql = sql;
+		this.#query = query;
+	}
+	async all(...params) {
+		const res = await this.#query(this.#sql, params);
+		return res.rows;
+	}
+	async run(...params) {
+		const res = await this.#query(this.#sql, params);
+		return {
+			success: true,
+			...res
+		};
+	}
+	async get(...params) {
+		const res = await this.#query(this.#sql, params);
+		return res.rows[0];
+	}
+}

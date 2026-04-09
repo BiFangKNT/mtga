@@ -1,0 +1,1 @@
+export default {":root":{"scrollbar-color":"color-mix(in oklch, currentColor 35%, #0000) #0000"}};

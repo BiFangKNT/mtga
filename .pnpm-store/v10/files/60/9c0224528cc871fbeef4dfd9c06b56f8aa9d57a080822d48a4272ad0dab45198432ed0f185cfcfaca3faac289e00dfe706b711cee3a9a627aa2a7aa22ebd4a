@@ -1,0 +1,104 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getCustomComponentClasses = getCustomComponentClasses;
+const promises_1 = require("node:fs/promises");
+const node_path_1 = require("node:path");
+const css_tree_1 = require("@eslint/css-tree");
+const tailwind_csstree_1 = require("tailwind-csstree");
+const cache_js_1 = require("../async-utils/cache.js");
+const resolvers_js_1 = require("../async-utils/resolvers.js");
+const { findAll, generate, parse, walk } = (0, css_tree_1.fork)(tailwind_csstree_1.tailwind4);
+async function getCustomComponentClasses(ctx) {
+    const resolvedPath = (0, resolvers_js_1.resolveCss)(ctx, ctx.tailwindConfigPath);
+    if (!resolvedPath) {
+        return [];
+    }
+    const files = await parseCssFilesDeep(ctx, resolvedPath);
+    return getCustomComponentUtilities(files, resolvedPath);
+}
+async function parseCssFilesDeep(ctx, resolvedPath) {
+    const cssFiles = {};
+    const cssFile = await parseCssFile(ctx, resolvedPath);
+    if (!cssFile) {
+        return cssFiles;
+    }
+    cssFiles[resolvedPath] = cssFile;
+    for (const { path } of cssFile.imports) {
+        const importedFiles = await parseCssFilesDeep(ctx, path);
+        for (const importedFile in importedFiles) {
+            cssFiles[importedFile] = importedFiles[importedFile];
+        }
+    }
+    return cssFiles;
+}
+const parseCssFile = async (ctx, resolvedPath) => (0, cache_js_1.withCache)("css-file", resolvedPath, async () => {
+    try {
+        const content = await (0, promises_1.readFile)(resolvedPath, "utf-8");
+        const ast = parse(content);
+        const importNodes = findAll(ast, node => node.type === "Atrule" &&
+            node.name === "import" &&
+            node.prelude?.type === "AtrulePrelude");
+        const imports = importNodes.reduce((imports, importNode) => {
+            if (importNode.type !== "Atrule" || !importNode.prelude) {
+                return imports;
+            }
+            const prelude = generate(importNode.prelude);
+            const importStatement = prelude.match(/["'](?<importPath>[^"']+)["'](?<rest>.*)/);
+            if (!importStatement) {
+                return imports;
+            }
+            const { importPath, rest } = importStatement.groups || {};
+            const layerMatch = rest?.match(/layer(?:\((?<layerName>[^)]+)\))?/);
+            const layer = layerMatch ? layerMatch.groups?.layerName || "anonymous" : undefined;
+            const cwd = (0, node_path_1.dirname)(resolvedPath);
+            const resolvedImportPath = (0, resolvers_js_1.resolveCss)(ctx, importPath, cwd);
+            if (resolvedImportPath) {
+                imports.push({ layer, path: resolvedImportPath });
+            }
+            return imports;
+        }, []);
+        return {
+            ast,
+            imports
+        };
+    }
+    catch { }
+});
+function getCustomComponentUtilities(files, filePath, currentLayer = []) {
+    const classes = new Set();
+    const file = files[filePath];
+    if (!file) {
+        return [];
+    }
+    for (const { layer, path } of file.imports) {
+        const nextLayer = [...currentLayer];
+        if (layer) {
+            nextLayer.push(layer);
+        }
+        const importedClasses = getCustomComponentUtilities(files, path, nextLayer);
+        for (const importedClass of importedClasses) {
+            classes.add(importedClass);
+        }
+    }
+    const localLayers = [];
+    walk(file.ast, {
+        enter: (node) => {
+            if (node.type === "Atrule" && node.name === "layer" && node.prelude?.type === "AtrulePrelude" && node.block) {
+                const layerName = generate(node.prelude).trim();
+                localLayers.push(layerName);
+            }
+            if (node.type === "ClassSelector") {
+                if ([...currentLayer, ...localLayers][0] === "components") {
+                    classes.add(node.name);
+                }
+            }
+        },
+        leave: (node) => {
+            if (node.type === "Atrule" && node.name === "layer" && node.block) {
+                localLayers.pop();
+            }
+        }
+    });
+    return Array.from(classes);
+}
+//# sourceMappingURL=custom-component-classes.async.v4.js.map

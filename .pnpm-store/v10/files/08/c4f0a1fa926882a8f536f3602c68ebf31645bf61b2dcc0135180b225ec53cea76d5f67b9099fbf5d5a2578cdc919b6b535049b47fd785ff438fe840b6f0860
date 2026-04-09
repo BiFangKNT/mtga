@@ -1,0 +1,71 @@
+{
+  "name": "eslint-typegen",
+  "type": "module",
+  "version": "2.3.1",
+  "description": "Generate types from ESLint rule schemas automatically, with auto-completion and type-checking for rule options.",
+  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/antfu",
+  "homepage": "https://github.com/antfu/eslint-typegen#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antfu/eslint-typegen.git"
+  },
+  "bugs": "https://github.com/antfu/eslint-typegen/issues",
+  "keywords": [
+    "eslint"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./core": "./dist/core.mjs",
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "eslint": "^9.0.0 || ^10.0.0"
+  },
+  "dependencies": {
+    "json-schema-to-typescript-lite": "^15.0.0",
+    "ohash": "^2.0.11"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^7.4.3",
+    "@antfu/ni": "^28.2.0",
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^25.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "bumpp": "^10.4.1",
+    "eslint": "^10.0.0",
+    "eslint-plugin-antfu": "^3.2.2",
+    "eslint-plugin-import-x": "^4.16.1",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-you-dont-need-lodash-underscore": "^6.14.0",
+    "lint-staged": "^16.2.7",
+    "pnpm": "^10.30.0",
+    "simple-git-hooks": "^2.13.1",
+    "tsdown": "^0.20.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm lint-staged"
+  },
+  "lint-staged": {
+    "*": "eslint --fix"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "nr build && eslint .",
+    "release": "bumpp",
+    "start": "tsx src/index.ts",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  }
+}

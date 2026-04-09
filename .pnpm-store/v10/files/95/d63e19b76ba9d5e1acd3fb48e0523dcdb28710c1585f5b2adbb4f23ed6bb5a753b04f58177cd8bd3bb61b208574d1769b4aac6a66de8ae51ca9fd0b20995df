@@ -1,0 +1,77 @@
+{
+  "name": "@bomb.sh/tab",
+  "version": "0.0.14",
+  "type": "module",
+  "bin": {
+    "tab": "./dist/bin/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "bombshell",
+    "tab",
+    "completion",
+    "autocomplete"
+  ],
+  "author": "Bombshell Authors (https://github.com/bombshell-dev)",
+  "homepage": "https://github.com/bombshell-dev/tab#readme",
+  "bugs": {
+    "url": "https://github.com/bombshell-dev/tab/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bombshell-dev/tab.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@changesets/cli": "^2.29.6",
+    "@eslint/js": "^9.33.0",
+    "@types/node": "^22.7.4",
+    "cac": "^6.7.14",
+    "citty": "^0.2.0",
+    "commander": "^13.1.0",
+    "eslint": "^9.33.0",
+    "eslint-config-prettier": "^10.0.1",
+    "prettier": "^3.5.2",
+    "tinybench": "^4.0.1",
+    "tsdown": "^0.20.3",
+    "tsx": "^4.19.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.40.0",
+    "vitest": "^2.1.3"
+  },
+  "peerDependencies": {
+    "cac": "^6.7.14",
+    "citty": "^0.1.6 || ^0.2.0",
+    "commander": "^13.1.0"
+  },
+  "peerDependenciesMeta": {
+    "cac": {
+      "optional": true
+    },
+    "citty": {
+      "optional": true
+    },
+    "commander": {
+      "optional": true
+    }
+  },
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./bin/cli": "./dist/bin/cli.mjs",
+    "./cac": "./dist/cac.mjs",
+    "./citty": "./dist/citty.mjs",
+    "./commander": "./dist/commander.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "tsdown",
+    "lint": "eslint src \"./*.ts\"",
+    "benchmark": "tsx benchmarks/completion.bench.ts"
+  }
+}

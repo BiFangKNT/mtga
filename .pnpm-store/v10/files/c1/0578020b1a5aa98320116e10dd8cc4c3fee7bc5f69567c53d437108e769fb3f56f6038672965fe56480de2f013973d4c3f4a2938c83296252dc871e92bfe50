@@ -1,0 +1,67 @@
+{
+  "name": "@nuxt/eslint",
+  "type": "module",
+  "version": "1.15.2",
+  "description": "Generate ESLint config from current Nuxt settings",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nuxt/eslint.git",
+    "directory": "packages/module"
+  },
+  "exports": {
+    ".": "./dist/module.mjs"
+  },
+  "main": "./dist/module.mjs",
+  "module": "./dist/module.mjs",
+  "types": "./dist/types.d.mts",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "eslint": "^9.0.0 || ^10.0.0",
+    "eslint-webpack-plugin": "^4.1.0",
+    "vite-plugin-eslint2": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "eslint-webpack-plugin": {
+      "optional": true
+    },
+    "vite-plugin-eslint2": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@eslint/config-inspector": "^1.4.2",
+    "@nuxt/devtools-kit": "^3.2.1",
+    "@nuxt/kit": "^4.3.1",
+    "chokidar": "^5.0.0",
+    "eslint-flat-config-utils": "^3.0.1",
+    "eslint-typegen": "^2.3.1",
+    "find-up": "^8.0.0",
+    "get-port-please": "^3.2.0",
+    "mlly": "^1.8.0",
+    "pathe": "^2.0.3",
+    "unimport": "^5.6.0",
+    "@nuxt/eslint-config": "1.15.2",
+    "@nuxt/eslint-plugin": "1.15.2"
+  },
+  "devDependencies": {
+    "@nuxt/module-builder": "^1.0.2",
+    "@nuxt/schema": "^4.3.1",
+    "@typescript-eslint/scope-manager": "^8.56.1",
+    "eslint-webpack-plugin": "^5.0.2",
+    "nuxt": "^4.3.1",
+    "vite-plugin-eslint2": "^5.0.5"
+  },
+  "scripts": {
+    "build": "nuxt-module-build build",
+    "dev": "nuxi dev playground",
+    "dev:build": "nuxi build playground",
+    "dev:prepare": "nuxt-module-build build --stub && nuxt-module-build prepare && nuxi prepare playground",
+    "lint": "eslint .",
+    "lint:play": "cd playground && eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  }
+}

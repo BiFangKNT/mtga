@@ -1,0 +1,44 @@
+{
+  "name": "@oxc-transform/binding-linux-x64-gnu",
+  "version": "0.117.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "transform.linux-x64-gnu.node",
+  "files": [
+    "transform.linux-x64-gnu.node"
+  ],
+  "description": "Oxc Transformer Node API",
+  "keywords": [
+    "babel",
+    "javascript",
+    "jsx",
+    "oxc",
+    "transform",
+    "transformer",
+    "tsx",
+    "typescript"
+  ],
+  "author": "Boshen and oxc contributors",
+  "homepage": "https://oxc.rs/docs/guide/usage/transformer",
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxc-project/oxc.git",
+    "directory": "napi/transform"
+  },
+  "bugs": "https://github.com/oxc-project/oxc/issues",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "name": "cssnano-preset-default",
+  "version": "7.0.11",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "description": "Safe defaults for cssnano which require minimal configuration.",
+  "files": [
+    "LICENSE-MIT",
+    "src",
+    "types"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "browserslist": "^4.28.1",
+    "css-declaration-sorter": "^7.2.0",
+    "postcss-calc": "^10.1.1",
+    "cssnano-utils": "^5.0.1",
+    "postcss-colormin": "^7.0.6",
+    "postcss-convert-values": "^7.0.9",
+    "postcss-discard-comments": "^7.0.6",
+    "postcss-discard-duplicates": "^7.0.2",
+    "postcss-discard-empty": "^7.0.1",
+    "postcss-discard-overridden": "^7.0.1",
+    "postcss-merge-longhand": "^7.0.5",
+    "postcss-merge-rules": "^7.0.8",
+    "postcss-minify-font-values": "^7.0.1",
+    "postcss-minify-gradients": "^7.0.1",
+    "postcss-minify-params": "^7.0.6",
+    "postcss-minify-selectors": "^7.0.6",
+    "postcss-normalize-charset": "^7.0.1",
+    "postcss-normalize-display-values": "^7.0.1",
+    "postcss-normalize-positions": "^7.0.1",
+    "postcss-normalize-repeat-style": "^7.0.1",
+    "postcss-normalize-string": "^7.0.1",
+    "postcss-normalize-timing-functions": "^7.0.1",
+    "postcss-normalize-unicode": "^7.0.6",
+    "postcss-normalize-url": "^7.0.1",
+    "postcss-normalize-whitespace": "^7.0.1",
+    "postcss-ordered-values": "^7.0.2",
+    "postcss-reduce-initial": "^7.0.6",
+    "postcss-reduce-transforms": "^7.0.1",
+    "postcss-svgo": "^7.1.1",
+    "postcss-unique-selectors": "^7.0.5"
+  },
+  "author": {
+    "name": "Ben Briggs",
+    "email": "beneb.info@gmail.com",
+    "url": "http://beneb.info"
+  },
+  "repository": "cssnano/cssnano",
+  "homepage": "https://github.com/cssnano/cssnano",
+  "bugs": {
+    "url": "https://github.com/cssnano/cssnano/issues"
+  },
+  "engines": {
+    "node": "^18.12.0 || ^20.9.0 || >=22.0"
+  },
+  "devDependencies": {
+    "postcss": "^8.5.6"
+  },
+  "peerDependencies": {
+    "postcss": "^8.4.32"
+  }
+}

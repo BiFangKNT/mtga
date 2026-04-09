@@ -1,0 +1,155 @@
+{
+  "version": "3.8.0",
+  "type": "module",
+  "name": "eslint-plugin-better-tailwindcss",
+  "description": "auto-wraps tailwind classes after a certain print width or class count into multiple lines to improve readability.",
+  "license": "MIT",
+  "author": "Roger Schönbächler",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/schoero/eslint-plugin-better-tailwindcss.git"
+  },
+  "bugs": {
+    "url": "https://github.com/schoero/eslint-plugin-better-tailwindcss/issues"
+  },
+  "exports": {
+    ".": {
+      "require": "./lib/cjs/configs/cjs.js",
+      "import": "./lib/esm/configs/esm.js"
+    },
+    "./api/defaults": {
+      "require": "./lib/cjs/api/defaults.js",
+      "import": "./lib/esm/api/defaults.js"
+    },
+    "./api/types": {
+      "require": "./lib/cjs/api/types.js",
+      "import": "./lib/esm/api/types.js"
+    }
+  },
+  "main": "./lib/cjs/configs/cjs.js",
+  "scripts": {
+    "build": "vite-node build",
+    "build:ci": "vite-node build",
+    "eslint": "eslint .",
+    "eslint:ci": "npm run eslint -- --max-warnings 0",
+    "eslint:fix": "npm run eslint -- --fix",
+    "install:v3": "npm i tailwindcss@^3 --no-save",
+    "install:v4": "npm i tailwindcss@^4 --no-save",
+    "lint": "npm run eslint && npm run markdownlint",
+    "lint:ci": "npm run eslint:ci && npm run markdownlint:ci",
+    "lint:fix": "npm run eslint:fix && npm run markdownlint:fix",
+    "markdownlint": "markdownlint-cli2 '**/*.md' '#**/node_modules'",
+    "markdownlint:ci": "npm run markdownlint",
+    "markdownlint:fix": "npm run markdownlint -- --fix",
+    "postrelease:alpha": "eslint --fix package.json && markdownlint-cli2 --fix 'CHANGELOG.md'",
+    "postrelease:beta": "eslint --fix package.json && markdownlint-cli2 --fix 'CHANGELOG.md'",
+    "postrelease:latest": "eslint --fix package.json && markdownlint-cli2 --fix 'CHANGELOG.md'",
+    "prebuild": "npm run typecheck && npm run lint && npm run spellcheck",
+    "prerelease:alpha": "npm run test -- --run && npm run build",
+    "prerelease:beta": "npm run test -- --run && npm run build",
+    "prerelease:latest": "npm run test -- --run && npm run build",
+    "pretest:v3": "npm run install:v3",
+    "pretest:v4": "npm run install:v4",
+    "publish:alpha": "changelogen gh release && changelogen --publish --publishTag alpha",
+    "publish:beta": "changelogen gh release && changelogen --publish --publishTag beta",
+    "publish:latest": "changelogen gh release && changelogen --publish",
+    "release:alpha": "changelogen --bump --output --prerelease alpha",
+    "release:beta": "changelogen --bump --output --prerelease beta",
+    "release:latest": "changelogen --bump --output --no-tag",
+    "spellcheck": "cspell lint",
+    "spellcheck:ci": "npm run spellcheck -- --no-progress",
+    "test": "vitest -c ./vite.config.ts --exclude tests/e2e",
+    "test:all": "npm run test:v3 && npm run test:v4",
+    "test:e2e": "vitest -c ./vite.config.ts tests/e2e --run",
+    "test:v3": "npm run test -- --run",
+    "test:v4": "npm run test -- --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": "^20.11.0 || >=21.2.0"
+  },
+  "files": [
+    "lib"
+  ],
+  "peerDependencies": {
+    "eslint": "^7.0.0 || ^8.0.0 || ^9.0.0",
+    "tailwindcss": "^3.3.0 || ^4.1.6"
+  },
+  "dependencies": {
+    "@eslint/css-tree": "^3.6.8",
+    "enhanced-resolve": "^5.18.3",
+    "jiti": "^2.6.1",
+    "postcss": "^8.5.6",
+    "postcss-import": "^16.1.1",
+    "synckit": "^0.11.11",
+    "tailwind-csstree": "^0.1.4",
+    "tsconfig-paths-webpack-plugin": "^4.2.0"
+  },
+  "devDependencies": {
+    "@angular/compiler": "^21.0.3",
+    "@angular-eslint/template-parser": "^21.0.1",
+    "@html-eslint/parser": "^0.50.0",
+    "@schoero/configs": "^1.5.20",
+    "@types/estree-jsx": "^1.0.5",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "astro-eslint-parser": "^1.2.2",
+    "changelogen": "^0.6.2",
+    "cspell": "^9.4.0",
+    "daisyui": "^5.5.8",
+    "es-html-parser": "^0.3.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-better-tailwindcss": "file:./",
+    "eslint-plugin-eslint-plugin": "^7.2.0",
+    "glob": "^13.0.0",
+    "json-schema": "^0.4.0",
+    "markdownlint": "^0.40.0",
+    "svelte": "^5.45.6",
+    "svelte-eslint-parser": "^1.4.1",
+    "tailwindcss": "^4.1.17",
+    "tailwindcss3": "npm:tailwindcss@^3.0.0",
+    "tailwindcss4": "npm:tailwindcss@^4.0.0",
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16",
+    "typescript": "^5.9.3",
+    "vite-node": "^5.2.0",
+    "vitest": "^4.0.15",
+    "vue-eslint-parser": "^10.2.0"
+  },
+  "keywords": [
+    "eslint",
+    "eslint-plugin",
+    "stylistic",
+    "formatting",
+    "tailwind",
+    "readable",
+    "readability",
+    "horizontal",
+    "scrolling",
+    "multiline",
+    "multi",
+    "newline",
+    "line",
+    "break",
+    "linebreak",
+    "wrap",
+    "template",
+    "literal",
+    "jsx",
+    "html",
+    "astro",
+    "svelte",
+    "vue",
+    "react",
+    "qwik",
+    "solid",
+    "template-literal",
+    "template-literals",
+    "tailwindcss",
+    "tailwind-css",
+    "tailwind-classes"
+  ],
+  "volta": {
+    "node": "24.3.0"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "json-schema-to-typescript-lite",
+  "type": "module",
+  "version": "15.0.0",
+  "description": "Lite version of json-schema-to-typescript",
+  "author": "Boris Cherny <boris@performancejs.com> (http://performancejs.com/)",
+  "license": "MIT",
+  "homepage": "https://github.com/bcherny/json-schema-to-typescript#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bcherny/json-schema-to-typescript.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bcherny/json-schema-to-typescript/issues"
+  },
+  "keywords": [
+    "json",
+    "schema",
+    "typescript",
+    "compile",
+    "transpile",
+    "api",
+    "interface",
+    "typing",
+    "share"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@apidevtools/json-schema-ref-parser": "^14.1.1",
+    "@types/json-schema": "^7.0.15"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.19.0",
+    "@types/lodash": "^4.17.20",
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "^24.1.0",
+    "bumpp": "^10.2.0",
+    "eslint": "^9.31.0",
+    "lodash-es": "^4.17.21",
+    "typescript": "^5.8.3",
+    "unbuild": "^3.6.0",
+    "vitest": "^3.2.4",
+    "json-schema-to-typescript-lite": "15.0.0"
+  },
+  "scripts": {
+    "build": "unbuild",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "release": "bumpp && pnpm publish"
+  }
+}

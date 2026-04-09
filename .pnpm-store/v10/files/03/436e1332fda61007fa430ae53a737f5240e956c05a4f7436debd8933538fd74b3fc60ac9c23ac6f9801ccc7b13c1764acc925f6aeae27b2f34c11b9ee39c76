@@ -1,0 +1,32 @@
+{
+  "name": "@nuxt/eslint-plugin",
+  "type": "module",
+  "version": "1.15.2",
+  "description": "ESLint plugin for Nuxt",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nuxt/eslint.git",
+    "directory": "packages/eslint-plugin"
+  },
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "eslint": "^9.0.0 || ^10.0.0"
+  },
+  "dependencies": {
+    "@typescript-eslint/types": "^8.56.1",
+    "@typescript-eslint/utils": "^8.56.1"
+  },
+  "scripts": {
+    "build": "unbuild",
+    "stub": "unbuild --stub"
+  }
+}

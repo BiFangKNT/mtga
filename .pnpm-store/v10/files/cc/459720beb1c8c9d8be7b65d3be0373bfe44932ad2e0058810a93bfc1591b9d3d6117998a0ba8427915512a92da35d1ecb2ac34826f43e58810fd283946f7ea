@@ -1,0 +1,70 @@
+{
+  "name": "vite-node",
+  "type": "module",
+  "version": "5.3.0",
+  "description": "Vite as Node.js runtime",
+  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "license": "MIT",
+  "funding": "https://opencollective.com/antfu",
+  "homepage": "https://github.com/antfu-collective/vite-node#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antfu-collective/vite-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/antfu-collective/vite-node/issues"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./cli": "./dist/cli.mjs",
+    "./client": "./dist/client.mjs",
+    "./constants": "./dist/constants.mjs",
+    "./hmr": "./dist/hmr.mjs",
+    "./server": "./dist/server.mjs",
+    "./source-map": "./dist/source-map.mjs",
+    "./types": "./dist/types.mjs",
+    "./utils": "./dist/utils.mjs",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "vite-node": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "dependencies": {
+    "cac": "^6.7.14",
+    "es-module-lexer": "^2.0.0",
+    "obug": "^2.1.1",
+    "pathe": "^2.0.3",
+    "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^7.0.1",
+    "@jridgewell/trace-mapping": "^0.3.31",
+    "@types/node": "^25.0.9",
+    "bumpp": "^10.4.0",
+    "eslint": "^9.39.2",
+    "inquirer": "^13.2.0",
+    "tinyexec": "^1.0.2",
+    "tinyrainbow": "^3.0.3",
+    "tsdown": "^0.16.8",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "build": "tsdown",
+    "dev": "tsdown -w",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "release": "bumpp"
+  }
+}

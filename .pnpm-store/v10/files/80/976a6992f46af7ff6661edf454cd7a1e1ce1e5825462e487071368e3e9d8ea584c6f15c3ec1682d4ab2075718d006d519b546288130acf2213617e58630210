@@ -1,0 +1,3 @@
+import { _ as withTrailingSlash, a as getCachedData, c as isNodeBuiltin, d as normalizeModuleId, f as normalizeRequestId, g as toFilePath, h as toArray, i as findNearestPackageData, l as isPrimitive, m as slash, n as cleanUrl, o as isBareImport, p as setCacheData, r as createImportMetaEnvProxy, s as isInternalRequest, t as VALID_ID_PREFIX, u as isWindows } from "./utils-ExLpYVUV.mjs";
+
+export { VALID_ID_PREFIX, cleanUrl, createImportMetaEnvProxy, findNearestPackageData, getCachedData, isBareImport, isInternalRequest, isNodeBuiltin, isPrimitive, isWindows, normalizeModuleId, normalizeRequestId, setCacheData, slash, toArray, toFilePath, withTrailingSlash };

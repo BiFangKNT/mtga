@@ -1,0 +1,1 @@
+function e(e=`cli`){if(process.argv.indexOf(`--`)===-1){let t=`Error: You need to use -- to separate completion arguments.\nExample: ${e} complete -- <args>`;console.error(t),process.exit(1)}}export{e as t};

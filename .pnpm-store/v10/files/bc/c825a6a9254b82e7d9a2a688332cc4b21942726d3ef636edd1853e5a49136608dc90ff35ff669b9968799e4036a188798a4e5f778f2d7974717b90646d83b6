@@ -1,0 +1,111 @@
+{
+  "name": "oxc-minify",
+  "version": "0.117.0",
+  "description": "Oxc Minifier Node API",
+  "keywords": [
+    "javascript",
+    "minifier",
+    "minify",
+    "oxc",
+    "terser",
+    "typescript",
+    "uglify"
+  ],
+  "homepage": "https://oxc.rs/docs/guide/usage/minifier",
+  "bugs": "https://github.com/oxc-project/oxc/issues",
+  "license": "MIT",
+  "author": "Boshen and oxc contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxc-project/oxc.git",
+    "directory": "napi/minify"
+  },
+  "funding": {
+    "url": "https://github.com/sponsors/Boshen"
+  },
+  "files": [
+    "browser.js",
+    "index.d.ts",
+    "index.js",
+    "webcontainer-fallback.cjs"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "browser": "browser.js",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.5.1",
+    "@types/node": "24.1.0",
+    "publint": "0.3.18",
+    "vitest": "4.0.18"
+  },
+  "napi": {
+    "binaryName": "minify",
+    "packageName": "@oxc-minify/binding",
+    "targets": [
+      "aarch64-apple-darwin",
+      "aarch64-linux-android",
+      "aarch64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "aarch64-unknown-linux-ohos",
+      "armv7-linux-androideabi",
+      "armv7-unknown-linux-gnueabihf",
+      "armv7-unknown-linux-musleabihf",
+      "i686-pc-windows-msvc",
+      "powerpc64le-unknown-linux-gnu",
+      "riscv64gc-unknown-linux-gnu",
+      "riscv64gc-unknown-linux-musl",
+      "s390x-unknown-linux-gnu",
+      "wasm32-wasip1-threads",
+      "x86_64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-freebsd",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl"
+    ],
+    "wasm": {
+      "browser": {
+        "fs": false
+      }
+    }
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "optionalDependencies": {
+    "@oxc-minify/binding-darwin-arm64": "0.117.0",
+    "@oxc-minify/binding-android-arm64": "0.117.0",
+    "@oxc-minify/binding-win32-arm64-msvc": "0.117.0",
+    "@oxc-minify/binding-linux-arm64-gnu": "0.117.0",
+    "@oxc-minify/binding-linux-arm64-musl": "0.117.0",
+    "@oxc-minify/binding-openharmony-arm64": "0.117.0",
+    "@oxc-minify/binding-android-arm-eabi": "0.117.0",
+    "@oxc-minify/binding-linux-arm-gnueabihf": "0.117.0",
+    "@oxc-minify/binding-linux-arm-musleabihf": "0.117.0",
+    "@oxc-minify/binding-win32-ia32-msvc": "0.117.0",
+    "@oxc-minify/binding-linux-ppc64-gnu": "0.117.0",
+    "@oxc-minify/binding-linux-riscv64-gnu": "0.117.0",
+    "@oxc-minify/binding-linux-riscv64-musl": "0.117.0",
+    "@oxc-minify/binding-linux-s390x-gnu": "0.117.0",
+    "@oxc-minify/binding-wasm32-wasi": "0.117.0",
+    "@oxc-minify/binding-darwin-x64": "0.117.0",
+    "@oxc-minify/binding-win32-x64-msvc": "0.117.0",
+    "@oxc-minify/binding-freebsd-x64": "0.117.0",
+    "@oxc-minify/binding-linux-x64-gnu": "0.117.0",
+    "@oxc-minify/binding-linux-x64-musl": "0.117.0"
+  },
+  "scripts": {
+    "build-dev": "napi build --esm --platform",
+    "build-test": "pnpm run build-dev --profile coverage",
+    "build": "pnpm run build-dev --features allocator --release",
+    "postbuild": "publint",
+    "postbuild-dev": "node scripts/patch.js",
+    "build-wasm": "pnpm run build-wasm-dev --release",
+    "build-wasm-dev": "pnpm run build-dev --target wasm32-wasip1-threads",
+    "test": "vitest run --dir ./test"
+  }
+}

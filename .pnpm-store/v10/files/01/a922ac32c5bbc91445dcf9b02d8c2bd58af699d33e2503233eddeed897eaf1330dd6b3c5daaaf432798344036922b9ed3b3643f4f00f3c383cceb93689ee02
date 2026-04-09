@@ -1,0 +1,157 @@
+import { DEFAULT_ATTRIBUTE_NAMES, DEFAULT_CALLEE_NAMES, DEFAULT_TAG_NAMES, DEFAULT_VARIABLE_NAMES } from "../options/default-options.js";
+import { ATTRIBUTE_SCHEMA, CALLEE_SCHEMA, ENTRYPOINT_SCHEMA, TAG_SCHEMA, TAILWIND_CONFIG_SCHEMA, TSCONFIG_SCHEMA, VARIABLE_SCHEMA } from "../options/descriptions.js";
+import { createGetClassOrder } from "../tailwindcss/class-order.js";
+import { createGetDissectedClasses } from "../tailwindcss/dissect-classes.js";
+import { getCommonOptions } from "../utils/options.js";
+import { escapeNestedQuotes } from "../utils/quotes.js";
+import { createRuleListener } from "../utils/rule.js";
+import { augmentMessageWithWarnings, display, splitClasses, splitWhitespaces } from "../utils/utils.js";
+const defaultOptions = {
+    attributes: DEFAULT_ATTRIBUTE_NAMES,
+    callees: DEFAULT_CALLEE_NAMES,
+    order: "improved",
+    tags: DEFAULT_TAG_NAMES,
+    variables: DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/enforce-consistent-class-order.md";
+export const enforceConsistentClassOrder = {
+    name: "enforce-consistent-class-order",
+    rule: {
+        create: ctx => createRuleListener(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                category: "Stylistic Issues",
+                description: "Enforce a consistent order for tailwind classes.",
+                recommended: true,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...CALLEE_SCHEMA,
+                        ...ATTRIBUTE_SCHEMA,
+                        ...VARIABLE_SCHEMA,
+                        ...TAG_SCHEMA,
+                        ...ENTRYPOINT_SCHEMA,
+                        ...TAILWIND_CONFIG_SCHEMA,
+                        ...TSCONFIG_SCHEMA,
+                        order: {
+                            default: defaultOptions.order,
+                            description: "The algorithm to use when sorting classes.",
+                            enum: [
+                                "asc",
+                                "desc",
+                                "official",
+                                "improved"
+                            ],
+                            type: "string"
+                        }
+                    },
+                    type: "object"
+                }
+            ],
+            type: "layout"
+        }
+    }
+};
+function initialize() {
+    createGetClassOrder();
+    createGetDissectedClasses();
+}
+function lintLiterals(ctx, literals) {
+    for (const literal of literals) {
+        const classChunks = splitClasses(literal.content);
+        const whitespaceChunks = splitWhitespaces(literal.content);
+        const unsortableClasses = ["", ""];
+        // remove sticky classes
+        if (literal.closingBraces && whitespaceChunks[0] === "") {
+            whitespaceChunks.shift();
+            unsortableClasses[0] = classChunks.shift() ?? "";
+        }
+        if (literal.openingBraces && whitespaceChunks[whitespaceChunks.length - 1] === "") {
+            whitespaceChunks.pop();
+            unsortableClasses[1] = classChunks.pop() ?? "";
+        }
+        const [sortedClassChunks, warnings] = sortClassNames(ctx, classChunks);
+        const classes = [];
+        for (let i = 0; i < Math.max(sortedClassChunks.length, whitespaceChunks.length); i++) {
+            whitespaceChunks[i] && classes.push(whitespaceChunks[i]);
+            sortedClassChunks[i] && classes.push(sortedClassChunks[i]);
+        }
+        const escapedClasses = escapeNestedQuotes([
+            unsortableClasses[0],
+            ...classes,
+            unsortableClasses[1]
+        ].join(""), literal.openingQuote ?? literal.closingQuote ?? "`");
+        const fixedClasses = [
+            literal.openingQuote ?? "",
+            literal.isInterpolated && literal.closingBraces ? literal.closingBraces : "",
+            escapedClasses,
+            literal.isInterpolated && literal.openingBraces ? literal.openingBraces : "",
+            literal.closingQuote ?? ""
+        ].join("");
+        if (literal.raw === fixedClasses) {
+            continue;
+        }
+        ctx.report({
+            data: {
+                notSorted: display(literal.raw),
+                sorted: display(fixedClasses)
+            },
+            fix(fixer) {
+                return fixer.replaceTextRange(literal.range, fixedClasses);
+            },
+            loc: literal.loc,
+            message: augmentMessageWithWarnings("Incorrect class order. Expected\n\n{{ notSorted }}\n\nto be\n\n{{ sorted }}", DOCUMENTATION_URL, warnings)
+        });
+    }
+}
+function sortClassNames(ctx, classes) {
+    const getClassOrder = createGetClassOrder();
+    const getDissectedClasses = createGetDissectedClasses();
+    const { order, tailwindConfig, tsconfig } = getOptions(ctx);
+    if (order === "asc") {
+        return [classes.toSorted((a, b) => a.localeCompare(b))];
+    }
+    if (order === "desc") {
+        return [classes.toSorted((a, b) => b.localeCompare(a))];
+    }
+    const { classOrder, warnings } = getClassOrder({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const { dissectedClasses } = getDissectedClasses({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const officiallySortedClasses = classOrder
+        .toSorted(([, a], [, z]) => {
+        if (a === z) {
+            return 0;
+        }
+        if (a === null) {
+            return -1;
+        }
+        if (z === null) {
+            return +1;
+        }
+        return +(a - z > 0n) - +(a - z < 0n);
+    })
+        .map(([className]) => className);
+    if (order === "official") {
+        return [officiallySortedClasses, warnings];
+    }
+    const groupedByVariant = new Map();
+    for (const className of officiallySortedClasses) {
+        const dissectedClass = dissectedClasses.find(dissectedClass => dissectedClass.className === className);
+        const variants = dissectedClass?.variants.join(":") ?? "";
+        groupedByVariant.set(variants, [...groupedByVariant.get(variants) ?? [], className]);
+    }
+    return [Array.from(groupedByVariant.values()).flat(), warnings];
+}
+export function getOptions(ctx) {
+    const options = ctx.options[0] ?? {};
+    const common = getCommonOptions(ctx);
+    const order = options.order ?? defaultOptions.order;
+    return {
+        ...common,
+        order
+    };
+}
+//# sourceMappingURL=enforce-consistent-class-order.js.map

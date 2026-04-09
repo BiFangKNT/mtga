@@ -1,0 +1,54 @@
+import { createElementBlock, defineComponent, onMounted, shallowRef, useId } from "vue";
+import { useState } from "../composables/state.js";
+const VALID_TAG_RE = /^[a-z][a-z0-9-]*$/i;
+function sanitizeTag(tag, fallback) {
+  return VALID_TAG_RE.test(tag) ? tag : fallback;
+}
+export default defineComponent({
+  name: "NuxtClientFallback",
+  inheritAttrs: false,
+  props: {
+    fallbackTag: {
+      type: String,
+      default: () => "div"
+    },
+    fallback: {
+      type: String,
+      default: () => ""
+    },
+    placeholder: {
+      type: String
+    },
+    placeholderTag: {
+      type: String
+    },
+    keepFallback: {
+      type: Boolean,
+      default: () => false
+    }
+  },
+  emits: ["ssr-error"],
+  setup(props, ctx) {
+    const mounted = shallowRef(false);
+    const ssrFailed = useState(useId());
+    if (ssrFailed.value) {
+      onMounted(() => {
+        mounted.value = true;
+      });
+    }
+    return () => {
+      if (ssrFailed.value) {
+        if (!mounted.value || props.keepFallback) {
+          const slot = ctx.slots.placeholder || ctx.slots.fallback;
+          if (slot) {
+            return slot();
+          }
+          const fallbackStr = props.placeholder || props.fallback;
+          const fallbackTag = sanitizeTag(props.placeholderTag || props.fallbackTag, "div");
+          return createElementBlock(fallbackTag, null, fallbackStr);
+        }
+      }
+      return ctx.slots.default?.();
+    };
+  }
+});

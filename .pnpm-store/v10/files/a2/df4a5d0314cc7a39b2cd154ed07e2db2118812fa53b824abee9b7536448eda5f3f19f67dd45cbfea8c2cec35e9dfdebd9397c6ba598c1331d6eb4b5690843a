@@ -1,0 +1,120 @@
+import { DEFAULT_ATTRIBUTE_NAMES, DEFAULT_CALLEE_NAMES, DEFAULT_TAG_NAMES, DEFAULT_VARIABLE_NAMES } from "../options/default-options.js";
+import { ATTRIBUTE_SCHEMA, CALLEE_SCHEMA, ENTRYPOINT_SCHEMA, TAG_SCHEMA, TAILWIND_CONFIG_SCHEMA, TSCONFIG_SCHEMA, VARIABLE_SCHEMA } from "../options/descriptions.js";
+import { createGetCustomComponentClasses } from "../tailwindcss/custom-component-classes.js";
+import { createGetPrefix } from "../tailwindcss/prefix.js";
+import { createGetUnregisteredClasses } from "../tailwindcss/unregistered-classes.js";
+import { escapeForRegex } from "../async-utils/escape.js";
+import { lintClasses } from "../utils/lint.js";
+import { getCommonOptions } from "../utils/options.js";
+import { createRuleListener } from "../utils/rule.js";
+import { augmentMessageWithWarnings, splitClasses } from "../utils/utils.js";
+export const DEFAULT_IGNORED_UNREGISTERED_CLASSES = [];
+const defaultOptions = {
+    attributes: DEFAULT_ATTRIBUTE_NAMES,
+    callees: DEFAULT_CALLEE_NAMES,
+    detectComponentClasses: false,
+    ignore: DEFAULT_IGNORED_UNREGISTERED_CLASSES,
+    tags: DEFAULT_TAG_NAMES,
+    variables: DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/no-unregistered-classes.md";
+export const noUnregisteredClasses = {
+    name: "no-unregistered-classes",
+    rule: {
+        create: ctx => createRuleListener(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                description: "Disallow any css classes that are not registered in tailwindcss.",
+                recommended: true,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...CALLEE_SCHEMA,
+                        ...ATTRIBUTE_SCHEMA,
+                        ...VARIABLE_SCHEMA,
+                        ...TAG_SCHEMA,
+                        ...ENTRYPOINT_SCHEMA,
+                        ...TAILWIND_CONFIG_SCHEMA,
+                        ...TSCONFIG_SCHEMA,
+                        detectComponentClasses: {
+                            default: defaultOptions.detectComponentClasses,
+                            description: "Whether to automatically detect custom component classes from the tailwindcss config.",
+                            type: "boolean"
+                        },
+                        ignore: {
+                            description: "A list of classes that should be ignored by the rule.",
+                            items: {
+                                type: "string"
+                            },
+                            type: "array"
+                        }
+                    },
+                    type: "object"
+                }
+            ],
+            type: "problem"
+        }
+    }
+};
+function initialize() {
+    createGetCustomComponentClasses();
+    createGetUnregisteredClasses();
+    createGetPrefix();
+}
+function lintLiterals(ctx, literals) {
+    const getPrefix = createGetPrefix();
+    const getUnregisteredClasses = createGetUnregisteredClasses();
+    const { ignore, tailwindConfig, tsconfig } = getOptions(ctx);
+    const { prefix, suffix } = getPrefix({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const ignoredGroups = new RegExp(`^${escapeForRegex(`${prefix}${suffix}`)}group(?:\\/(\\S*))?$`);
+    const ignoredPeers = new RegExp(`^${escapeForRegex(`${prefix}${suffix}`)}peer(?:\\/(\\S*))?$`);
+    const customComponentClassRegexes = getCustomComponentClassRegexes(ctx);
+    for (const literal of literals) {
+        const classes = splitClasses(literal.content);
+        const { unregisteredClasses, warnings } = getUnregisteredClasses({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+        if (unregisteredClasses.length === 0) {
+            continue;
+        }
+        lintClasses(ctx, literal, className => {
+            if (!unregisteredClasses.includes(className)) {
+                return;
+            }
+            if (ignore.some(ignoredClass => className.match(ignoredClass)) ||
+                customComponentClassRegexes?.some(customComponentClassesRegex => className.match(customComponentClassesRegex)) ||
+                className.match(ignoredGroups) ||
+                className.match(ignoredPeers)) {
+                return;
+            }
+            return {
+                message: augmentMessageWithWarnings(`Unregistered class detected: ${className}`, DOCUMENTATION_URL, warnings)
+            };
+        });
+    }
+}
+function getCustomComponentClassRegexes(ctx) {
+    const { detectComponentClasses, tailwindConfig, tsconfig } = getOptions(ctx);
+    if (!detectComponentClasses) {
+        return;
+    }
+    const getCustomComponentClasses = createGetCustomComponentClasses();
+    const getPrefix = createGetPrefix();
+    const { customComponentClasses } = getCustomComponentClasses({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const { prefix, suffix } = getPrefix({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    return customComponentClasses.map(className => new RegExp(`^${escapeForRegex(`${prefix}${suffix}`)}(?:.*:)?${escapeForRegex(className)}$`));
+}
+export function getOptions(ctx) {
+    const options = ctx.options[0] ?? {};
+    const common = getCommonOptions(ctx);
+    const ignore = options.ignore ?? defaultOptions.ignore;
+    const detectComponentClasses = options.detectComponentClasses ?? defaultOptions.detectComponentClasses;
+    return {
+        ...common,
+        detectComponentClasses,
+        ignore
+    };
+}
+//# sourceMappingURL=no-unregistered-classes.js.map

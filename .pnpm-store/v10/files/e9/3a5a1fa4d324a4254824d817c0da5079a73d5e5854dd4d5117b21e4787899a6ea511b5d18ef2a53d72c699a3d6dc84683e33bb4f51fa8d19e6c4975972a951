@@ -1,0 +1,124 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.noUnregisteredClasses = exports.DEFAULT_IGNORED_UNREGISTERED_CLASSES = void 0;
+exports.getOptions = getOptions;
+const default_options_js_1 = require("../options/default-options.js");
+const descriptions_js_1 = require("../options/descriptions.js");
+const custom_component_classes_js_1 = require("../tailwindcss/custom-component-classes.js");
+const prefix_js_1 = require("../tailwindcss/prefix.js");
+const unregistered_classes_js_1 = require("../tailwindcss/unregistered-classes.js");
+const escape_js_1 = require("../async-utils/escape.js");
+const lint_js_1 = require("../utils/lint.js");
+const options_js_1 = require("../utils/options.js");
+const rule_js_1 = require("../utils/rule.js");
+const utils_js_1 = require("../utils/utils.js");
+exports.DEFAULT_IGNORED_UNREGISTERED_CLASSES = [];
+const defaultOptions = {
+    attributes: default_options_js_1.DEFAULT_ATTRIBUTE_NAMES,
+    callees: default_options_js_1.DEFAULT_CALLEE_NAMES,
+    detectComponentClasses: false,
+    ignore: exports.DEFAULT_IGNORED_UNREGISTERED_CLASSES,
+    tags: default_options_js_1.DEFAULT_TAG_NAMES,
+    variables: default_options_js_1.DEFAULT_VARIABLE_NAMES
+};
+const DOCUMENTATION_URL = "https://github.com/schoero/eslint-plugin-better-tailwindcss/blob/main/docs/rules/no-unregistered-classes.md";
+exports.noUnregisteredClasses = {
+    name: "no-unregistered-classes",
+    rule: {
+        create: ctx => (0, rule_js_1.createRuleListener)(ctx, initialize, getOptions, lintLiterals),
+        meta: {
+            docs: {
+                description: "Disallow any css classes that are not registered in tailwindcss.",
+                recommended: true,
+                url: DOCUMENTATION_URL
+            },
+            fixable: "code",
+            schema: [
+                {
+                    additionalProperties: false,
+                    properties: {
+                        ...descriptions_js_1.CALLEE_SCHEMA,
+                        ...descriptions_js_1.ATTRIBUTE_SCHEMA,
+                        ...descriptions_js_1.VARIABLE_SCHEMA,
+                        ...descriptions_js_1.TAG_SCHEMA,
+                        ...descriptions_js_1.ENTRYPOINT_SCHEMA,
+                        ...descriptions_js_1.TAILWIND_CONFIG_SCHEMA,
+                        ...descriptions_js_1.TSCONFIG_SCHEMA,
+                        detectComponentClasses: {
+                            default: defaultOptions.detectComponentClasses,
+                            description: "Whether to automatically detect custom component classes from the tailwindcss config.",
+                            type: "boolean"
+                        },
+                        ignore: {
+                            description: "A list of classes that should be ignored by the rule.",
+                            items: {
+                                type: "string"
+                            },
+                            type: "array"
+                        }
+                    },
+                    type: "object"
+                }
+            ],
+            type: "problem"
+        }
+    }
+};
+function initialize() {
+    (0, custom_component_classes_js_1.createGetCustomComponentClasses)();
+    (0, unregistered_classes_js_1.createGetUnregisteredClasses)();
+    (0, prefix_js_1.createGetPrefix)();
+}
+function lintLiterals(ctx, literals) {
+    const getPrefix = (0, prefix_js_1.createGetPrefix)();
+    const getUnregisteredClasses = (0, unregistered_classes_js_1.createGetUnregisteredClasses)();
+    const { ignore, tailwindConfig, tsconfig } = getOptions(ctx);
+    const { prefix, suffix } = getPrefix({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const ignoredGroups = new RegExp(`^${(0, escape_js_1.escapeForRegex)(`${prefix}${suffix}`)}group(?:\\/(\\S*))?$`);
+    const ignoredPeers = new RegExp(`^${(0, escape_js_1.escapeForRegex)(`${prefix}${suffix}`)}peer(?:\\/(\\S*))?$`);
+    const customComponentClassRegexes = getCustomComponentClassRegexes(ctx);
+    for (const literal of literals) {
+        const classes = (0, utils_js_1.splitClasses)(literal.content);
+        const { unregisteredClasses, warnings } = getUnregisteredClasses({ classes, configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+        if (unregisteredClasses.length === 0) {
+            continue;
+        }
+        (0, lint_js_1.lintClasses)(ctx, literal, className => {
+            if (!unregisteredClasses.includes(className)) {
+                return;
+            }
+            if (ignore.some(ignoredClass => className.match(ignoredClass)) ||
+                customComponentClassRegexes?.some(customComponentClassesRegex => className.match(customComponentClassesRegex)) ||
+                className.match(ignoredGroups) ||
+                className.match(ignoredPeers)) {
+                return;
+            }
+            return {
+                message: (0, utils_js_1.augmentMessageWithWarnings)(`Unregistered class detected: ${className}`, DOCUMENTATION_URL, warnings)
+            };
+        });
+    }
+}
+function getCustomComponentClassRegexes(ctx) {
+    const { detectComponentClasses, tailwindConfig, tsconfig } = getOptions(ctx);
+    if (!detectComponentClasses) {
+        return;
+    }
+    const getCustomComponentClasses = (0, custom_component_classes_js_1.createGetCustomComponentClasses)();
+    const getPrefix = (0, prefix_js_1.createGetPrefix)();
+    const { customComponentClasses } = getCustomComponentClasses({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    const { prefix, suffix } = getPrefix({ configPath: tailwindConfig, cwd: ctx.cwd, tsconfigPath: tsconfig });
+    return customComponentClasses.map(className => new RegExp(`^${(0, escape_js_1.escapeForRegex)(`${prefix}${suffix}`)}(?:.*:)?${(0, escape_js_1.escapeForRegex)(className)}$`));
+}
+function getOptions(ctx) {
+    const options = ctx.options[0] ?? {};
+    const common = (0, options_js_1.getCommonOptions)(ctx);
+    const ignore = options.ignore ?? defaultOptions.ignore;
+    const detectComponentClasses = options.detectComponentClasses ?? defaultOptions.detectComponentClasses;
+    return {
+        ...common,
+        detectComponentClasses,
+        ignore
+    };
+}
+//# sourceMappingURL=no-unregistered-classes.js.map

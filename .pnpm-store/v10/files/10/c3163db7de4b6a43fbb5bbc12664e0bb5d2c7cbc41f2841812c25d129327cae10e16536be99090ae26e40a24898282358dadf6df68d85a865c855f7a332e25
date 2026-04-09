@@ -1,0 +1,27 @@
+{
+  "name": "@dxup/unimport",
+  "type": "module",
+  "version": "0.1.2",
+  "description": "TypeScript plugin for unimport",
+  "author": "KazariEX",
+  "license": "MIT",
+  "repository": "KazariEX/dxup",
+  "exports": {
+    ".": "./dist/index.cjs",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@dxup/shared": "",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown -w --sourcemap",
+    "release": "node ../../scripts/release.ts"
+  }
+}

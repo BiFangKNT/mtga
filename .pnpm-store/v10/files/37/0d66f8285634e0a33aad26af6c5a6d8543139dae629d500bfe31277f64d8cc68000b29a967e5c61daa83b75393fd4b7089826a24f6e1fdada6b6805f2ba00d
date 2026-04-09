@@ -1,0 +1,67 @@
+{
+  "name": "@vitejs/plugin-vue-jsx",
+  "version": "5.1.5",
+  "type": "module",
+  "license": "MIT",
+  "author": "Evan You",
+  "description": "Provides Vue 3 JSX & TSX support with HMR.",
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "vue"
+  ],
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vitejs/vite-plugin-vue.git",
+    "directory": "packages/plugin-vue-jsx"
+  },
+  "bugs": {
+    "url": "https://github.com/vitejs/vite-plugin-vue/issues"
+  },
+  "homepage": "https://github.com/vitejs/vite-plugin-vue/tree/main/packages/plugin-vue-jsx#readme",
+  "dependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/plugin-syntax-typescript": "^7.28.6",
+    "@babel/plugin-transform-typescript": "^7.28.6",
+    "@rolldown/pluginutils": "^1.0.0-rc.2",
+    "@vue/babel-plugin-jsx": "^2.0.1"
+  },
+  "devDependencies": {
+    "tsdown": "^0.20.1",
+    "vite": "^7.3.1"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0",
+    "vue": "^3.0.0"
+  },
+  "tsdown": {
+    "dts": {
+      "tsgo": true
+    }
+  },
+  "compatiblePackages": {
+    "schemaVersion": 1,
+    "rolldown": {
+      "type": "incompatible",
+      "reason": "Uses Vite-specific APIs"
+    },
+    "rollup": {
+      "type": "incompatible",
+      "reason": "Uses Vite-specific APIs"
+    }
+  },
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown"
+  }
+}

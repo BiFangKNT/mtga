@@ -1,0 +1,54 @@
+{
+  "name": "nypm",
+  "version": "0.6.5",
+  "description": "Unified Package Manager for Node.js",
+  "license": "MIT",
+  "repository": "unjs/nypm",
+  "bin": {
+    "nypm": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "dependencies": {
+    "citty": "^0.2.0",
+    "pathe": "^2.0.3",
+    "tinyexec": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260205.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "automd": "^0.4.3",
+    "changelogen": "^0.6.2",
+    "eslint-config-unjs": "^0.6.2",
+    "obuild": "^0.4.22",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
+    "pkg-types": "^2.3.0",
+    "std-env": "^3.10.0",
+    "typescript": "^5.9.3",
+    "ufo": "^1.6.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "automd && obuild",
+    "dev": "vitest dev",
+    "lint": "oxlint . && oxfmt --check src test",
+    "lint:fix": "oxlint . --fix && oxfmt src test",
+    "nypm": "node ./src/cli.ts",
+    "release": "pnpm test && pnpm build && changelogen --release --push && pnpm publish",
+    "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:types": "tsgo --noEmit"
+  }
+}

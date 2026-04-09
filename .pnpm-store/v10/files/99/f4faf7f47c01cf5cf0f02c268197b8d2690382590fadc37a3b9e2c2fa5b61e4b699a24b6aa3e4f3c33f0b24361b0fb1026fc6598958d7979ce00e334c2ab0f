@@ -1,0 +1,43 @@
+{
+	"name": "is-in-ssh",
+	"version": "1.0.0",
+	"description": "Check if the process is running in an SSH session",
+	"license": "MIT",
+	"repository": "sindresorhus/is-in-ssh",
+	"funding": "https://github.com/sponsors/sindresorhus",
+	"author": {
+		"name": "Sindre Sorhus",
+		"email": "sindresorhus@gmail.com",
+		"url": "https://sindresorhus.com"
+	},
+	"type": "module",
+	"exports": {
+		"types": "./index.d.ts",
+		"default": "./index.js"
+	},
+	"sideEffects": false,
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"test": "xo && node --test"
+	},
+	"files": [
+		"index.js",
+		"index.d.ts"
+	],
+	"keywords": [
+		"ssh",
+		"detect",
+		"detection",
+		"session",
+		"remote",
+		"connection",
+		"environment",
+		"check",
+		"is"
+	],
+	"devDependencies": {
+		"xo": "^1.2.3"
+	}
+}

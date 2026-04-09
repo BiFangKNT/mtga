@@ -1,0 +1,59 @@
+{
+  "name": "mocked-exports",
+  "version": "0.1.1",
+  "description": "",
+  "repository": "unjs/mocked-exports",
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./lib/proxy.cjs",
+  "module": "./lib/proxy.mjs",
+  "exports": {
+    "./empty-cjs": "./lib/empty.cjs",
+    "./empty-mjs": "./lib/empty.mjs",
+    "./empty": {
+      "import": "./lib/empty.mjs",
+      "default": "./lib/empty.cjs"
+    },
+    "./noop-cjs": "./lib/noop.cjs",
+    "./noop-mjs": "./lib/noop.mjs",
+    "./noop": {
+      "import": "./lib/noop.mjs",
+      "default": "./lib/noop.cjs"
+    },
+    "./proxy-cjs": "./lib/proxy.cjs",
+    "./proxy-cjs/*": "./lib/proxy.cjs",
+    "./proxy-mjs": "./lib/proxy.mjs",
+    "./proxy-mjs/*": "./lib/proxy.mjs",
+    "./proxy": {
+      "import": "./lib/proxy.mjs",
+      "default": "./lib/proxy.cjs"
+    },
+    "./proxy/*": {
+      "import": "./lib/proxy.mjs",
+      "default": "./lib/proxy.cjs"
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "dev": "vitest dev",
+    "lint": "eslint . && prettier -c .",
+    "lint:fix": "automd && eslint . --fix && prettier -w .",
+    "release": "pnpm test && changelogen --release && npm publish && git push --follow-tags",
+    "test": "pnpm lint && pnpm test:types && vitest run --coverage",
+    "test:types": "tsc --noEmit --skipLibCheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vitest/coverage-v8": "^3.0.8",
+    "automd": "^0.4.0",
+    "changelogen": "^0.6.1",
+    "eslint": "^9.22.0",
+    "eslint-config-unjs": "^0.4.2",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "packageManager": "pnpm@10.6.1"
+}

@@ -1,0 +1,67 @@
+{
+  "name": "eslint-config-flat-gitignore",
+  "type": "module",
+  "version": "2.3.0",
+  "description": ".gitignore support for ESLint Flat Config",
+  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/antfu",
+  "homepage": "https://github.com/antfu/eslint-config-flat-gitignore#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antfu/eslint-config-flat-gitignore.git"
+  },
+  "bugs": "https://github.com/antfu/eslint-config-flat-gitignore/issues",
+  "keywords": [
+    "eslint-config",
+    "eslint-flat-config"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "eslint": "^9.5.0 || ^10.0.0"
+  },
+  "dependencies": {
+    "@eslint/compat": "^2.0.3"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^7.7.3",
+    "@antfu/ni": "^30.0.0",
+    "@antfu/utils": "^9.3.0",
+    "@types/node": "^25.5.0",
+    "bumpp": "^11.0.1",
+    "eslint": "^10.1.0",
+    "find-up-simple": "^1.0.1",
+    "lint-staged": "^16.4.0",
+    "pnpm": "^10.32.1",
+    "simple-git-hooks": "^2.13.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "unbuild": "^3.6.1",
+    "vite": "^8.0.2",
+    "vitest": "^4.1.1"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm lint-staged"
+  },
+  "lint-staged": {
+    "*": "eslint --fix"
+  },
+  "scripts": {
+    "build": "unbuild",
+    "dev": "unbuild --stub",
+    "lint": "eslint .",
+    "release": "bumpp",
+    "start": "tsx src/index.ts",
+    "test": "vitest --pool=forks",
+    "typecheck": "tsc --noEmit"
+  }
+}

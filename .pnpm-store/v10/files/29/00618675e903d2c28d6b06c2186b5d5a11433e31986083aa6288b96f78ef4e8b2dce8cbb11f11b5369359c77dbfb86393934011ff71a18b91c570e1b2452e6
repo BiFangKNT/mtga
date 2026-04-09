@@ -1,0 +1,145 @@
+:root {
+  --copy-button-active-bg: var(--slate-a4);
+  --copy-button-border: var(--slate-7);
+  --copy-button-success-bg: var(--green-5);
+  --copy-button-success-border: var(--green-7);
+  --copy-button-success-fg: var(--green-12);
+}
+html.dark {
+  --copy-button-active-bg: var(--slate-a4);
+  --copy-button-border: var(--slate-7);
+  --copy-button-success-bg: var(--green-3);
+  --copy-button-success-border: var(--green-4);
+  --copy-button-success-fg: var(--green-11);
+}
+
+#error-name {
+  color: var(--danger-fg);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#error-title {
+  color: var(--title-fg);
+  font-size: 32px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#error-message {
+  color: var(--danger-fg);
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  align-items: flex-start;
+  gap: 12px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+  word-break: break-word;
+}
+#error-message svg {
+  margin-top: 1.5px;
+}
+
+#error-hint {
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+  margin-top: 15px;
+  font-size: 15px;
+  font-style: italic;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-left: 1px;
+}
+#error-hint svg {
+  margin-bottom: -2px;
+}
+#error-hint strong {
+  color: var(--title-fg);
+}
+#error-hint a {
+  color: var(--links-fg);
+}
+
+#copy-error-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  position: relative;
+  cursor: pointer;
+
+  background: transparent;
+  border: 1px solid var(--copy-button-border);
+
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 4px 8px 6px 8px;
+  border-radius: var(--radius);
+  color: var(--surface-fg);
+  transition: all 0.2s ease;
+}
+
+#copy-error-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+#copy-error-btn:hover {
+  background: var(--copy-button-active-bg);
+  color: var(--title-fg);
+}
+
+#copy-error-btn:active {
+  transform: scale(0.95);
+}
+
+#copy-error-btn.copied::after {
+  content: 'Copied';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--copy-button-success-bg);
+  color: var(--copy-button-success-fg);
+  border: 1px solid var(--copy-button-success-border);
+  border-radius: 20px;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 2px 8px 4px 8px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  opacity: 0;
+  animation: copyFeedback 2s ease-in-out forwards;
+}
+
+@keyframes copyFeedback {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(5px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  90% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-5px);
+  }
+}
+
+@media (min-width: 1024px) {
+  #error-hint {
+    align-items: center;
+  }
+}

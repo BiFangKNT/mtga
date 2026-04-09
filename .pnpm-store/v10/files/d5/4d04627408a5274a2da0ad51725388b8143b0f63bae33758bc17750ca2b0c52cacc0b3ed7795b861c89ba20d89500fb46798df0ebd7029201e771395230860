@@ -1,0 +1,32 @@
+import type { Rule } from "eslint";
+import type { ArrowFunctionExpression as ESArrowFunctionExpression, BaseNode as ESBaseNode, CallExpression as ESCallExpression, Node as ESNode, SimpleLiteral as ESSimpleLiteral, TaggedTemplateExpression as ESTaggedTemplateExpression, TemplateElement as ESTemplateElement, TemplateLiteral as ESTemplateLiteral, VariableDeclarator as ESVariableDeclarator } from "estree";
+import type { Literal, StringLiteral } from "../types/ast.js";
+import type { WithParent } from "../types/estree.js";
+import type { Callees, Matcher, RegexConfig, Tags, Variables } from "../types/rule.js";
+export declare const ES_CONTAINER_TYPES_TO_REPLACE_QUOTES: string[];
+export declare const ES_CONTAINER_TYPES_TO_INSERT_BRACES: string[];
+export declare function getLiteralsByESVariableDeclarator(ctx: Rule.RuleContext, node: ESVariableDeclarator, variables: Variables): Literal[];
+export declare function getLiteralsByESCallExpression(ctx: Rule.RuleContext, node: ESCallExpression, callees: Callees): Literal[];
+export declare function getLiteralsByTaggedTemplateExpression(ctx: Rule.RuleContext, node: ESTaggedTemplateExpression, tags: Tags): Literal[];
+export declare function getLiteralsByESLiteralNode(ctx: Rule.RuleContext, node: ESBaseNode): Literal[];
+export declare function getLiteralsByESMatchers(ctx: Rule.RuleContext, node: ESBaseNode, matchers: Matcher[]): Literal[];
+export declare function getLiteralsByESNodeAndRegex(ctx: Rule.RuleContext, node: ESBaseNode, regex: RegexConfig): Literal[];
+export declare function getStringLiteralByESStringLiteral(ctx: Rule.RuleContext, node: ESSimpleStringLiteral): StringLiteral | undefined;
+export declare function getLiteralsByESTemplateLiteral(ctx: Rule.RuleContext, node: ESTemplateLiteral): Literal[];
+export declare function findParentESTemplateLiteralByESTemplateElement(node: WithParent<ESNode>): ESTemplateLiteral | undefined;
+export declare function getESObjectPath(node: WithParent<ESNode>): string | undefined;
+export interface ESSimpleStringLiteral extends Rule.NodeParentExtension, ESSimpleLiteral {
+    value: string;
+}
+export declare function isESObjectKey(node: ESBaseNode & Rule.NodeParentExtension): boolean;
+export declare function isInsideObjectValue(node: WithParent<ESNode>): boolean;
+export declare function isESSimpleStringLiteral(node: ESBaseNode): node is ESSimpleStringLiteral;
+export declare function isESStringLike(node: ESBaseNode): node is ESSimpleStringLiteral | ESTemplateElement;
+export declare function isESTemplateLiteral(node: ESBaseNode): node is ESTemplateLiteral;
+export declare function isESTemplateElement(node: ESBaseNode): node is ESTemplateElement;
+export declare function isESNode(node: unknown): node is ESNode;
+export declare function isESCallExpression(node: ESBaseNode): node is ESCallExpression;
+export declare function isESArrowFunctionExpression(node: ESBaseNode): node is ESArrowFunctionExpression;
+export declare function isESVariableDeclarator(node: ESBaseNode): node is ESVariableDeclarator;
+export declare function hasESNodeParentExtension(node: ESBaseNode): node is Rule.Node & Rule.NodeParentExtension;
+//# sourceMappingURL=es.d.ts.map

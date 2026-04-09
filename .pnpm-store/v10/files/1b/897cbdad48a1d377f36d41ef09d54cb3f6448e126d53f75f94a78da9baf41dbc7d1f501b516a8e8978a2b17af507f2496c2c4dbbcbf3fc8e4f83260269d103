@@ -1,0 +1,22 @@
+import type { InvokeOptions } from "@tauri-apps/api/core";
+type RawPyInvokeArgs = ArrayBuffer | Uint8Array;
+type PyInvokeArgs = RawPyInvokeArgs | any;
+/**
+ * Invokes a Python function through the Tauri IPC mechanism.
+ *
+ * @param funcName - The name of the Python function to invoke.
+ * @param body - The body to send to the Python function.
+ * @param options - See {@link invoke} for more details.
+ * @template T - The expected return type of the Python function.
+ *
+ *     ### NOTE
+ *
+ *     The following headers are reserved and you should not set them in the options:
+ *         - `pyfunc`
+ *         - `__PYTAURI*`
+ *         - `PyTauri*`
+ * @returns A promise resolving or rejecting to the backend response.
+ */
+export declare function pyInvoke<T>(funcName: string, body?: PyInvokeArgs, options?: InvokeOptions): Promise<T>;
+export {};
+//# sourceMappingURL=index.d.ts.map

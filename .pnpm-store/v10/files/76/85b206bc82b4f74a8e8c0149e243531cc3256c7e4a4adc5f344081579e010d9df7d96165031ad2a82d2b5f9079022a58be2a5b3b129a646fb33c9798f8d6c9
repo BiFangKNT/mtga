@@ -1,0 +1,25 @@
+import type { Rule } from "eslint";
+import type { Node as ESNode } from "estree";
+import type { WithParent } from "../types/estree.js";
+import type { AttributeMatchers, AttributeName, AttributeRegex, Attributes, CalleeMatchers, CalleeName, CalleeRegex, Callees, MatcherFunctions, Regex, TagMatchers, TagName, TagRegex, Tags, VariableMatchers, VariableName, VariableRegex, Variables } from "../types/rule.js";
+import type { GenericNodeWithParent } from "./utils.js";
+export declare function getLiteralNodesByMatchers<Node>(ctx: Rule.RuleContext, node: unknown, matcherFunctions: MatcherFunctions<Node>, deadEnd?: (node: unknown) => boolean): Node[];
+export declare function findMatchingParentNodes<Node>(node: Partial<GenericNodeWithParent>, matcherFunctions: MatcherFunctions<Node>): Node[];
+export declare function matchesPathPattern(path: string, pattern: Regex): boolean;
+export declare function isCalleeName(callee: Callees[number]): callee is CalleeName;
+export declare function isCalleeRegex(callee: Callees[number]): callee is CalleeRegex;
+export declare function isCalleeMatchers(callee: Callees[number]): callee is CalleeMatchers;
+export declare function isVariableName(variable: Variables[number]): variable is VariableName;
+export declare function isVariableRegex(variable: Variables[number]): variable is VariableRegex;
+export declare function isVariableMatchers(variable: Variables[number]): variable is VariableMatchers;
+export declare function isTagName(tag: Tags[number]): tag is TagName;
+export declare function isTagRegex(tag: Tags[number]): tag is TagRegex;
+export declare function isTagMatchers(tag: Tags[number]): tag is TagMatchers;
+export declare function isAttributesName(attributes: Attributes[number]): attributes is AttributeName;
+export declare function isAttributesRegex(attributes: Attributes[number]): attributes is AttributeRegex;
+export declare function isAttributesMatchers(attributes: Attributes[number]): attributes is AttributeMatchers;
+export declare function isInsideConditionalExpressionTest(node: WithParent<ESNode>): boolean;
+export declare function isInsideBinaryExpression(node: WithParent<ESNode>): boolean;
+export declare function isInsideLogicalExpressionLeft(node: WithParent<ESNode>): boolean;
+export declare function isInsideMemberExpression(node: WithParent<ESNode>): boolean;
+//# sourceMappingURL=matchers.d.ts.map

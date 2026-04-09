@@ -1,0 +1,200 @@
+import { ES_CONTAINER_TYPES_TO_REPLACE_QUOTES, getESObjectPath, getLiteralsByESLiteralNode, getLiteralsByESNodeAndRegex, hasESNodeParentExtension, isESNode, isESObjectKey, isESStringLike, isInsideObjectValue } from "./es.js";
+import { MatcherType } from "../types/rule.js";
+import { getLiteralNodesByMatchers, isAttributesMatchers, isAttributesName, isAttributesRegex, isInsideBinaryExpression, isInsideConditionalExpressionTest, isInsideLogicalExpressionLeft, isInsideMemberExpression, matchesPathPattern } from "../utils/matchers.js";
+import { deduplicateLiterals, getContent, getIndentation, getQuotes, getWhitespace, matchesName } from "../utils/utils.js";
+export const SVELTE_CONTAINER_TYPES_TO_REPLACE_QUOTES = [
+    ...ES_CONTAINER_TYPES_TO_REPLACE_QUOTES,
+    "SvelteMustacheTag"
+];
+export const SVELTE_CONTAINER_TYPES_TO_INSERT_BRACES = [];
+export function getAttributesBySvelteTag(ctx, node) {
+    return node.attributes.reduce((acc, attribute) => {
+        if (isSvelteAttribute(attribute)) {
+            acc.push(attribute);
+        }
+        return acc;
+    }, []);
+}
+export function getLiteralsBySvelteAttribute(ctx, attribute, attributes) {
+    // skip shorthand attributes #42
+    if (!Array.isArray(attribute.value)) {
+        return [];
+    }
+    const literals = attributes.reduce((literals, attributes) => {
+        if (isAttributesRegex(attributes)) {
+            literals.push(...getLiteralsByESNodeAndRegex(ctx, attribute, attributes));
+        }
+        for (const value of attribute.value) {
+            if (isAttributesName(attributes)) {
+                if (!matchesName(attributes.toLowerCase(), attribute.key.name.toLowerCase())) {
+                    continue;
+                }
+                literals.push(...getLiteralsBySvelteLiteralNode(ctx, value));
+            }
+            else if (isAttributesMatchers(attributes)) {
+                if (!matchesName(attributes[0].toLowerCase(), attribute.key.name.toLowerCase())) {
+                    continue;
+                }
+                literals.push(...getLiteralsBySvelteMatchers(ctx, value, attributes[1]));
+            }
+        }
+        return literals;
+    }, []);
+    return deduplicateLiterals(literals);
+}
+function getLiteralsBySvelteMatchers(ctx, node, matchers) {
+    const matcherFunctions = getSvelteMatcherFunctions(matchers);
+    const literalNodes = getLiteralNodesByMatchers(ctx, node, matcherFunctions);
+    const literals = literalNodes.flatMap(literalNode => getLiteralsBySvelteLiteralNode(ctx, literalNode));
+    return deduplicateLiterals(literals);
+}
+function getLiteralsBySvelteLiteralNode(ctx, node) {
+    if (isSvelteStringLiteral(node)) {
+        const stringLiteral = getStringLiteralBySvelteStringLiteral(ctx, node);
+        if (stringLiteral) {
+            return [stringLiteral];
+        }
+    }
+    if (isSvelteMustacheTag(node)) {
+        return getLiteralsBySvelteLiteralNode(ctx, node.expression);
+    }
+    if (isESStringLike(node)) {
+        return getLiteralsBySvelteESLiteralNode(ctx, node);
+    }
+    return [];
+}
+function getLiteralsBySvelteESLiteralNode(ctx, node) {
+    const literals = getLiteralsByESLiteralNode(ctx, node);
+    return literals.map(literal => {
+        if (!hasESNodeParentExtension(node)) {
+            return literal;
+        }
+        const multilineQuotes = getMultilineQuotes(node);
+        return {
+            ...literal,
+            ...multilineQuotes
+        };
+    });
+}
+function getStringLiteralBySvelteStringLiteral(ctx, node) {
+    const raw = ctx.sourceCode.getText(node, 1, 1);
+    const braces = getBracesByString(ctx, raw);
+    const isInterpolated = getIsInterpolated(ctx, raw);
+    const quotes = getQuotes(raw);
+    const content = getContent(raw, quotes, braces);
+    const whitespaces = getWhitespace(content);
+    const line = ctx.sourceCode.lines[isInterpolated ? node.parent.loc.start.line - 1 : node.loc.start.line - 1];
+    const indentation = getIndentation(line);
+    const multilineQuotes = getMultilineQuotes(node);
+    return {
+        ...whitespaces,
+        ...quotes,
+        ...braces,
+        ...multilineQuotes,
+        content,
+        indentation,
+        isInterpolated,
+        loc: node.loc,
+        range: [node.range[0] - 1, node.range[1] + 1], // include quotes in range
+        raw,
+        supportsMultiline: true,
+        type: "StringLiteral"
+    };
+}
+function getBracesByString(ctx, raw) {
+    const closingBraces = raw.trim().startsWith("}") ? "}" : undefined;
+    const openingTemplateBraces = raw.trim().endsWith("${") ? "${" : undefined;
+    const openingBrace = raw.trim().endsWith("{") ? "{" : undefined;
+    const openingBraces = openingTemplateBraces ?? openingBrace;
+    return {
+        closingBraces,
+        openingBraces
+    };
+}
+function getIsInterpolated(ctx, raw) {
+    const braces = getBracesByString(ctx, raw);
+    return !!braces.closingBraces || !!braces.openingBraces;
+}
+function getMultilineQuotes(node) {
+    const surroundingBraces = SVELTE_CONTAINER_TYPES_TO_INSERT_BRACES.includes(node.parent.type);
+    const multilineQuotes = SVELTE_CONTAINER_TYPES_TO_REPLACE_QUOTES.includes(node.parent.type)
+        ? ["'", "\"", "`"]
+        : [];
+    return {
+        multilineQuotes,
+        surroundingBraces
+    };
+}
+function isSvelteAttribute(attribute) {
+    return "key" in attribute && "name" in attribute.key && typeof attribute.key.name === "string";
+}
+function isSvelteStringLiteral(node) {
+    return node.type === "SvelteLiteral";
+}
+function isSvelteMustacheTag(node) {
+    return node.type === "SvelteMustacheTag" &&
+        "kind" in node && node.kind === "text";
+}
+function getSvelteMatcherFunctions(matchers) {
+    return matchers.reduce((matcherFunctions, matcher) => {
+        switch (matcher.match) {
+            case MatcherType.String: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node) ||
+                        isESObjectKey(node) ||
+                        isInsideObjectValue(node)) {
+                        return false;
+                    }
+                    return isESStringLike(node) || isSvelteStringLiteral(node);
+                });
+                break;
+            }
+            case MatcherType.ObjectKey: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isESObjectKey(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isInsideMemberExpression(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+            case MatcherType.ObjectValue: {
+                matcherFunctions.push((node) => {
+                    if (!isESNode(node) ||
+                        !hasESNodeParentExtension(node) ||
+                        !isInsideObjectValue(node) ||
+                        isInsideBinaryExpression(node) ||
+                        isInsideConditionalExpressionTest(node) ||
+                        isInsideLogicalExpressionLeft(node) ||
+                        isESObjectKey(node) ||
+                        !isESStringLike(node) && !isSvelteStringLiteral(node)) {
+                        return false;
+                    }
+                    const path = getESObjectPath(node);
+                    if (!path || !matcher.pathPattern) {
+                        return true;
+                    }
+                    return matchesPathPattern(path, matcher.pathPattern);
+                });
+                break;
+            }
+        }
+        return matcherFunctions;
+    }, []);
+}
+//# sourceMappingURL=svelte.js.map

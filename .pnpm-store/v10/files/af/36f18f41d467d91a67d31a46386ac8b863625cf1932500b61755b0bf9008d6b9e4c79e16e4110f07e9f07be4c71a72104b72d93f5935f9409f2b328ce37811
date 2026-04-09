@@ -1,0 +1,43 @@
+{
+  "name": "@oxc-minify/binding-linux-x64-gnu",
+  "version": "0.117.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "minify.linux-x64-gnu.node",
+  "files": [
+    "minify.linux-x64-gnu.node"
+  ],
+  "description": "Oxc Minifier Node API",
+  "keywords": [
+    "javascript",
+    "minifier",
+    "minify",
+    "oxc",
+    "terser",
+    "typescript",
+    "uglify"
+  ],
+  "author": "Boshen and oxc contributors",
+  "homepage": "https://oxc.rs/docs/guide/usage/minifier",
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxc-project/oxc.git",
+    "directory": "napi/minify"
+  },
+  "bugs": "https://github.com/oxc-project/oxc/issues",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

@@ -1,0 +1,129 @@
+import { hasESNodeParentExtension, isESArrowFunctionExpression, isESCallExpression, isESNode, isESVariableDeclarator } from "../parsers/es.js";
+import { isGenericNodeWithParent } from "./utils.js";
+export function getLiteralNodesByMatchers(ctx, node, matcherFunctions, deadEnd) {
+    if (!isGenericNodeWithParent(node)) {
+        return [];
+    }
+    const nestedLiterals = findMatchingNestedNodes(node, matcherFunctions, deadEnd);
+    const self = nodeMatches(node, matcherFunctions) ? [node] : [];
+    return [...nestedLiterals, ...self];
+}
+function findMatchingNestedNodes(node, matcherFunctions, deadEnd = value => isESNode(value) && (isESCallExpression(value) || isESArrowFunctionExpression(value) || isESVariableDeclarator(value))) {
+    return Object.entries(node).reduce((matchedNodes, [key, value]) => {
+        if (!value || typeof value !== "object" || key === "parent") {
+            return matchedNodes;
+        }
+        if (deadEnd?.(value)) {
+            return matchedNodes;
+        }
+        if (nodeMatches(value, matcherFunctions)) {
+            matchedNodes.push(value);
+        }
+        matchedNodes.push(...findMatchingNestedNodes(value, matcherFunctions, deadEnd));
+        return matchedNodes;
+    }, []);
+}
+export function findMatchingParentNodes(node, matcherFunctions) {
+    if (!isGenericNodeWithParent(node)) {
+        return [];
+    }
+    if (nodeMatches(node.parent, matcherFunctions)) {
+        return [node.parent];
+    }
+    return findMatchingParentNodes(node.parent, matcherFunctions);
+}
+function nodeMatches(node, matcherFunctions) {
+    for (const matcherFunction of matcherFunctions) {
+        if (matcherFunction(node)) {
+            return true;
+        }
+    }
+    return false;
+}
+function isChildNodeOfNode(node, parent) {
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    if (node.parent === parent) {
+        return true;
+    }
+    return isChildNodeOfNode(node.parent, parent);
+}
+export function matchesPathPattern(path, pattern) {
+    const regex = new RegExp(pattern);
+    return regex.test(path);
+}
+export function isCalleeName(callee) {
+    return typeof callee === "string";
+}
+export function isCalleeRegex(callee) {
+    return Array.isArray(callee) && typeof callee[0] === "string" && typeof callee[1] === "string";
+}
+export function isCalleeMatchers(callee) {
+    return Array.isArray(callee) && typeof callee[0] === "string" && Array.isArray(callee[1]);
+}
+export function isVariableName(variable) {
+    return typeof variable === "string";
+}
+export function isVariableRegex(variable) {
+    return Array.isArray(variable) && typeof variable[0] === "string" && typeof variable[1] === "string";
+}
+export function isVariableMatchers(variable) {
+    return Array.isArray(variable) && typeof variable[0] === "string" && Array.isArray(variable[1]);
+}
+export function isTagName(tag) {
+    return typeof tag === "string";
+}
+export function isTagRegex(tag) {
+    return Array.isArray(tag) && typeof tag[0] === "string" && typeof tag[1] === "string";
+}
+export function isTagMatchers(tag) {
+    return Array.isArray(tag) && typeof tag[0] === "string" && Array.isArray(tag[1]);
+}
+export function isAttributesName(attributes) {
+    return typeof attributes === "string";
+}
+export function isAttributesRegex(attributes) {
+    return Array.isArray(attributes) && typeof attributes[0] === "string" && typeof attributes[1] === "string";
+}
+export function isAttributesMatchers(attributes) {
+    return Array.isArray(attributes) && typeof attributes[0] === "string" && Array.isArray(attributes[1]);
+}
+export function isInsideConditionalExpressionTest(node) {
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    if (node.parent.type === "ConditionalExpression" && node.parent.test === node) {
+        return true;
+    }
+    return isInsideConditionalExpressionTest(node.parent);
+}
+export function isInsideBinaryExpression(node) {
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    if (node.parent.type === "BinaryExpression") {
+        return true;
+    }
+    return isInsideBinaryExpression(node.parent);
+}
+export function isInsideLogicalExpressionLeft(node) {
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    if (node.parent.type === "LogicalExpression" && node.parent.left === node) {
+        return true;
+    }
+    return isInsideLogicalExpressionLeft(node.parent);
+}
+export function isInsideMemberExpression(node) {
+    // aka indexed access: https://github.com/estree/estree/blob/master/es5.md#memberexpression
+    if (!hasESNodeParentExtension(node)) {
+        return false;
+    }
+    if (node.parent.type === "MemberExpression") {
+        return true;
+    }
+    return isInsideMemberExpression(node.parent);
+}
+//# sourceMappingURL=matchers.js.map

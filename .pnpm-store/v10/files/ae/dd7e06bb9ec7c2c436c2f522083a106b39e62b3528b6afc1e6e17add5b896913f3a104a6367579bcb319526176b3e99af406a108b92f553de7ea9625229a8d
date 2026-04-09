@@ -1,0 +1,1 @@
+export default {"@property --radialprogress":{"syntax":"\"<percentage>\"","inherits":"true","initial-value":"0%"}};

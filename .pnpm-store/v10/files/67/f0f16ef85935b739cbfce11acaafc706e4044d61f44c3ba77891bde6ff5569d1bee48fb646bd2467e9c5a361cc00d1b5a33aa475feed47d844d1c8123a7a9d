@@ -1,0 +1,61 @@
+{
+  "name": "@cloudflare/kv-asset-handler",
+  "version": "0.4.2",
+  "description": "Routes requests to KV assets",
+  "keywords": [
+    "kv",
+    "cloudflare",
+    "workers",
+    "wrangler",
+    "assets"
+  ],
+  "homepage": "https://github.com/cloudflare/workers-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/cloudflare/workers-sdk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cloudflare/workers-sdk.git",
+    "directory": "packages/kv-asset-handler"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": "wrangler@cloudflare.com",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "src",
+    "dist"
+  ],
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.11",
+    "@cloudflare/workers-types": "^4.20260114.0",
+    "@types/mime": "^3.0.4",
+    "@types/node": "^20.19.9",
+    "eslint": "^9.39.1",
+    "mime": "^3.0.0",
+    "tsup": "8.3.0",
+    "vitest": "~2.1.0",
+    "@cloudflare/eslint-config-shared": "1.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "volta": {
+    "extends": "../../package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "workers-sdk": {
+    "prerelease": true
+  },
+  "scripts": {
+    "build": "tsup",
+    "check:lint": "eslint . --max-warnings=0",
+    "check:type": "tsc",
+    "pretest": "npm run build",
+    "test": "vitest",
+    "test:ci": "vitest run"
+  }
+}

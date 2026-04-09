@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <title>Vite Inspect</title>
+  <script type="module" crossorigin src="./assets/index---UmQy10.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/runtime-core.esm-bundler-Cyv4obHQ.js">
+  <link rel="modulepreload" crossorigin href="./assets/payload-BX9lTMvN.js">
+  <link rel="modulepreload" crossorigin href="./assets/vue-router-BxYGFXy-.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-shvuXdj8.css">
+</head>
+<body data-vite-inspect-mode="DEV" class="bg-main text-main font-sans">
+  <div id="app"></div>
+  <script>
+    (function () {
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      const setting = localStorage.getItem('color-schema') || 'auto'
+      if (setting === 'dark' || (prefersDark && setting !== 'light'))
+        document.documentElement.classList.toggle('dark', true)
+    })()
+
+    ;(function () {
+      if (!location.pathname.endsWith('/'))
+        location.pathname += '/'
+    })()
+  </script>
+</body>
+</html>

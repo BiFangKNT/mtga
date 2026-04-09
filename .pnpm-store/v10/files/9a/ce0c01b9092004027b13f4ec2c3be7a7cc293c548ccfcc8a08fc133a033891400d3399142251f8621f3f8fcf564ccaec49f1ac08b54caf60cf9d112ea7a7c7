@@ -1,0 +1,77 @@
+{
+  "type": "module",
+  "name": "daisyui",
+  "version": "5.5.19",
+  "description": "daisyUI 5 - The Tailwind CSS Component Library",
+  "author": "Pouya Saadeghi",
+  "license": "MIT",
+  "homepage": "https://daisyui.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saadeghi/daisyui.git",
+    "directory": "packages/daisyui"
+  },
+  "funding": "https://github.com/saadeghi/daisyui?sponsor=1",
+  "bugs": "https://github.com/saadeghi/daisyui/issues",
+  "keywords": [
+    "daisyui",
+    "tailwind",
+    "tailwindcss",
+    "tailwind css",
+    "tailwind react",
+    "tailwind vue",
+    "tailwind plugin",
+    "tailwind component",
+    "tailwind next",
+    "tailwind nuxt",
+    "tailwind svelte",
+    "tailwind css plugin",
+    "tailwind astro",
+    "tailwind laravel",
+    "tailwind rails",
+    "react",
+    "css",
+    "ui",
+    "vue",
+    "component",
+    "framework",
+    "nextjs",
+    "front-end",
+    "laravel",
+    "theme",
+    "nuxt",
+    "svelte",
+    "astro",
+    "component library",
+    "css library"
+  ],
+  "main": "./index.js",
+  "module": "./index.js",
+  "browser": "./daisyui.css",
+  "files": [
+    "base",
+    "colors",
+    "components",
+    "!components/*/class.json",
+    "functions/addPrefix.js",
+    "functions/plugin.js",
+    "functions/pluginOptionsHandler.js",
+    "functions/themeOrder.js",
+    "functions/variables.js",
+    "theme",
+    "utilities",
+    "imports.js",
+    "index.js",
+    "chunks.css",
+    "daisyui.css",
+    "themes.css"
+  ],
+  "commit-and-tag-version": {
+    "scripts": {
+      "postbump": "cd ../.. && bun run --bun bundle && git add --all packages/bundle/"
+    }
+  },
+  "scripts": {
+    "build": "bun build.js"
+  }
+}
