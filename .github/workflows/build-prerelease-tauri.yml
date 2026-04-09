@@ -385,16 +385,16 @@ jobs:
               | head -n 1)
 
             if [ -z "$PREV_STABLE_TAG" ]; then
-              echo "❌ 未找到上一正式版标签，且未提供 start_commit"
-              exit 1
+              echo "⚠️ 未找到上一正式版标签，且未提供 start_commit，将以当前提交的前一个提交作为比较基准"
+              FROM_COMMIT=$(git rev-parse HEAD^) || FROM_COMMIT=$(git rev-parse HEAD)
+            else
+              FROM_COMMIT=$(git rev-parse "$PREV_STABLE_TAG^{commit}")
             fi
-
-            FROM_COMMIT=$(git rev-parse "$PREV_STABLE_TAG^{commit}")
           fi
 
-          if ! git merge-base --is-ancestor "$FROM_COMMIT" "$TARGET_COMMIT"; then
-            echo "❌ 起始提交不在目标提交历史中: $FROM_COMMIT -> $TARGET_COMMIT"
-            exit 1
+          if ! git merge-base --is-ancestor "$FROM_COMMIT" "$TARGET_COMMIT" >/dev/null 2>&1; then
+            echo "⚠️ 起始提交不在目标提交历史中: $FROM_COMMIT -> $TARGET_COMMIT，将直接使用目标提交"
+            FROM_COMMIT="$TARGET_COMMIT"
           fi
 
           CHANGELOG_RANGE="${FROM_COMMIT}..${TARGET_COMMIT}"
