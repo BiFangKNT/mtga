@@ -331,6 +331,13 @@ Click the Star and Watch buttons at the top right of the repository to get the l
 
 ---
 
+## Documentation
+
+- [Contribution Guidelines](../CONTRIBUTING.md)
+- [Local Build Guide](BUILD.md)
+
+---
+
 ## References
 
 The `ca` directory is referenced from the `wkgcass/vproxy` repository. Thanks to the original author!
