@@ -542,12 +542,10 @@ jobs:
     name: 🚀 创建 GitHub 发布
     needs: [prepare-version, build-windows, build-macos]
     runs-on: ubuntu-latest
-    if: ${{ secrets.CI_DEPLOY_KEY != '' }}
     permissions:
       contents: write
     env:
       CI_DEPLOY_KEY: ${{ secrets.CI_DEPLOY_KEY }}
-
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v6
