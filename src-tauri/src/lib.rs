@@ -544,22 +544,81 @@ pub fn run() {
                         );
                     });
                 }
+
+                // --- TRAY SETUP ---
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+
+                let toggle_i = MenuItem::with_id(app, "toggle", "显示 / 隐藏主界面", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", "退出 MTGA", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&toggle_i, &quit_i])?;
+
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            let app_handle = app.clone();
+                            spawn_shutdown(app_handle);
+                        }
+                        "toggle" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.close();
+                            } else {
+                                if let Ok(window) = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+                                    .title("MTGA")
+                                    .inner_size(1200.0, 800.0)
+                                    .min_inner_size(1200.0, 800.0)
+                                    .resizable(true)
+                                    .fullscreen(false)
+                                    .build() {
+                                    inject_runtime_tag(&window);
+                                }
+                            }
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.close();
+                            } else {
+                                if let Ok(window) = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+                                    .title("MTGA")
+                                    .inner_size(1200.0, 800.0)
+                                    .min_inner_size(1200.0, 800.0)
+                                    .resizable(true)
+                                    .fullscreen(false)
+                                    .build() {
+                                    inject_runtime_tag(&window);
+                                }
+                            }
+                        }
+                    })
+                    .build(app)?;
+
                 Ok(())
             }
         })
         .on_window_event({
             let shutdown_started = Arc::clone(&shutdown_started);
             move |window, event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    if window.label() == "splash" && MAIN_WINDOW_SHOWN.load(Ordering::SeqCst) {
-                        return;
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        if window.label() == "splash" && MAIN_WINDOW_SHOWN.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        // Allow main window to close for lightweight mode.
+                        // We do NOT prevent close or shut down the backend here.
                     }
-                    if shutdown_started.swap(true, Ordering::SeqCst) {
-                        return;
+                    WindowEvent::Destroyed => {
+                        if window.label() == "main" {
+                            MAIN_WINDOW_SHOWN.store(false, Ordering::SeqCst);
+                            MAIN_PAGE_READY.store(false, Ordering::SeqCst);
+                        }
                     }
-                    api.prevent_close();
-                    let app_handle = window.app_handle().clone();
-                    spawn_shutdown(app_handle);
+                    _ => {}
                 }
             }
         })
@@ -569,15 +628,9 @@ pub fn run() {
     let shutdown_started = Arc::clone(&shutdown_started);
     app.run(move |app_handle, event| match event {
         RunEvent::ExitRequested { api, .. } => {
-            if !MAIN_WINDOW_SHOWN.load(Ordering::SeqCst) {
-                api.prevent_exit();
-                return;
-            }
-            if shutdown_started.swap(true, Ordering::SeqCst) {
-                return;
-            }
+            // Prevent app from exiting when all windows are closed
+            // so the tray icon remains active.
             api.prevent_exit();
-            spawn_shutdown(app_handle.clone());
         }
         _ => {}
     });
