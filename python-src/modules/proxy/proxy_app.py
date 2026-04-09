@@ -524,17 +524,8 @@ class ProxyApp:
         transport: ProxyTransport,
         log: Callable[[str], None],
     ) -> tuple[contextlib.ExitStack | None, Any | None, str | None]:
-        if not debug_mode:
-            return None, None, None
-        try:
-            log_path = transport.prepare_sse_log_path()
-            log_file_stack = contextlib.ExitStack()
-            log_file = log_file_stack.enter_context(open(log_path, "wb"))  # noqa: SIM115
-            log(f"SSE 归一化数据将记录到: {log_path}")
-            return log_file_stack, log_file, log_path
-        except Exception as log_exc:  # noqa: BLE001
-            log(f"SSE 日志文件创建失败: {log_exc}")
-            return None, None, None
+        # 强制关闭 SSE 磁盘日志以避免高频小文件 I/O 开销和磁盘打满
+        return None, None, None
 
     @staticmethod
     def _write_sse_debug_chunk(
@@ -543,17 +534,7 @@ class ProxyApp:
         *,
         log: Callable[[str], None],
     ) -> Any | None:
-        if not log_file:
-            return log_file
-        try:
-            log_file.write(chunk_bytes)
-            log_file.flush()
-            return log_file
-        except Exception as write_exc:  # noqa: BLE001
-            log(f"SSE 日志写入失败，停止记录: {write_exc}")
-            with contextlib.suppress(Exception):
-                log_file.close()
-            return None
+        return None
 
     def _create_app(self) -> None:
         self.app = Flask(__name__)
@@ -777,6 +758,20 @@ class ProxyApp:
                     log=log,
                 )
 
+                _stream_cleaned_up = False
+                def cleanup_stream_resources():
+                    nonlocal _stream_cleaned_up
+                    if _stream_cleaned_up:
+                        return
+                    _stream_cleaned_up = True
+                    self._close_upstream_stream(response_from_target, log=log)
+                    release_transport()
+                    if log_file_stack:
+                        with contextlib.suppress(Exception):
+                            log_file_stack.close()
+                    if log_path:
+                        log(f"SSE 记录完成: {log_path}")
+
                 def generate_stream() -> Generator[bytes]:  # noqa: PLR0915, PLR0912
                     nonlocal log_file, log_file_stack
                     event_index = 0
@@ -828,20 +823,16 @@ class ProxyApp:
                             )
                             yield done_bytes
                     finally:
-                        self._close_upstream_stream(response_from_target, log=log)
-                        release_transport()
-                        if log_file_stack:
-                            with contextlib.suppress(Exception):
-                                log_file_stack.close()
-                        if log_path:
-                            log(f"SSE 记录完成: {log_path}")
                         if debug_mode:
                             log(f"UP 流结束，累计 {event_index} 个事件")
+                        cleanup_stream_resources()
 
-                return Response(
+                response = Response(
                     generate_stream(),
                     content_type="text/event-stream",
                 )
+                response.call_on_close(cleanup_stream_resources)
+                return response
 
             if response_json is None:
                 log("上游响应不是 JSON 对象")
@@ -861,6 +852,18 @@ class ProxyApp:
                     transport=transport,
                     log=log,
                 )
+
+                _sim_cleaned_up = False
+                def cleanup_sim_resources():
+                    nonlocal _sim_cleaned_up
+                    if _sim_cleaned_up:
+                        return
+                    _sim_cleaned_up = True
+                    if log_file_stack:
+                        with contextlib.suppress(Exception):
+                            log_file_stack.close()
+                    if log_path:
+                        log(f"SSE 记录完成: {log_path}")
 
                 def simulate_stream() -> Generator[bytes]:
                     nonlocal log_file, log_file_stack
@@ -899,14 +902,12 @@ class ProxyApp:
                         )
                         yield done_bytes
                     finally:
-                        if log_file_stack:
-                            with contextlib.suppress(Exception):
-                                log_file_stack.close()
-                        if log_path:
-                            log(f"SSE 记录完成: {log_path}")
+                        cleanup_sim_resources()
 
                 release_transport()
-                return Response(simulate_stream(), content_type="text/event-stream")
+                response = Response(simulate_stream(), content_type="text/event-stream")
+                response.call_on_close(cleanup_sim_resources)
+                return response
 
             if debug_mode:
                 response_str = json.dumps(response_json, indent=2, ensure_ascii=False)

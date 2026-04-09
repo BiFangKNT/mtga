@@ -5,7 +5,7 @@ import time
 from collections import deque
 
 _MAX_LOGS = 2000
-
+_MAX_LOG_LENGTH = 10000
 
 class LogBus:
     def __init__(self) -> None:
@@ -15,6 +15,8 @@ class LogBus:
 
     def push(self, message: str) -> int:
         msg = str(message)
+        if len(msg) > _MAX_LOG_LENGTH:
+            msg = msg[:_MAX_LOG_LENGTH] + f"\n... (已截断 {len(msg) - _MAX_LOG_LENGTH} 字符) ..."
         with self._lock:
             log_id = self._next_id
             self._next_id += 1

@@ -5,7 +5,7 @@ import time
 from collections import deque
 
 _MAX_ITEMS = 2000
-
+_MAX_PAYLOAD_LENGTH = 10000
 
 class ProxyStepBus:
     def __init__(self) -> None:
@@ -15,6 +15,8 @@ class ProxyStepBus:
 
     def push(self, message: str) -> int:
         payload = str(message)
+        if len(payload) > _MAX_PAYLOAD_LENGTH:
+            payload = payload[:_MAX_PAYLOAD_LENGTH] + f"\n... (已截断 {len(payload) - _MAX_PAYLOAD_LENGTH} 字符) ..."
         with self._lock:
             item_id = self._next_id
             self._next_id += 1
