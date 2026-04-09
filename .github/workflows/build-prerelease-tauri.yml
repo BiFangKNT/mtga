@@ -8,8 +8,7 @@ on:
     inputs:
       version:
         description: >-
-          版本号（例如：2.0.0-beta.1）。手动触发只支持更新已存在 tag；
-          新 tag 请用 git-flow-next 创建 release 分支并通过 `pnpm release:push` 推送。
+          要打包的版本号（例如：2.0.0-beta.1）。留空则自动从 pyproject.toml 读取。
         required: false
         default: ""
       release_type:
