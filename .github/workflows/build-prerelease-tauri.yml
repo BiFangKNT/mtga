@@ -44,8 +44,8 @@ jobs:
           set -euo pipefail
 
           if [ -z "${CI_DEPLOY_KEY:-}" ]; then
-            echo "⚠️ 缺少 secrets.CI_DEPLOY_KEY，跳过发布回写推送"
-            exit 0
+            echo "❌ 缺少 secrets.CI_DEPLOY_KEY，无法执行发布回写推送"
+            exit 1
           fi
 
           mkdir -p ~/.ssh
@@ -132,11 +132,11 @@ jobs:
           set -euo pipefail
           TAG_NAME="${{ steps.version.outputs.tag_name }}"
           if ! git rev-parse "$TAG_NAME^{commit}" >/dev/null 2>&1; then
-            echo "⚠️ workflow_dispatch 目标标签不存在: $TAG_NAME"
-            echo "由于您可能只是为了获取构建产物，将跳过标签校验并使用当前分支进行构建。"
-          else
-            echo "✅ 目标标签存在：$TAG_NAME，后续构建将固定在该标签提交上"
+            echo "❌ workflow_dispatch 仅支持重打已存在标签: $TAG_NAME"
+            echo "请先创建并推送该标签后再重发。"
+            exit 1
           fi
+          echo "✅ 目标标签存在：$TAG_NAME，后续构建将固定在该标签提交上"
 
   build-macos:
     name: 🍎 构建 macOS
@@ -162,7 +162,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
           fetch-depth: 0
 
       - name: 🐍 设置 Python
@@ -360,7 +360,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
 
       - name: 🐍 设置 Python
         id: setup-python
@@ -544,14 +544,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      CI_DEPLOY_KEY: ${{ secrets.CI_DEPLOY_KEY }}
+
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v6
-        if: env.CI_DEPLOY_KEY != ''
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
           fetch-depth: 0
           ssh-key: ${{ secrets.CI_DEPLOY_KEY }}
 
@@ -715,7 +713,6 @@ jobs:
           cat release_notes.md
 
       - name: 🧾 回写 CHANGELOG.md 并同步 dev -> tauri
-        if: env.CI_DEPLOY_KEY != ''
         run: |
           set -euo pipefail
 
@@ -789,7 +786,6 @@ jobs:
 
       - name: 🚀 创建 GitHub 发布
         uses: ncipollo/release-action@v1
-        if: env.CI_DEPLOY_KEY != ''
         with:
           tag: ${{ needs.prepare-version.outputs.tag_name }}
           name: ${{ needs.prepare-version.outputs.release_name }}
