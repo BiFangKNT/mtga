@@ -132,11 +132,11 @@ jobs:
           set -euo pipefail
           TAG_NAME="${{ steps.version.outputs.tag_name }}"
           if ! git rev-parse "$TAG_NAME^{commit}" >/dev/null 2>&1; then
-            echo "❌ workflow_dispatch 仅支持重打已存在标签: $TAG_NAME"
-            echo "请先创建并推送该标签后再重发。"
-            exit 1
+            echo "⚠️ workflow_dispatch 目标标签不存在: $TAG_NAME"
+            echo "由于您可能只是为了获取构建产物，将跳过标签校验并使用当前分支进行构建。"
+          else
+            echo "✅ 目标标签存在：$TAG_NAME，后续构建将固定在该标签提交上"
           fi
-          echo "✅ 目标标签存在：$TAG_NAME，后续构建将固定在该标签提交上"
 
   build-macos:
     name: 🍎 构建 macOS
@@ -162,7 +162,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
+          ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: 🐍 设置 Python
@@ -360,7 +360,7 @@ jobs:
       - name: 📥 检出代码
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: 🐍 设置 Python
         id: setup-python
@@ -542,6 +542,7 @@ jobs:
     name: 🚀 创建 GitHub 发布
     needs: [prepare-version, build-windows, build-macos]
     runs-on: ubuntu-latest
+    if: ${{ secrets.CI_DEPLOY_KEY != '' }}
     permissions:
       contents: write
     env:
@@ -552,7 +553,7 @@ jobs:
         uses: actions/checkout@v6
         if: env.CI_DEPLOY_KEY != ''
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.prepare-version.outputs.tag_name) || github.ref }}
+          ref: ${{ github.ref }}
           fetch-depth: 0
           ssh-key: ${{ secrets.CI_DEPLOY_KEY }}
 
