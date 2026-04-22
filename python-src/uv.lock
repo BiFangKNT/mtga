@@ -778,6 +778,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiohttp" },
     { name = "pyright" },
     { name = "ruff" },
     { name = "yamllint" },
@@ -798,6 +799,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiohttp", specifier = ">=3.13.3" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "ruff", specifier = ">=0.14.4" },
     { name = "yamllint", specifier = ">=1.37.1" },

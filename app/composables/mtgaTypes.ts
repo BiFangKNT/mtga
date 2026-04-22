@@ -1,4 +1,5 @@
 export type ProviderId = "openai_chat_completion" | "openai_response" | "anthropic" | "gemini";
+export type ProxyMode = "reverse_hosts" | "trae_native";
 
 export type ConfigGroup = {
   name?: string;
@@ -16,6 +17,8 @@ export type ConfigPayload = {
   current_config_index: number;
   mapped_model_id: string;
   mtga_auth_key: string;
+  proxy_mode: ProxyMode;
+  trae_path: string;
   warnings?: string[];
 };
 
@@ -68,7 +71,7 @@ export type ProxyStartStepEvent = {
   step: MainTabKey;
   status: "ok" | "skipped" | "failed" | "started";
   message?: string | null;
-  panel_target?: "config-group" | "global-config" | null;
+  panel_target?: "config-group" | "global-config" | "settings" | null;
 };
 
 export type SystemPromptDelta = {

@@ -3,6 +3,7 @@
  * 设置面板组件
  * 提供用户数据管理、备份、还原及清理功能
  */
+import type { ProxyMode } from "~/composables/mtgaTypes";
 import {
   type ThemeConfig,
   DEFAULT_THEME_CONFIG,
@@ -21,6 +22,8 @@ const clearConfirmTitle = "确认清除数据";
 const clearConfirmMessage =
   "确定要清除用户数据吗？该操作将删除配置文件、SSL 证书和 hosts 备份（历史 backups 保留）。";
 const themeDialogOpen = ref(false);
+const proxySettingsSaving = ref(false);
+const traePathBrowsing = ref(false);
 
 const themeConfig = reactive<ThemeConfig>({ ...DEFAULT_THEME_CONFIG });
 if (import.meta.client) {
@@ -29,6 +32,29 @@ if (import.meta.client) {
     copyThemeConfig(themeConfig, savedTheme);
   }
 }
+
+const proxyMode = computed({
+  get: () => store.proxyMode.value,
+  set: (value: ProxyMode) => {
+    store.proxyMode.value = value;
+  },
+});
+
+const traePath = computed({
+  get: () => store.traePath.value,
+  set: (value: string) => {
+    store.traePath.value = value;
+  },
+});
+
+const traeNativeEnabled = computed({
+  get: () => proxyMode.value === "trae_native",
+  set: (value: boolean) => {
+    proxyMode.value = value ? "trae_native" : "reverse_hosts";
+  },
+});
+
+const traePathMissing = computed(() => traeNativeEnabled.value && !traePath.value.trim());
 
 /**
  * 打开目录的工具提示内容
@@ -75,6 +101,18 @@ const clearTooltip = [
   "保留内容：backups文件夹及其历史备份",
 ].join("\n");
 
+const proxyModeTooltip = [
+  "默认关闭：沿用当前反代 + hosts 路线",
+  "打开后：切换到 Trae native 自定义模型路线",
+  "后续一键启动会按所选模式切分启动流程",
+].join("\n");
+
+const traePathTooltip = [
+  "用于选择 Trae 可执行文件路径",
+  "建议直接通过右侧“浏览”选择，避免手填路径出错",
+  "启用该模式后，一键启动会自动拉起 Trae，并挂载 native SSE URL rewriter",
+].join("\n");
+
 /**
  * 处理打开数据目录
  */
@@ -110,6 +148,38 @@ const cancelClear = () => {
 const confirmClear = () => {
   clearConfirmOpen.value = false;
   store.runUserDataClear();
+};
+
+const handleBrowseTraePath = async () => {
+  if (traePathBrowsing.value) {
+    return;
+  }
+  traePathBrowsing.value = true;
+  try {
+    await store.runBrowseTraePath();
+  } finally {
+    traePathBrowsing.value = false;
+  }
+};
+
+const setProxyMode = (value: ProxyMode) => {
+  proxyMode.value = value;
+};
+
+const handleProxySettingsSave = async () => {
+  if (proxyMode.value === "trae_native" && !traePath.value.trim()) {
+    store.appendLog("错误: 启用 Trae native 路线前，请先选择 Trae 路径");
+    return;
+  }
+
+  proxySettingsSaving.value = true;
+  const ok = await store.saveConfig();
+  proxySettingsSaving.value = false;
+  if (ok) {
+    store.appendLog("代理模式设置已保存");
+  } else {
+    store.appendLog("保存代理模式设置失败");
+  }
 };
 
 const openThemeDialog = () => {
@@ -178,6 +248,109 @@ const handleThemeSave = (value: ThemeConfig) => {
         </button>
       </div>
     </div>
+
+    <div class="mtga-soft-panel space-y-3">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-sm font-semibold text-slate-900">启动路线</div>
+          <div class="text-xs text-slate-500">决定一键启动使用哪条接入链路</div>
+        </div>
+        <span
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+          :class="
+            traeNativeEnabled
+              ? 'border-amber-500/40 bg-amber-50 text-amber-700'
+              : 'border-slate-200 bg-white/60 text-slate-500'
+          "
+        >
+          <span
+            class="h-1.5 w-1.5 rounded-full"
+            :class="traeNativeEnabled ? 'bg-amber-500' : 'bg-slate-300'"
+          />
+          {{ traeNativeEnabled ? "Trae native" : "默认反代" }}
+        </span>
+      </div>
+
+      <div
+        class="tooltip mtga-tooltip grid grid-cols-2 gap-2"
+        :data-tip="proxyModeTooltip"
+        style="--mtga-tooltip-max: 360px"
+      >
+        <button
+          type="button"
+          class="cursor-pointer rounded-xl border px-3 py-2 text-left transition-all active:scale-[0.99]"
+          :class="
+            !traeNativeEnabled
+              ? 'border-amber-500/50 bg-amber-50/80 shadow-sm shadow-amber-500/10'
+              : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-white/70'
+          "
+          @click="setProxyMode('reverse_hosts')"
+        >
+          <span class="block text-sm font-semibold text-slate-800">默认反代</span>
+          <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">hosts + HTTPS 代理</span>
+        </button>
+        <button
+          type="button"
+          class="cursor-pointer rounded-xl border px-3 py-2 text-left transition-all active:scale-[0.99]"
+          :class="
+            traeNativeEnabled
+              ? 'border-amber-500/50 bg-amber-50/80 shadow-sm shadow-amber-500/10'
+              : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-white/70'
+          "
+          @click="setProxyMode('trae_native')"
+        >
+          <span class="block text-sm font-semibold text-slate-800">Trae native</span>
+          <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">native SSE rewriter</span>
+        </button>
+      </div>
+
+      <div
+        v-if="traeNativeEnabled"
+        class="mtga-tooltip w-full rounded-xl border border-slate-200/80 bg-white/35 p-3"
+        :data-tip="traePathTooltip"
+        style="--mtga-tooltip-max: 360px"
+      >
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-semibold text-slate-700">Trae 可执行文件</div>
+            <div class="text-[11px] text-slate-400">用于由 MTGA 拉起干净 Trae 实例</div>
+          </div>
+        </div>
+        <div class="flex items-start gap-2">
+          <MtgaInput
+            v-model="traePath"
+            class="min-w-0 flex-1"
+            placeholder="%LOCALAPPDATA%\Programs\Trae\Trae.exe"
+            :error="traePathMissing ? '启用 Trae native 路线前需要先选择 Trae.exe。' : ''"
+          />
+          <button
+            type="button"
+            class="btn btn-outline btn-sm h-10 min-w-[76px] shrink-0 cursor-pointer gap-2 rounded-xl border-slate-200 px-3 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600"
+            :disabled="traePathBrowsing"
+            :aria-busy="traePathBrowsing"
+            @click="handleBrowseTraePath"
+          >
+            <span
+              v-if="traePathBrowsing"
+              class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-amber-500"
+            />
+            <span>{{ traePathBrowsing ? "选择中" : "浏览" }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end">
+        <button
+          class="btn btn-primary btn-sm rounded-xl px-4"
+          :class="proxySettingsSaving ? 'loading' : ''"
+          :disabled="proxySettingsSaving"
+          @click="handleProxySettingsSave"
+        >
+          保存路线设置
+        </button>
+      </div>
+    </div>
+
     <button class="mtga-clickable-row" @click="openThemeDialog">
       <span class="flex flex-col items-start gap-0.5 text-left">
         <span class="font-semibold text-slate-800">主题配置</span>

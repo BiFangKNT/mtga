@@ -11,6 +11,7 @@ import type {
   LogEventPayload,
   LogPullResult,
   MainTabKey,
+  ProxyMode,
   ProxyStartStepEvent,
   SystemPromptItem,
 } from "./mtgaTypes";
@@ -41,6 +42,10 @@ const DEFAULT_RUNTIME_OPTIONS: RuntimeOptions = {
   forceStream: false,
   streamMode: "true",
 };
+
+const DEFAULT_PROXY_MODE: ProxyMode = "reverse_hosts";
+const DEFAULT_TRAE_PATH = "";
+const DEFAULT_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
 
 const FRONTEND_LOG_LIMIT = 2000;
 const LAZY_WARMUP_SHOW_DELAY_MS = 120;
@@ -74,6 +79,9 @@ const isProxyStartStepEvent = (value: unknown): value is ProxyStartStepEvent => 
   return isMainTabKey(value.step) && isProxyStepStatus(value.status);
 };
 
+const isProxyMode = (value: unknown): value is ProxyMode =>
+  value === "reverse_hosts" || value === "trae_native";
+
 const normalizeProxyStepPayload = (payload: unknown): ProxyStartStepEvent | null => {
   if (isProxyStartStepEvent(payload)) {
     return payload;
@@ -104,6 +112,23 @@ const coerceText = (value: unknown) => {
       if (typeof candidate === "string") {
         return candidate;
       }
+    }
+  }
+  return "";
+};
+
+const formatUnknownError = (error: unknown) => {
+  if (error instanceof Error) {
+    return error.message.trim();
+  }
+  if (typeof error === "string") {
+    return error.trim();
+  }
+  if (isRecord(error)) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "";
     }
   }
   return "";
@@ -199,6 +224,8 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0);
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
+  const proxyMode = useState<ProxyMode>("mtga-proxy-mode", () => DEFAULT_PROXY_MODE);
+  const traePath = useState<string>("mtga-trae-path", () => DEFAULT_TRAE_PATH);
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -276,6 +303,11 @@ export const useMtgaStore = () => {
     }
     if (normalized.includes("全局配置缺失") || normalized === "global_config_missing") {
       panelNavTarget.value = "global-config";
+      panelNavSignal.value += 1;
+      return;
+    }
+    if (normalized.includes("Trae 路径") || normalized.startsWith("trae_path_")) {
+      panelNavTarget.value = "settings";
       panelNavSignal.value += 1;
       return;
     }
@@ -767,6 +799,8 @@ export const useMtgaStore = () => {
     );
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
+    proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
+    traePath.value = coerceText(result.trae_path).trim();
     if (Array.isArray(result.warnings)) {
       result.warnings.forEach((warning) => {
         const text = coerceText(warning).trim();
@@ -786,6 +820,8 @@ export const useMtgaStore = () => {
       current_config_index: clampedIndex,
       mapped_model_id: coerceText(mappedModelId.value),
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      proxy_mode: proxyMode.value,
+      trae_path: coerceText(traePath.value).trim(),
     };
     const ok = await api.saveConfig(payload);
     return Boolean(ok);
@@ -890,6 +926,8 @@ export const useMtgaStore = () => {
     disable_ssl_strict_mode: runtimeOptions.value.disableSslStrict,
     force_stream: runtimeOptions.value.forceStream,
     stream_mode: runtimeOptions.value.streamMode,
+    proxy_mode: proxyMode.value,
+    trae_path: coerceText(traePath.value).trim(),
   });
 
   const runGenerateCertificates = async () => {
@@ -1034,6 +1072,68 @@ export const useMtgaStore = () => {
     return applyInvokeResult(result, "清除用户数据");
   };
 
+  const runBrowseTraePath = async () => {
+    if (!isTauriRuntime()) {
+      appendLog("浏览 Trae 路径失败：当前运行环境不支持系统文件选择器");
+      return false;
+    }
+
+    const currentPath = coerceText(traePath.value).trim();
+    const resolveSource = currentPath || DEFAULT_TRAE_DIALOG_PATH;
+    const resolvedPathResult = await api.resolveTraeDialogPath({ path: resolveSource });
+    const resolvedPath = coerceText(resolvedPathResult?.path).trim();
+    const defaultPath = resolvedPath || currentPath || undefined;
+
+    try {
+      appendLog("正在使用 Tauri dialog 选择 Trae 路径...");
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const options = {
+        title: "选择 Trae 可执行文件",
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Trae 可执行文件", extensions: ["exe"] }],
+      };
+      const selected = await open(defaultPath ? { ...options, defaultPath } : options);
+      const selectedPath = typeof selected === "string" ? selected.trim() : "";
+      if (!selectedPath) {
+        appendLog("已取消选择 Trae 路径");
+        return false;
+      }
+
+      traePath.value = selectedPath;
+      appendLog(`已选择 Trae 路径: ${selectedPath}`);
+      return true;
+    } catch (error) {
+      console.warn("[mtga] tauri dialog browse trae path failed", error);
+      const errorMessage = formatUnknownError(error);
+      appendLog(
+        errorMessage
+          ? `Tauri dialog 不可用，回退后端选择器: ${errorMessage}`
+          : "Tauri dialog 不可用，回退后端选择器",
+      );
+    }
+
+    const result = await api.browseTraePath({ path: currentPath || DEFAULT_TRAE_DIALOG_PATH });
+    if (!result) {
+      appendLog("浏览 Trae 路径失败");
+      return false;
+    }
+    const errorMessage = coerceText(result.error).trim();
+    if (errorMessage) {
+      appendLog(`浏览 Trae 路径失败: ${errorMessage}`);
+      return false;
+    }
+    const selectedPath = coerceText(result.path).trim();
+    if (!selectedPath) {
+      appendLog("已取消选择 Trae 路径");
+      return false;
+    }
+
+    traePath.value = selectedPath;
+    appendLog(`已选择 Trae 路径: ${selectedPath}`);
+    return true;
+  };
+
   const runCheckUpdates = async () => {
     const result = await api.checkUpdates();
     const ok = applyInvokeResult(result, "检查更新");
@@ -1144,6 +1244,8 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    proxyMode,
+    traePath,
     runtimeOptions,
     logs,
     systemPrompts,
@@ -1191,6 +1293,7 @@ export const useMtgaStore = () => {
     runUserDataBackup,
     runUserDataRestoreLatest,
     runUserDataClear,
+    runBrowseTraePath,
     runCheckUpdates,
     runCheckUpdatesOnce,
     closeUpdateDialog,

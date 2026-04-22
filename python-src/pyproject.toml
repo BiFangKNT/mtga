@@ -30,10 +30,11 @@ exclude = ["build*", "target*", "pyembed*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-modules = ["resources/ca/**"]
+modules = ["resources/ca/**", "resources/trae/**"]
 
 [dependency-groups]
 dev = [
+    "aiohttp>=3.13.3",
     "pyright>=1.1.408",
     "ruff>=0.14.4",
     "yamllint>=1.37.1",

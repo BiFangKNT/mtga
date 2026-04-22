@@ -7,6 +7,8 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/pyembed/
 python-src/.venv/
+artifacts/
+python-src/artifacts/
 pnpm-lock.yaml
 CHANGELOG.md
 .codex/

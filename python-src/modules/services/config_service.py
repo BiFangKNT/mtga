@@ -13,6 +13,8 @@ from modules.proxy.proxy_config import (
 )
 
 DEFAULT_PROVIDER = OPENAI_CHAT_COMPLETION_PROVIDER
+DEFAULT_PROXY_MODE = "reverse_hosts"
+NATIVE_PROXY_MODE = "trae_native"
 # Breaking change:
 # `config_groups[*].mapped_model_id` 已经不符合当前“一份全局映射模型ID + 多个配置组”的语义。
 # 新版本不会自动迁移该字段；读取时会直接忽略，保存时会按当前 schema 清理掉。
@@ -34,6 +36,12 @@ CONFIG_GROUP_ALLOWED_KEYS = frozenset(
         "prompt_cache_enabled",
     }
 )
+
+
+def _normalize_proxy_mode(value: Any) -> str:
+    if isinstance(value, str) and value.strip() == NATIVE_PROXY_MODE:
+        return NATIVE_PROXY_MODE
+    return DEFAULT_PROXY_MODE
 
 
 def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
@@ -134,12 +142,27 @@ class ConfigStore:
             pass
         return "", ""
 
-    def save_config_groups(
+    def load_proxy_settings(self) -> tuple[str, str]:
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                    if config:
+                        proxy_mode = _normalize_proxy_mode(config.get("proxy_mode"))
+                        trae_path = config.get("trae_path", "")
+                        return proxy_mode, str(trae_path or "")
+        except Exception:
+            pass
+        return DEFAULT_PROXY_MODE, ""
+
+    def save_config_groups(  # noqa: PLR0913
         self,
         config_groups: list[dict[str, Any]],
         current_index: int = 0,
         mapped_model_id: str | None = None,
         mtga_auth_key: str | None = None,
+        proxy_mode: str | None = None,
+        trae_path: str | None = None,
     ) -> bool:
         try:
             config_data: dict[str, Any] = {}
@@ -160,6 +183,10 @@ class ConfigStore:
                 config_data["mapped_model_id"] = mapped_model_id
             if mtga_auth_key is not None:
                 config_data["mtga_auth_key"] = mtga_auth_key
+            if proxy_mode is not None:
+                config_data["proxy_mode"] = _normalize_proxy_mode(proxy_mode)
+            if trae_path is not None:
+                config_data["trae_path"] = str(trae_path or "").strip()
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
 

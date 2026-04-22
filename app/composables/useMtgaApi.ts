@@ -56,12 +56,16 @@ export const useMtgaApi = () => {
     disable_ssl_strict_mode: boolean;
     force_stream: boolean;
     stream_mode?: string | null;
+    proxy_mode?: string | null;
+    trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_start", payload);
   const proxyApplyCurrentConfig = (payload: {
     debug_mode: boolean;
     disable_ssl_strict_mode: boolean;
     force_stream: boolean;
     stream_mode?: string | null;
+    proxy_mode?: string | null;
+    trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_apply_current_config", payload);
   const proxyStop = () => safeInvoke<InvokeResult>("proxy_stop");
   const proxyCheckNetwork = () => safeInvoke<InvokeResult>("proxy_check_network");
@@ -70,6 +74,8 @@ export const useMtgaApi = () => {
     disable_ssl_strict_mode: boolean;
     force_stream: boolean;
     stream_mode?: string | null;
+    proxy_mode?: string | null;
+    trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_start_all", payload);
   const configGroupTest = (payload: { index: number; mode?: "chat" | "models" }) =>
     safeInvoke<InvokeResult>("config_group_test", payload);
@@ -84,6 +90,10 @@ export const useMtgaApi = () => {
   const userDataBackup = () => safeInvoke<InvokeResult>("user_data_backup");
   const userDataRestoreLatest = () => safeInvoke<InvokeResult>("user_data_restore_latest");
   const userDataClear = () => safeInvoke<InvokeResult>("user_data_clear");
+  const resolveTraeDialogPath = (payload: { path: string }) =>
+    safeInvoke<{ path: string }>("resolve_trae_dialog_path", payload);
+  const browseTraePath = (payload: { path: string }) =>
+    safeInvoke<{ path: string; error?: string }>("browse_trae_path", payload);
   const checkUpdates = () => safeInvoke<InvokeResult>("check_updates");
   const systemPromptsList = () => safeInvoke<InvokeResult>("system_prompts_list");
   const systemPromptsUpdate = (payload: { hash: string; edited_text: string }) =>
@@ -149,6 +159,8 @@ export const useMtgaApi = () => {
     userDataBackup,
     userDataRestoreLatest,
     userDataClear,
+    resolveTraeDialogPath,
+    browseTraePath,
     checkUpdates,
     systemPromptsList,
     systemPromptsUpdate,

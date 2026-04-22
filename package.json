@@ -44,6 +44,7 @@
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.16",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "2.7.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "dompurify": "^3.3.3",
     "nuxt": "^4.4.2",

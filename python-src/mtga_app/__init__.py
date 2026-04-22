@@ -146,6 +146,7 @@ except Exception as exc:
 # 仓库根仍用于版本号读取。
 REPO_ROOT = TAURI_PROJECT_ROOT
 
+from anyio import to_thread
 from anyio.from_thread import start_blocking_portal
 from pydantic import BaseModel
 from pytauri import AppHandle, Commands, Emitter
@@ -208,6 +209,12 @@ class SaveConfigPayload(BaseModel):
     current_config_index: int
     mapped_model_id: str | None = None
     mtga_auth_key: str | None = None
+    proxy_mode: str | None = None
+    trae_path: str | None = None
+
+
+class ResolvePathPayload(BaseModel):
+    path: str
 
 
 @lru_cache(maxsize=1)
@@ -233,12 +240,15 @@ async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     config_groups, current_index = config_store.load_config_groups()
     mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    proxy_mode, trae_path = config_store.load_proxy_settings()
     warnings = config_store.load_config_warnings()
     return {
         "config_groups": config_groups,
         "current_config_index": current_index,
         "mapped_model_id": mapped_model_id,
         "mtga_auth_key": mtga_auth_key,
+        "proxy_mode": proxy_mode,
+        "trae_path": trae_path,
         "warnings": warnings,
     }
 
@@ -251,7 +261,60 @@ async def save_config(body: SaveConfigPayload) -> bool:
         body.current_config_index,
         body.mapped_model_id,
         body.mtga_auth_key,
+        body.proxy_mode,
+        body.trae_path,
     )
+
+
+@command_registry.command()
+async def resolve_trae_dialog_path(body: ResolvePathPayload) -> dict[str, str]:
+    raw_path = body.path.strip()
+    if not raw_path:
+        return {"path": ""}
+    return {"path": os.path.expanduser(os.path.expandvars(raw_path))}
+
+
+def _browse_trae_path_sync(raw_path: str) -> str:
+    import tkinter as tk  # noqa: PLC0415
+    from tkinter import filedialog  # noqa: PLC0415
+
+    expanded = os.path.expanduser(os.path.expandvars(raw_path.strip()))
+    initial_dir = ""
+    initial_file = "Trae.exe"
+    if expanded:
+        candidate = Path(expanded)
+        if candidate.is_dir():
+            initial_dir = str(candidate)
+        else:
+            if candidate.parent.exists():
+                initial_dir = str(candidate.parent)
+            if candidate.name:
+                initial_file = candidate.name
+
+    root = cast(Any, tk.Tk())
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.update()
+    try:
+        selected = filedialog.askopenfilename(
+            parent=root,
+            title="选择 Trae 可执行文件",
+            initialdir=initial_dir or None,
+            initialfile=initial_file,
+            filetypes=(("Trae 可执行文件", "*.exe"), ("所有文件", "*.*")),
+        )
+    finally:
+        root.destroy()
+    return str(selected or "").strip()
+
+
+@command_registry.command()
+async def browse_trae_path(body: ResolvePathPayload) -> dict[str, str]:
+    try:
+        path = await to_thread.run_sync(_browse_trae_path_sync, body.path)
+    except Exception as exc:  # noqa: BLE001
+        return {"path": "", "error": str(exc)}
+    return {"path": path, "error": ""}
 
 
 @command_registry.command()

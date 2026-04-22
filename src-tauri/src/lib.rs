@@ -500,6 +500,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![proxy_step_channel])
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_pytauri::init(py_invoke_handler))
         .plugin(tauri_plugin_shell::init())
         .on_page_load({
