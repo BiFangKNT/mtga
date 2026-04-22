@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trae Native Debug"
+  short_description: "Maintain Trae native route and hook offsets"
+  default_prompt: "Use $trae-native-debug to investigate a Trae native route failure or update-related hook offset change."
