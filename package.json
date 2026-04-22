@@ -22,6 +22,7 @@
     "py:gate": "pnpm gate -- py",
     "dev:py": "cd python-src && cross-env DEV_SERVER=http://localhost:3000 MTGA_SRC_TAURI_DIR=../src-tauri uv run python -m mtga_app",
     "dev:all": "concurrently -k \"pnpm dev\" \"pnpm dev:py\"",
+    "tauri:dev": "tauri dev",
     "pytauri:install:win": "cd src-tauri && set PYTAURI_STANDALONE=1 && uv pip install --exact --python \"pyembed\\\\python\\\\python.exe\" --reinstall-package mtga-app \"..\\\\python-src\"",
     "pytauri:install:mac": "cd src-tauri && PYTAURI_STANDALONE=1 uv pip install --exact --python \"./pyembed/python/bin/python3\" --reinstall-package mtga-app \"../python-src\"",
     "pyembed:prune": "node ./scripts/prune-pyembed.mjs",
