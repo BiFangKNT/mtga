@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import ctypes
 import json
 import sys
@@ -41,9 +40,9 @@ from .trae_native_breakpoint_probe import (
     write_process_memory,
     write_thread_context,
 )
+from .trae_native_compatibility import build_compatibility_report
 from .trae_native_hook_candidates import AI_AGENT_DLL
 from .trae_native_runtime_breakpoints import enable_debug_privilege
-from .trae_native_string_offsets import find_all, parse_pe_layout
 
 MEM_COMMIT = 0x1000
 MEM_RESERVE = 0x2000
@@ -59,8 +58,6 @@ VirtualAllocEx.argtypes = [
 ]
 VirtualAllocEx.restype = ctypes.c_void_p
 
-URL_COPY_PATTERN = bytes.fromhex("48 8b 52 08 4d 8b 46 10 48 8d 8d 20 01 00 00")
-URL_COPY_CALL_OFFSET = 0x0F
 DEFAULT_OLD_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_NEW_URL = "http://127.0.0.1:18083/v1/chat/completions"
 DEFAULT_DURATION_SECONDS = 300
@@ -78,6 +75,7 @@ class RewriterConfig:
     breakpoint_rva: int | None = None
     old_url: str = DEFAULT_OLD_URL
     new_url: str = DEFAULT_NEW_URL
+    compatibility_report: dict[str, Any] | None = None
     duration_seconds: int = DEFAULT_DURATION_SECONDS
     max_patches: int = DEFAULT_MAX_PATCHES
     wait_for_module_seconds: int = DEFAULT_WAIT_FOR_MODULE_SECONDS
@@ -143,31 +141,72 @@ def _allocate_remote_utf8(process: wintypes.HANDLE, text: str) -> dict[str, Any]
     }
 
 
-def _locate_url_copy_call_rva(module_path: Path) -> int:
-    data = module_path.read_bytes()
-    layout = parse_pe_layout(data)
-    offsets = find_all(data, URL_COPY_PATTERN)
-    if len(offsets) != 1:
-        raise RuntimeError(
-            "无法唯一定位 SseOpenPayload URL copy call；"
-            f"pattern_count={len(offsets)}"
-        )
-    location = layout.locate_file_offset(offsets[0] + URL_COPY_CALL_OFFSET)
-    rva = location.get("rva")
-    if not isinstance(rva, str) or rva == "<unknown>":
-        raise RuntimeError(f"无法把 URL copy call file offset 转换为 RVA: {location}")
-    return int(rva, 0)
-
-
 def run_rewriter_config(config: RewriterConfig) -> dict[str, Any]:
     return run_rewriter(argparse.Namespace(**config.__dict__))
 
 
+def _compatibility_value(report: dict[str, Any], key: str) -> Any | None:
+    value = report.get(key)
+    return value if value is not None else None
+
+
+def _coerce_report(raw_report: object) -> dict[str, Any]:
+    return cast(dict[str, Any], raw_report) if isinstance(raw_report, dict) else {}
+
+
+def _report_rva(report: dict[str, Any]) -> int:
+    raw_rva = report.get("url_copy_call_rva")
+    if not isinstance(raw_rva, str) or raw_rva == "<unknown>":
+        raise RuntimeError(f"runtime compatibility report 缺少有效 RVA: {raw_rva}")
+    return int(raw_rva, 0)
+
+
+def _report_identity(report: dict[str, Any]) -> tuple[Any | None, Any | None] | None:
+    dll_sha256 = report.get("dll_sha256")
+    dll_size = report.get("dll_size")
+    if dll_sha256 is None or dll_size is None:
+        return None
+    return dll_sha256, dll_size
+
+
+def _report_changed(
+    preflight_report: dict[str, Any],
+    runtime_report: dict[str, Any],
+) -> bool | None:
+    preflight_identity = _report_identity(preflight_report)
+    runtime_identity = _report_identity(runtime_report)
+    if preflight_identity is None or runtime_identity is None:
+        return None
+    return preflight_identity != runtime_identity
+
+
+def _build_runtime_compatibility_report(module_path: Path, old_url: str) -> dict[str, Any]:
+    report = build_compatibility_report(module_path, old_url=old_url)
+    if report.blocked:
+        raise RuntimeError(
+            "Trae native runtime compatibility blocked before attach: "
+            f"reason={report.reason} "
+            f"pattern_count={report.pattern_count} "
+            f"sha={report.dll_sha256 or '<empty>'} "
+            f"dll={report.dll_path}"
+        )
+    return report.to_dict()
+
+
 def run_rewriter(args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0912, PLR0915
+    raw_preflight_report = cast(object, getattr(args, "compatibility_report", None))
+    preflight_report = _coerce_report(raw_preflight_report)
+    runtime_report = (
+        {}
+        if args.breakpoint_rva is not None
+        else _build_runtime_compatibility_report(args.module_path, args.old_url)
+    )
+    compatibility_report = runtime_report or preflight_report
+    compatibility_changed = _report_changed(preflight_report, runtime_report)
     breakpoint_rva = (
         args.breakpoint_rva
         if args.breakpoint_rva is not None
-        else _locate_url_copy_call_rva(args.module_path)
+        else _report_rva(runtime_report)
     )
     target_pid, module_base, module_size = resolve_runtime_module(
         args.pid,
@@ -192,6 +231,13 @@ def run_rewriter(args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0912, 
         "breakpoint_rva": hex(breakpoint_rva),
         "old_url": args.old_url,
         "new_url": args.new_url,
+        "dll_sha256": _compatibility_value(compatibility_report, "dll_sha256"),
+        "pattern_count": _compatibility_value(compatibility_report, "pattern_count"),
+        "compatibility_status": _compatibility_value(compatibility_report, "status"),
+        "compatibility_reason": _compatibility_value(compatibility_report, "reason"),
+        "preflight_dll_sha256": _compatibility_value(preflight_report, "dll_sha256"),
+        "preflight_dll_size": _compatibility_value(preflight_report, "dll_size"),
+        "compatibility_changed_since_preflight": compatibility_changed,
         "duration_seconds": args.duration_seconds,
         "max_patches": args.max_patches,
         "hit_count": 0,
@@ -201,6 +247,8 @@ def run_rewriter(args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0912, 
         "single_step_count": 0,
         "events": [],
         "status": "running",
+        "breakpoint_restored": False,
+        "debug_detached": False,
     }
     pending_rearm_threads: set[int] = set()
     try:
@@ -220,7 +268,17 @@ def run_rewriter(args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0912, 
             "pid": target_pid,
             "breakpoint": hex(breakpoint_address),
             "breakpoint_rva": hex(breakpoint_rva),
+            "dll_sha256": _compatibility_value(compatibility_report, "dll_sha256"),
+            "pattern_count": _compatibility_value(compatibility_report, "pattern_count"),
+            "old_url": args.old_url,
             "new_url": args.new_url,
+            "preflight_dll_sha256": _compatibility_value(preflight_report, "dll_sha256"),
+            "preflight_dll_size": _compatibility_value(preflight_report, "dll_size"),
+            "compatibility_changed_since_preflight": compatibility_changed,
+            "compatibility_status": _compatibility_value(
+                compatibility_report,
+                "status",
+            ),
         }
         stats["events"].append(armed_payload)
         _record(args.output_path, armed_payload)
@@ -343,9 +401,16 @@ def run_rewriter(args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0912, 
             ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status)
     finally:
         if process is not None and original:
-            with contextlib.suppress(Exception):
+            try:
                 write_process_memory(process, breakpoint_address, original)
-        DebugActiveProcessStop(target_pid)
+            except Exception as exc:  # noqa: BLE001
+                stats["breakpoint_restore_error"] = f"{type(exc).__name__}: {exc}"
+            else:
+                stats["breakpoint_restored"] = True
+        detached = DebugActiveProcessStop(target_pid)
+        stats["debug_detached"] = bool(detached)
+        if not detached:
+            stats["debug_detach_error"] = str(last_windows_error("DebugActiveProcessStop"))
         if process is not None:
             close_process_handle(process)
 

@@ -21,6 +21,10 @@ from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.runtime.thread_manager import ThreadManager
+from modules.trae_patch.trae_native_compatibility import (
+    TraeNativeCompatibilityReport,
+    build_compatibility_report,
+)
 
 type LogFunc = Callable[[str], None]
 
@@ -30,6 +34,7 @@ DEFAULT_TRAE_CDP_HOST = "127.0.0.1"
 DEFAULT_TRAE_CDP_PORT = 9330
 DEFAULT_REWRITER_WAIT_SECONDS = 20.0
 DEFAULT_LOOPBACK_WAIT_SECONDS = 5.0
+REWRITER_WATCH_INTERVAL_SECONDS = 1.0
 TRAE_REWRITER_MODULE = "modules.trae_patch.trae_native_sse_open_url_rewriter"
 TRAE_AI_AGENT_DLL_RELATIVE_PATH = Path(
     "resources/app/modules/ai-agent/ai_agent.dll"
@@ -62,8 +67,11 @@ class _TraeNativeRouteState:
     rewriter_log_fp: Any | None = None
     rewriter_events_path: Path | None = None
     rewriter_stop_path: Path | None = None
+    rewriter_watcher_task_id: str | None = None
+    compatibility_report: TraeNativeCompatibilityReport | None = None
     trae_process: subprocess.Popen[bytes] | None = None
     running: bool = False
+    stopping: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +127,13 @@ def _read_tail(path: Path, max_chars: int = 2000) -> str:
         return ""
     text = path.read_text(encoding="utf-8", errors="replace")
     return text[-max_chars:].strip()
+
+
+def _summary_value(summary: dict[str, Any] | None, key: str) -> str:
+    if summary is None:
+        return "<empty>"
+    value = summary.get(key)
+    return str(value) if value is not None else "<empty>"
 
 
 def _list_existing_trae_pids() -> list[int]:
@@ -183,6 +198,14 @@ class TraeNativeRouteManager:
             stop_result = self._stop_locked(log_func=log_func, show_idle_message=False)
             if not stop_result.ok:
                 return stop_result
+            self._state.stopping = False
+
+            compatibility_result = self._check_static_compatibility_locked(
+                config,
+                log_func=log_func,
+            )
+            if not compatibility_result.ok:
+                return compatibility_result
 
             log_func("Trae native 路线：启动本地 custom model loopback")
             loopback_result = self._start_loopback_locked(config, log_func=log_func)
@@ -205,6 +228,7 @@ class TraeNativeRouteManager:
                 return rewriter_result
 
             self._state.running = True
+            self._start_rewriter_watcher_locked(log_func=log_func)
             log_func("✅ Trae native 路线已就绪")
             return OperationResult.success(
                 "Trae native 路线已就绪",
@@ -222,6 +246,54 @@ class TraeNativeRouteManager:
                 log_func=log_func,
                 show_idle_message=show_idle_message,
             )
+
+    def _check_static_compatibility_locked(
+        self,
+        config: TraeNativeRouteConfig,
+        *,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        self._state.compatibility_report = None
+        if not config.trae_path.strip():
+            message = "trae_path_missing"
+            log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+        trae_exe = resolve_trae_path(config.trae_path)
+        if not trae_exe.is_file():
+            message = "trae_path_invalid"
+            log_func(f"❌ Trae 路径无效: {trae_exe}")
+            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
+
+        module_path = _resolve_ai_agent_dll_path(trae_exe)
+        report = build_compatibility_report(module_path)
+        self._state.compatibility_report = report
+        details = report.to_dict()
+        sha_preview = (report.dll_sha256 or "<empty>")[:12]
+        if report.blocked:
+            log_func(
+                "❌ Trae native 兼容性检查失败: "
+                f"reason={report.reason} "
+                f"pattern_count={report.pattern_count} "
+                f"sha={sha_preview} "
+                f"dll={module_path}"
+            )
+            return OperationResult.failure(
+                "Trae native 兼容性检查失败",
+                code=ErrorCode.CONFIG_INVALID,
+                **details,
+            )
+
+        log_func(
+            "Trae native 兼容性检查通过: "
+            f"status={report.status.value} "
+            f"reason={report.reason} "
+            f"breakpoint_rva={report.url_copy_call_rva} "
+            f"sha={sha_preview}"
+        )
+        if report.manifest_error:
+            log_func(f"⚠️ Trae native manifest 读取异常，按未知版本处理: {report.manifest_error}")
+        return OperationResult.success("Trae native 兼容性检查通过", **details)
 
     def _start_loopback_locked(
         self,
@@ -369,6 +441,7 @@ class TraeNativeRouteManager:
             config,
             module_path=module_path,
             files=files,
+            compatibility_report=self._state.compatibility_report,
             log_func=log_func,
         )
         if not task_result.ok:
@@ -391,7 +464,17 @@ class TraeNativeRouteManager:
             return OperationResult.failure("native rewriter 未就绪", code=ErrorCode.UNKNOWN)
 
         breakpoint_rva = str(armed.get("breakpoint_rva") or "")
-        log_func(f"Trae native rewriter 已就绪: breakpoint_rva={breakpoint_rva}")
+        dll_sha = str(armed.get("dll_sha256") or "<empty>")[:12]
+        if armed.get("compatibility_changed_since_preflight") is True:
+            log_func(
+                "⚠️ Trae ai_agent.dll 在启动期间发生变化，"
+                "已使用 rewriter attach 前重新定位的 RVA"
+            )
+        log_func(
+            "Trae native rewriter 已就绪: "
+            f"breakpoint_rva={breakpoint_rva} "
+            f"dll_sha={dll_sha}"
+        )
         return OperationResult.success()
 
     def _open_rewriter_files(self) -> _RewriterFiles:
@@ -419,6 +502,7 @@ class TraeNativeRouteManager:
         *,
         module_path: Path,
         files: _RewriterFiles,
+        compatibility_report: TraeNativeCompatibilityReport | None,
         log_func: LogFunc,
     ) -> OperationResult:
         try:
@@ -435,6 +519,9 @@ class TraeNativeRouteManager:
         rewriter_config = RewriterConfig(
             module_path=module_path,
             new_url=self._loopback_url(config),
+            compatibility_report=(
+                compatibility_report.to_dict() if compatibility_report is not None else None
+            ),
             duration_seconds=0,
             output_path=files.events_path,
             stop_file=files.stop_path,
@@ -508,6 +595,146 @@ class TraeNativeRouteManager:
         log_func(f"❌ native rewriter 等待超时; log_tail={tail or '<empty>'}")
         return None
 
+    def _start_rewriter_watcher_locked(self, *, log_func: LogFunc) -> None:
+        task_id = self._state.rewriter_task_id
+        events_path = self._state.rewriter_events_path
+        if task_id is None or events_path is None:
+            return
+
+        def watch_rewriter() -> None:
+            first_request_event_logged = False
+            while True:
+                with self._lock:
+                    active = (
+                        self._state.rewriter_task_id == task_id
+                        and self._state.running
+                        and not self._state.stopping
+                    )
+                if not active:
+                    return
+
+                if not first_request_event_logged:
+                    first_request_event_logged = self._log_first_rewrite_event(
+                        events_path,
+                        log_func=log_func,
+                    )
+
+                status = self._thread_manager.get_status(task_id=task_id)
+                if status is not None and status.get("status") in {"failed", "finished"}:
+                    with self._lock:
+                        still_active = (
+                            self._state.rewriter_task_id == task_id
+                            and self._state.running
+                            and not self._state.stopping
+                        )
+                        if not still_active:
+                            return
+                        self._state.running = False
+                        summary = self._state.rewriter_summary
+                        error = self._state.rewriter_error
+
+                    log_func(
+                        "❌ native rewriter 运行中退出，Trae native 路线已失效；"
+                        "请重启 Trae native 路线。"
+                        f"status={status.get('status')} "
+                        f"error={error or status.get('error') or '<empty>'} "
+                        f"summary_status={_summary_value(summary, 'status')}"
+                    )
+                    return
+
+                time.sleep(REWRITER_WATCH_INTERVAL_SECONDS)
+
+        self._state.rewriter_watcher_task_id = self._thread_manager.run(
+            "trae_native_rewriter_watcher",
+            watch_rewriter,
+            allow_parallel=False,
+        )
+
+    @staticmethod
+    def _log_first_rewrite_event(events_path: Path, *, log_func: LogFunc) -> bool:
+        for record in _read_jsonl(events_path):
+            kind = record.get("kind")
+            if kind == "patched":
+                log_func(f"Trae native URL rewrite 已命中: count={record.get('count')}")
+                return True
+            if kind == "already_patched":
+                log_func(
+                    "Trae native URL rewrite 观察到已改写 URL: "
+                    f"count={record.get('count')}"
+                )
+                return True
+            if kind == "unexpected_url":
+                current_text = str(record.get("current_text") or "")
+                preview = current_text[:200] if current_text else "<empty>"
+                log_func(
+                    "⚠️ Trae native URL copy 点命中非目标 URL: "
+                    f"count={record.get('count')} preview={preview}"
+                )
+                return True
+        return False
+
+    def _stop_rewriter_locked(self, *, log_func: LogFunc) -> bool:
+        task_id = self._state.rewriter_task_id
+        if task_id is None:
+            return True
+
+        if self._state.rewriter_stop_path is not None:
+            with contextlib.suppress(Exception):
+                self._state.rewriter_stop_path.write_text("stop", encoding="utf-8")
+
+        rewriter_stopped = self._thread_manager.wait(task_id, timeout=5)
+        if not rewriter_stopped:
+            log_func("⚠️ native rewriter 未能在 5 秒内停止，保留停止状态以便后续重试")
+            return False
+
+        self._log_rewriter_stop_summary_locked(log_func=log_func)
+        self._clear_rewriter_state_locked()
+        return True
+
+    def _log_rewriter_stop_summary_locked(self, *, log_func: LogFunc) -> None:
+        summary = self._state.rewriter_summary
+        if summary is None:
+            return
+        log_func(
+            "Trae native rewriter 停止摘要: "
+            f"status={_summary_value(summary, 'status')} "
+            f"breakpoint_restored={_summary_value(summary, 'breakpoint_restored')} "
+            f"debug_detached={_summary_value(summary, 'debug_detached')}"
+        )
+
+    def _clear_rewriter_state_locked(self) -> None:
+        self._state.rewriter_task_id = None
+        self._state.rewriter_error = None
+        self._state.rewriter_summary = None
+
+        if self._state.rewriter_log_fp is not None:
+            with contextlib.suppress(Exception):
+                self._state.rewriter_log_fp.close()
+            self._state.rewriter_log_fp = None
+        if self._state.rewriter_stop_path is not None:
+            with contextlib.suppress(FileNotFoundError):
+                self._state.rewriter_stop_path.unlink()
+            self._state.rewriter_stop_path = None
+        self._state.rewriter_events_path = None
+        self._state.rewriter_watcher_task_id = None
+
+    def _stop_loopback_locked(self) -> bool:
+        clean = True
+        server = self._state.server
+        if server is not None:
+            with contextlib.suppress(Exception):
+                server.server_close()
+        if self._state.server_task_id:
+            clean = self._thread_manager.wait(self._state.server_task_id, timeout=5)
+        self._state.server = None
+        self._state.server_task_id = None
+
+        if self._state.proxy_app is not None:
+            with contextlib.suppress(Exception):
+                self._state.proxy_app.close()
+            self._state.proxy_app = None
+        return clean
+
     def _stop_locked(
         self,
         *,
@@ -523,55 +750,22 @@ class TraeNativeRouteManager:
             )
         )
         if not had_runtime:
+            self._state.compatibility_report = None
+            self._state.stopping = False
             if show_idle_message:
                 log_func("Trae native 路线未运行")
             return OperationResult.success()
 
         log_func("正在停止 Trae native 路线...")
-        clean = True
-
-        task_id = self._state.rewriter_task_id
-        rewriter_stopped = task_id is None
-        if task_id is not None:
-            if self._state.rewriter_stop_path is not None:
-                with contextlib.suppress(Exception):
-                    self._state.rewriter_stop_path.write_text("stop", encoding="utf-8")
-            rewriter_stopped = self._thread_manager.wait(task_id, timeout=5)
-            clean = clean and rewriter_stopped
-            if not rewriter_stopped:
-                log_func("⚠️ native rewriter 未能在 5 秒内停止，保留停止状态以便后续重试")
-
-        if rewriter_stopped:
-            self._state.rewriter_task_id = None
-            self._state.rewriter_error = None
-            self._state.rewriter_summary = None
-
-            if self._state.rewriter_log_fp is not None:
-                with contextlib.suppress(Exception):
-                    self._state.rewriter_log_fp.close()
-                self._state.rewriter_log_fp = None
-            if self._state.rewriter_stop_path is not None:
-                with contextlib.suppress(FileNotFoundError):
-                    self._state.rewriter_stop_path.unlink()
-                self._state.rewriter_stop_path = None
-            self._state.rewriter_events_path = None
-
-        server = self._state.server
-        if server is not None:
-            with contextlib.suppress(Exception):
-                server.server_close()
-        if self._state.server_task_id:
-            finished = self._thread_manager.wait(self._state.server_task_id, timeout=5)
-            clean = clean and finished
-        self._state.server = None
-        self._state.server_task_id = None
-
-        if self._state.proxy_app is not None:
-            with contextlib.suppress(Exception):
-                self._state.proxy_app.close()
-            self._state.proxy_app = None
+        self._state.stopping = True
+        rewriter_stopped = self._stop_rewriter_locked(log_func=log_func)
+        loopback_stopped = self._stop_loopback_locked()
+        clean = rewriter_stopped and loopback_stopped
 
         self._state.running = False
+        self._state.stopping = False
+        if clean:
+            self._state.compatibility_report = None
         log_func("Trae native 路线已停止；不会关闭 Trae 客户端进程")
         if clean:
             return OperationResult.success()
