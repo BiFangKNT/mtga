@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from .trae_native_breakpoint_probe import (
+from .breakpoint_probe import (
     DBG_CONTINUE,
     DBG_EXCEPTION_NOT_HANDLED,
     DEBUG_EVENT,
@@ -40,9 +40,9 @@ from .trae_native_breakpoint_probe import (
     write_process_memory,
     write_thread_context,
 )
-from .trae_native_compatibility import build_compatibility_report
-from .trae_native_hook_candidates import AI_AGENT_DLL
-from .trae_native_runtime_breakpoints import enable_debug_privilege
+from .compatibility import build_compatibility_report
+from .hook_candidates import AI_AGENT_DLL
+from .runtime_breakpoints import enable_debug_privilege
 
 MEM_COMMIT = 0x1000
 MEM_RESERVE = 0x2000

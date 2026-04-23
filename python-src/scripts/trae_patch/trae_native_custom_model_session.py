@@ -95,7 +95,7 @@ def _build_rewriter_command(args: argparse.Namespace, new_url: str) -> list[str]
         sys.executable,
         "-u",
         "-m",
-        "modules.trae_patch.trae_native_sse_open_url_rewriter",
+        "modules.trae_patch.windows.sse_open_url_rewriter",
         "--new-url",
         new_url,
         "--duration-seconds",

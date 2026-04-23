@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .trae_native_hook_candidates import AI_AGENT_DLL
+from .hook_candidates import AI_AGENT_DLL
 
 DEFAULT_KEYWORDS = (
     "[AhaIPCSource] start_boot_config_stream",

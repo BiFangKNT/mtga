@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from modules.trae_patch.trae_native_hook_candidates import AI_AGENT_DLL
-from modules.trae_patch.trae_native_string_offsets import find_all, parse_pe_layout
+from modules.trae_patch.windows.hook_candidates import AI_AGENT_DLL
+from modules.trae_patch.windows.string_offsets import find_all, parse_pe_layout
 
 
 def _normalize_hex(value: str) -> bytes:

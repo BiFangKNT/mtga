@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .trae_native_hook_candidates import AI_AGENT_DLL
+from .hook_candidates import AI_AGENT_DLL
 
 TH32CS_SNAPPROCESS = 0x00000002
 TH32CS_SNAPMODULE = 0x00000008

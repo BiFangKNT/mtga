@@ -21,9 +21,14 @@ from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.runtime.thread_manager import ThreadManager
-from modules.trae_patch.trae_native_compatibility import (
-    TraeNativeCompatibilityReport,
-    build_compatibility_report,
+from modules.trae_patch.backends import (
+    UnsupportedNativeBackendError,
+    get_native_backend,
+)
+from modules.trae_patch.common.types import (
+    CompatibilityReport,
+    NativeBackend,
+    RewriterConfigRequest,
 )
 
 type LogFunc = Callable[[str], None]
@@ -35,7 +40,6 @@ DEFAULT_TRAE_CDP_PORT = 9330
 DEFAULT_REWRITER_WAIT_SECONDS = 20.0
 DEFAULT_LOOPBACK_WAIT_SECONDS = 5.0
 REWRITER_WATCH_INTERVAL_SECONDS = 1.0
-TRAE_REWRITER_MODULE = "modules.trae_patch.trae_native_sse_open_url_rewriter"
 TRAE_AI_AGENT_DLL_RELATIVE_PATH = Path(
     "resources/app/modules/ai-agent/ai_agent.dll"
 )
@@ -68,7 +72,8 @@ class _TraeNativeRouteState:
     rewriter_events_path: Path | None = None
     rewriter_stop_path: Path | None = None
     rewriter_watcher_task_id: str | None = None
-    compatibility_report: TraeNativeCompatibilityReport | None = None
+    native_backend: NativeBackend | None = None
+    compatibility_report: CompatibilityReport | None = None
     trae_process: subprocess.Popen[bytes] | None = None
     running: bool = False
     stopping: bool = False
@@ -253,7 +258,15 @@ class TraeNativeRouteManager:
         *,
         log_func: LogFunc,
     ) -> OperationResult:
+        self._state.native_backend = None
         self._state.compatibility_report = None
+        try:
+            backend = get_native_backend()
+        except UnsupportedNativeBackendError as exc:
+            message = str(exc)
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
         if not config.trae_path.strip():
             message = "trae_path_missing"
             log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
@@ -266,7 +279,8 @@ class TraeNativeRouteManager:
             return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
 
         module_path = _resolve_ai_agent_dll_path(trae_exe)
-        report = build_compatibility_report(module_path)
+        report = backend.build_compatibility_report(module_path)
+        self._state.native_backend = backend
         self._state.compatibility_report = report
         details = report.to_dict()
         sha_preview = (report.dll_sha256 or "<empty>")[:12]
@@ -424,24 +438,29 @@ class TraeNativeRouteManager:
         *,
         log_func: LogFunc,
     ) -> OperationResult:
-        if importlib.util.find_spec(TRAE_REWRITER_MODULE) is None:
-            message = f"未找到 native rewriter 模块: {TRAE_REWRITER_MODULE}"
+        backend = self._state.native_backend
+        if backend is None:
+            try:
+                backend = get_native_backend()
+            except UnsupportedNativeBackendError as exc:
+                message = str(exc)
+                log_func(f"❌ {message}")
+                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+            self._state.native_backend = backend
+
+        if importlib.util.find_spec(backend.rewriter_module) is None:
+            message = f"未找到 native rewriter 模块: {backend.rewriter_module}"
             log_func(f"❌ {message}")
             return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
 
         trae_exe = resolve_trae_path(config.trae_path)
         module_path = _resolve_ai_agent_dll_path(trae_exe)
-        if not module_path.is_file():
-            message = f"未找到 Trae ai_agent.dll: {module_path}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
 
         files = self._open_rewriter_files()
         task_result = self._start_rewriter_task_locked(
             config,
             module_path=module_path,
             files=files,
-            compatibility_report=self._state.compatibility_report,
             log_func=log_func,
         )
         if not task_result.ok:
@@ -502,35 +521,40 @@ class TraeNativeRouteManager:
         *,
         module_path: Path,
         files: _RewriterFiles,
-        compatibility_report: TraeNativeCompatibilityReport | None,
         log_func: LogFunc,
     ) -> OperationResult:
-        try:
-            from modules.trae_patch.trae_native_sse_open_url_rewriter import (  # noqa: PLC0415
-                RewriterConfig,
-                run_rewriter_config,
-            )
-        except Exception as exc:  # noqa: BLE001
-            files.log_fp.close()
-            message = f"native rewriter 模块导入失败: {exc}"
+        backend = self._state.native_backend
+        if backend is None:
+            message = "native backend 状态异常"
             log_func(f"❌ {message}")
             return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
 
-        rewriter_config = RewriterConfig(
-            module_path=module_path,
-            new_url=self._loopback_url(config),
-            compatibility_report=(
-                compatibility_report.to_dict() if compatibility_report is not None else None
-            ),
-            duration_seconds=0,
-            output_path=files.events_path,
-            stop_file=files.stop_path,
-            quiet=True,
-        )
+        compatibility_report = self._state.compatibility_report
+        try:
+            rewriter_config = backend.create_rewriter_config(
+                RewriterConfigRequest(
+                    module_path=module_path,
+                    new_url=self._loopback_url(config),
+                    compatibility_report=(
+                        compatibility_report.to_dict()
+                        if compatibility_report is not None
+                        else None
+                    ),
+                    duration_seconds=0,
+                    output_path=files.events_path,
+                    stop_file=files.stop_path,
+                    quiet=True,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            files.log_fp.close()
+            message = f"native rewriter 配置创建失败: {exc}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
 
         def run_rewriter() -> None:
             try:
-                summary = run_rewriter_config(rewriter_config)
+                summary = backend.run_rewriter_config(rewriter_config)
             except Exception as exc:  # noqa: BLE001
                 self._state.rewriter_error = f"{type(exc).__name__}: {exc}"
                 files.log_fp.write(f"{self._state.rewriter_error}\n")
@@ -750,6 +774,7 @@ class TraeNativeRouteManager:
             )
         )
         if not had_runtime:
+            self._state.native_backend = None
             self._state.compatibility_report = None
             self._state.stopping = False
             if show_idle_message:
@@ -765,6 +790,7 @@ class TraeNativeRouteManager:
         self._state.running = False
         self._state.stopping = False
         if clean:
+            self._state.native_backend = None
             self._state.compatibility_report = None
         log_func("Trae native 路线已停止；不会关闭 Trae 客户端进程")
         if clean:

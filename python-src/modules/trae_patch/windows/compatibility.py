@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
 
-from .trae_native_string_offsets import find_all, parse_pe_layout
+from .string_offsets import find_all, parse_pe_layout
 
 URL_COPY_PATTERN_HEX = "48 8b 52 08 4d 8b 46 10 48 8d 8d 20 01 00 00"
 URL_COPY_PATTERN = bytes.fromhex(URL_COPY_PATTERN_HEX)

@@ -14,8 +14,9 @@ Trae native 自定义模型路线当前依赖 `ai_agent.dll` 中 `SseOpenPayload
 ## 当前锚点
 
 - 路线入口：`modules/services/trae_native_route.py`
-- 运行时代码：`modules/trae_patch/`
-- 主流程模块：`modules/trae_patch/trae_native_sse_open_url_rewriter.py`
+- 平台后端入口：`modules/trae_patch/backends.py`
+- Windows 运行时代码：`modules/trae_patch/windows/`
+- Windows 主流程模块：`modules/trae_patch/windows/sse_open_url_rewriter.py`
 - 维护脚本目录：`scripts/trae_patch/`，只用于复查、CDP 触发、一次性诊断；不得被主流程依赖。
 - URL copy 字节模式：`48 8b 52 08 4d 8b 46 10 48 8d 8d 20 01 00 00`
 - call 偏移：`0x0f`
@@ -117,8 +118,8 @@ ready 只表示断点挂好，不表示 chat 已走到 URL copy 点。运行中�
 
 ## 落地顺序
 
-1. 固化运行时边界：主流程只导入 `modules/trae_patch/`；`scripts/trae_patch/` 只能作为维护工具，不能放运行时依赖。
-2. 新增 `modules/trae_patch/trae_native_compatibility.py`，复用 `trae_native_string_offsets.py` 输出静态兼容性报告。
+1. 固化运行时边界：主流程只通过 `modules/trae_patch/backends.py` 选择平台后端；`scripts/trae_patch/` 只能作为维护工具，不能放运行时依赖。
+2. 新增 `modules/trae_patch/windows/compatibility.py`，复用 `modules/trae_patch/windows/string_offsets.py` 输出静态兼容性报告。
 3. 在 `TraeNativeRouteManager._start_rewriter_locked()` 前调用兼容性检查，阻断 `blocked`。
 4. 扩展 rewriter 的 `armed` / summary JSON，写入 dll sha、pattern count、RVA、恢复状态。
 5. 增加 route watcher，监控 rewriter 运行中退出和首个 `patched` 事件。

@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from .trae_native_hook_candidates import AI_AGENT_DLL
-from .trae_native_runtime_breakpoints import (
+from .hook_candidates import AI_AGENT_DLL
+from .runtime_breakpoints import (
     DEFAULT_RVAS,
     ModuleInfo,
     ModuleSnapshotFailure,
