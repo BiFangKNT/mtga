@@ -75,7 +75,12 @@ pnpm gitflow:setup
 ### 常用开发命令
 
 ```bash
+# 启动前后端开发服务器（默认 `http://localhost:3000`）
 pnpm dev:all
+
+# 启动 Tauri 原生开发环境以验证原生行为，必须先安装 python 后端
+pnpm pytauri:install:{平台：win/mac}
+pnpm tauri:dev
 ```
 
 ### 按改动类型执行质量检查
