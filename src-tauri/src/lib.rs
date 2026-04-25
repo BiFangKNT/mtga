@@ -46,7 +46,6 @@ static PY_WARMUP: OnceLock<PyObject> = OnceLock::new();
 static BACKEND_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_PAGE_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
-static LOG_STREAM_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn set_env_var_during_startup<K, V>(key: K, value: V)
 where
@@ -299,7 +298,6 @@ fn run_backend_warmup(app_handle: &AppHandle) {
     if let Err(error) = warmup_py_invoke_handler() {
         log::error!(target: "boot", "label=backend_init_error error={}", error);
     }
-    start_log_event_stream(app_handle.clone());
     BACKEND_READY.store(true, Ordering::SeqCst);
     schedule_try_show_main(app_handle.clone());
 }
@@ -336,6 +334,32 @@ fn pull_proxy_steps(
         kwargs.set_item("timeout_ms", timeout_ms)?;
         kwargs.set_item("max_items", max_items)?;
         let result = pull_steps.call((), Some(&kwargs))?;
+        let dict = result.downcast::<PyDict>()?;
+        let items = match dict.get_item("items")? {
+            Some(value) => value.extract::<Vec<String>>()?,
+            None => Vec::new(),
+        };
+        let next_id = match dict.get_item("next_id")? {
+            Some(value) => value.extract::<Option<i64>>()?,
+            None => None,
+        };
+        Ok((items, next_id))
+    })
+}
+
+fn pull_logs(
+    after_id: Option<i64>,
+    timeout_ms: i64,
+    max_items: i64,
+) -> PyResult<(Vec<String>, Option<i64>)> {
+    Python::with_gil(|py| {
+        let module = PyModule::import(py, "modules.runtime.log_bus")?;
+        let pull_logs = module.getattr("pull_logs")?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("after_id", after_id)?;
+        kwargs.set_item("timeout_ms", timeout_ms)?;
+        kwargs.set_item("max_items", max_items)?;
+        let result = pull_logs.call((), Some(&kwargs))?;
         let dict = result.downcast::<PyDict>()?;
         let items = match dict.get_item("items")? {
             Some(value) => value.extract::<Vec<String>>()?,
@@ -428,6 +452,42 @@ fn proxy_step_channel(channel: Channel<String>, start_from_latest: Option<bool>)
 }
 
 #[tauri::command]
+fn log_channel(channel: Channel<LogEventPayload>, after_id: Option<i64>) {
+    std::thread::spawn(move || {
+        let mut after_id = after_id;
+        loop {
+            let result = pull_logs(after_id, 1000, 200);
+
+            match result {
+                Ok((items, next_id)) => {
+                    if let Some(value) = next_id {
+                        after_id = Some(value);
+                    }
+                    if items.is_empty() {
+                        continue;
+                    }
+                    let payload = LogEventPayload {
+                        items,
+                        next_id: after_id.unwrap_or(0),
+                    };
+                    if channel.send(payload).is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        target: "boot",
+                        "label=log_channel_pull_failed error={}",
+                        error
+                    );
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
 fn proxy_status_channel(
     channel: Channel<String>,
     start_from_latest: Option<bool>,
@@ -481,65 +541,6 @@ fn proxy_status_channel(
     Ok(())
 }
 
-fn start_log_event_stream(app_handle: AppHandle) {
-    if LOG_STREAM_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    std::thread::spawn(move || {
-        let mut after_id: Option<i64> = None;
-        loop {
-            let result = Python::with_gil(|py| -> PyResult<(Vec<String>, Option<i64>)> {
-                let module = PyModule::import(py, "modules.runtime.log_bus")?;
-                let pull_logs = module.getattr("pull_logs")?;
-                let kwargs = PyDict::new(py);
-                kwargs.set_item("after_id", after_id)?;
-                kwargs.set_item("timeout_ms", 1000)?;
-                kwargs.set_item("max_items", 200)?;
-                let result = pull_logs.call((), Some(&kwargs))?;
-                let dict = result.downcast::<PyDict>()?;
-                let items = match dict.get_item("items")? {
-                    Some(value) => value.extract::<Vec<String>>()?,
-                    None => Vec::new(),
-                };
-                let next_id = match dict.get_item("next_id")? {
-                    Some(value) => value.extract::<Option<i64>>()?,
-                    None => None,
-                };
-                Ok((items, next_id))
-            });
-
-            match result {
-                Ok((items, next_id)) => {
-                    if let Some(value) = next_id {
-                        after_id = Some(value);
-                    }
-                    if !items.is_empty() {
-                        let payload = LogEventPayload {
-                            items,
-                            next_id: after_id.unwrap_or(0),
-                        };
-                        if let Err(error) = app_handle.emit("mtga:logs", payload) {
-                            log::warn!(
-                                target: "boot",
-                                "label=log_stream_emit_failed error={}",
-                                error
-                            );
-                        }
-                    }
-                }
-                Err(error) => {
-                    log::warn!(
-                        target: "boot",
-                        "label=log_stream_pull_failed error={}",
-                        error
-                    );
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-            }
-        }
-    });
-}
-
 fn stop_proxy_on_close() {
     Python::with_gil(|py| {
         let module = PyModule::import(py, "mtga_app.commands.proxy")?;
@@ -589,6 +590,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            log_channel,
             proxy_step_channel,
             proxy_status_channel
         ])

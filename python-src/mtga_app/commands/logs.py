@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 from pytauri import Commands
+from pytauri.ffi.webview import WebviewWindow
+from pytauri.ipc import JavaScriptChannelId
 
 from modules.runtime.log_bus import pull_logs, push_log
 from modules.runtime.resource_manager import get_log_path
@@ -17,6 +20,16 @@ class LogPullPayload(BaseModel):
     after_id: int | None = None
     timeout_ms: int = 0
     max_items: int = 200
+
+
+class LogEventPayload(BaseModel):
+    items: list[str]
+    next_id: int
+
+
+class LogChannelPayload(BaseModel):
+    channel: JavaScriptChannelId[LogEventPayload]
+    after_id: int | None = None
 
 
 class FrontendReportPayload(BaseModel):
@@ -93,6 +106,43 @@ def register_log_commands(commands: Commands) -> None:
         return result
 
     @commands.command()
+    async def log_channel(body: LogChannelPayload, webview_window: WebviewWindow) -> bool:
+        channel = body.channel.channel_on(webview_window.as_ref_webview())
+
+        def run() -> None:
+            after_id = body.after_id
+            while True:
+                try:
+                    result = pull_logs(
+                        after_id=after_id,
+                        timeout_ms=1000,
+                        max_items=200,
+                    )
+                except Exception:
+                    time.sleep(0.2)
+                    continue
+
+                items = result.get("items")
+                next_id = result.get("next_id")
+                if isinstance(next_id, int):
+                    after_id = next_id
+                if not isinstance(items, list) or not items:
+                    continue
+                safe_items = cast(list[object], items)
+
+                payload = LogEventPayload(
+                    items=[str(item) for item in safe_items],
+                    next_id=after_id or 0,
+                )
+                try:
+                    channel.send_model(payload)
+                except Exception:
+                    return
+
+        threading.Thread(target=run, name="mtga-log-channel", daemon=True).start()
+        return True
+
+    @commands.command()
     async def frontend_report(body: FrontendReportPayload) -> bool:
         message = _format_frontend_report(body)
         push_log(message)
@@ -100,6 +150,7 @@ def register_log_commands(commands: Commands) -> None:
         return True
 
     _ = pull_logs_command
+    _ = log_channel
     _ = frontend_report
 
 

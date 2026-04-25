@@ -66,6 +66,7 @@ _EAGER_COMMAND_GROUPS: tuple[CommandGroupSpec, ...] = (
         module_name="mtga_app.commands.logs",
         register_name="register_log_commands",
         commands=(
+            CommandSpec("log_channel", "body"),
             CommandSpec("pull_logs_command", "body"),
             CommandSpec("frontend_report", "body"),
         ),

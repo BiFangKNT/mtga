@@ -6,6 +6,7 @@ import type {
   ConfigPayload,
   InvokeResult,
   LazyWarmupEventPayload,
+  LogEventPayload,
   LogPullResult,
 } from "./mtgaTypes";
 
@@ -30,8 +31,13 @@ const safeInvoke = async <T>(
 };
 
 export const useMtgaApi = () => {
+  let logChannel: Channel<LogEventPayload> | null = null;
   let proxyStepChannel: Channel<string> | null = null;
   let proxyStatusChannel: Channel<string> | null = null;
+  type LogChannelOptions = {
+    reset?: boolean;
+    afterId?: number | null;
+  };
   type ProxyStepChannelOptions = {
     reset?: boolean;
     startFromLatest?: boolean;
@@ -111,6 +117,36 @@ export const useMtgaApi = () => {
     timeout_ms?: number;
     max_items?: number;
   }) => safeInvoke<LogPullResult>("pull_logs_command", payload);
+
+  const startLogChannel = async (
+    onMessage: (payload: LogEventPayload) => void,
+    options?: LogChannelOptions,
+  ): Promise<boolean> => {
+    if (!canInvoke()) {
+      return false;
+    }
+    try {
+      if (logChannel && options?.reset) {
+        logChannel.onmessage = () => {};
+        logChannel = null;
+      }
+      if (logChannel) {
+        logChannel.onmessage = onMessage;
+        return true;
+      }
+      logChannel = new Channel<LogEventPayload>();
+      logChannel.onmessage = onMessage;
+      await invoke("log_channel", {
+        channel: logChannel,
+        after_id: options?.afterId ?? null,
+      });
+      return true;
+    } catch (error) {
+      logChannel = null;
+      console.warn("[mtga] log channel failed", error);
+      return false;
+    }
+  };
 
   const startProxyStepChannel = async (
     onMessage: (payload: unknown) => void,
@@ -203,6 +239,7 @@ export const useMtgaApi = () => {
     systemPromptsUpdate,
     systemPromptsDelete,
     pullLogs,
+    startLogChannel,
     startProxyStepChannel,
     startProxyStatusChannel,
   };

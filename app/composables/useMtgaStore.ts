@@ -305,7 +305,6 @@ export const useMtgaStore = () => {
   );
 
   let logPollTimer: ReturnType<typeof setTimeout> | null = null;
-  let logEventUnlisten: (() => void) | null = null;
   let proxyStepUnlisten: (() => void) | null = null;
   let lazyWarmupShowTimer: ReturnType<typeof setTimeout> | null = null;
   let lazyWarmupHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -414,14 +413,6 @@ export const useMtgaStore = () => {
       return;
     }
     logStreamActive.value = true;
-    if (logEventUnlisten) {
-      try {
-        logEventUnlisten();
-      } catch {
-        // ignore cleanup errors
-      }
-      logEventUnlisten = null;
-    }
     if (logPollTimer !== null) {
       clearTimeout(logPollTimer);
       logPollTimer = null;
@@ -458,50 +449,29 @@ export const useMtgaStore = () => {
       void loop();
     };
 
-    const startEventStream = async () => {
+    const startChannel = async () => {
       if (!isTauriRuntime()) {
         startPolling();
         return;
       }
 
-      const initial = await api.pullLogs({
-        after_id: logCursor.value || null,
-        timeout_ms: 0,
-        max_items: 200,
-      });
-      applyLogResult(initial);
-
-      try {
-        const unlisten = await listen<LogEventPayload>("mtga:logs", (event) => {
-          const payload = event.payload;
-          if (!payload) {
+      const ok = await api.startLogChannel(
+        (payload: LogEventPayload) => {
+          if (!logStreamActive.value) {
             return;
           }
-          if (Array.isArray(payload.items) && payload.items.length) {
-            appendLogs(payload.items);
-          }
-          if (typeof payload.next_id === "number") {
-            logCursor.value = payload.next_id;
-          }
-        });
-        if (!logStreamActive.value) {
-          try {
-            unlisten();
-          } catch {
-            // ignore cleanup errors
-          }
-          return;
-        }
-        logEventUnlisten = () => {
-          void unlisten();
-        };
-      } catch (error) {
-        console.warn("[mtga] log event listen failed", error);
+          applyLogResult(payload);
+        },
+        {
+          afterId: logCursor.value || null,
+        },
+      );
+      if (!ok) {
         startPolling();
       }
     };
 
-    void startEventStream();
+    void startChannel();
   };
 
   const stopLogStream = () => {
@@ -509,14 +479,6 @@ export const useMtgaStore = () => {
     if (logPollTimer !== null) {
       clearTimeout(logPollTimer);
       logPollTimer = null;
-    }
-    if (logEventUnlisten) {
-      try {
-        logEventUnlisten();
-      } catch {
-        // ignore cleanup errors
-      }
-      logEventUnlisten = null;
     }
   };
 
