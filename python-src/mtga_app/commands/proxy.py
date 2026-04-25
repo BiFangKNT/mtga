@@ -31,6 +31,10 @@ from modules.services.trae_native_route import (
     TraeNativeRouteConfig,
     TraeNativeRouteManager,
 )
+from modules.services.trae_official_base_url_route import (
+    TraeOfficialBaseUrlRouteConfig,
+    TraeOfficialBaseUrlRouteManager,
+)
 
 from .common import build_result_payload, collect_logs
 
@@ -53,11 +57,17 @@ class ProxyStartStepEvent(BaseModel):
     panel_target: Literal["config-group", "global-config", "settings"] | None = None
 
 
+class ProxyRuntimeStatusEvent(BaseModel):
+    running: bool
+    active_mode: Literal["reverse_hosts", "trae_native", "trae_official_base_url"] | None = None
+
+
 @dataclass
 class ProxyRuntimeState:
     thread_manager: ThreadManager
     proxy_instance: Any | None = None
     trae_route_manager: TraeNativeRouteManager | None = None
+    trae_official_route_manager: TraeOfficialBaseUrlRouteManager | None = None
 
 
 @lru_cache(maxsize=1)
@@ -86,6 +96,16 @@ def _get_trae_route_manager() -> TraeNativeRouteManager:
     return state.trae_route_manager
 
 
+def _get_trae_official_route_manager() -> TraeOfficialBaseUrlRouteManager:
+    state = _get_proxy_state()
+    if state.trae_official_route_manager is None:
+        state.trae_official_route_manager = TraeOfficialBaseUrlRouteManager(
+            thread_manager=state.thread_manager,
+            resource_manager=_get_resource_manager(),
+        )
+    return state.trae_official_route_manager
+
+
 def _set_proxy_instance(instance: Any | None) -> None:
     state = _get_proxy_state()
     state.proxy_instance = instance
@@ -93,6 +113,27 @@ def _set_proxy_instance(instance: Any | None) -> None:
 
 def _get_proxy_instance() -> Any | None:
     return _get_proxy_state().proxy_instance
+
+
+def _build_proxy_runtime_status() -> ProxyRuntimeStatusEvent:
+    state = _get_proxy_state()
+
+    trae_manager = state.trae_route_manager
+    if trae_manager is not None and trae_manager.is_running():
+        return ProxyRuntimeStatusEvent(running=True, active_mode="trae_native")
+
+    trae_official_manager = state.trae_official_route_manager
+    if trae_official_manager is not None and trae_official_manager.is_running():
+        return ProxyRuntimeStatusEvent(
+            running=True,
+            active_mode="trae_official_base_url",
+        )
+
+    instance = state.proxy_instance
+    if instance is not None and instance.is_running():
+        return ProxyRuntimeStatusEvent(running=True, active_mode="reverse_hosts")
+
+    return ProxyRuntimeStatusEvent(running=False, active_mode=None)
 
 
 def stop_proxy_for_shutdown(*, log_func: LogFunc | None = None) -> OperationResult:
@@ -110,7 +151,7 @@ def stop_proxy_for_shutdown(*, log_func: LogFunc | None = None) -> OperationResu
             effective_log(message)
 
     _log("收到退出信号，准备停止代理服务器...")
-    trae_result = _stop_trae_native_route_result(log_func=_log)
+    trae_result = _stop_all_trae_routes_result(log_func=_log)
     result = proxy_orchestration.stop_proxy_instance_result(
         get_proxy_instance=_get_proxy_instance,
         set_proxy_instance=_set_proxy_instance,
@@ -150,6 +191,39 @@ def _stop_trae_native_route_result(
         log_func=log_func,
         show_idle_message=show_idle_message,
     )
+
+
+def _stop_trae_official_route_result(
+    *,
+    log_func: LogFunc,
+    show_idle_message: bool = False,
+) -> OperationResult:
+    return _get_trae_official_route_manager().stop(
+        log_func=log_func,
+        show_idle_message=show_idle_message,
+    )
+
+
+def _stop_all_trae_routes_result(
+    *,
+    log_func: LogFunc,
+    show_idle_message: bool = False,
+) -> OperationResult:
+    native_result = _stop_trae_native_route_result(
+        log_func=log_func,
+        show_idle_message=False,
+    )
+    official_result = _stop_trae_official_route_result(
+        log_func=log_func,
+        show_idle_message=False,
+    )
+    if not native_result.ok:
+        return native_result
+    if not official_result.ok:
+        return official_result
+    if show_idle_message:
+        log_func("Trae 路线已停止")
+    return OperationResult.success()
 
 
 def _start_proxy_instance_result(
@@ -232,11 +306,17 @@ def _build_proxy_config(
 def _resolve_proxy_mode(payload: ProxyStartPayload) -> str:
     if payload.proxy_mode == "trae_native":
         return "trae_native"
+    if payload.proxy_mode == "trae_official_base_url":
+        return "trae_official_base_url"
     if payload.proxy_mode == "reverse_hosts":
         return "reverse_hosts"
     config_store = _get_config_store()
     proxy_mode, _trae_path = config_store.load_proxy_settings()
-    return "trae_native" if proxy_mode == "trae_native" else "reverse_hosts"
+    if proxy_mode == "trae_native":
+        return "trae_native"
+    if proxy_mode == "trae_official_base_url":
+        return "trae_official_base_url"
+    return "reverse_hosts"
 
 
 def _resolve_trae_path(payload: ProxyStartPayload) -> str:
@@ -477,7 +557,7 @@ def _proxy_start_all_hosts(log_func: LogFunc) -> OperationResult | None:
 def _proxy_start_all_proxy(config: dict[str, Any], log_func: LogFunc) -> OperationResult:
     _push_proxy_step(log_func, step="proxy", status="started")
     log_func("步骤 4/4: 启动代理服务器")
-    trae_stop_result = _stop_trae_native_route_result(log_func=log_func)
+    trae_stop_result = _stop_all_trae_routes_result(log_func=log_func)
     if not trae_stop_result.ok:
         _push_proxy_step(
             log_func,
@@ -523,6 +603,16 @@ def _proxy_start_all_trae(
         )
         return reverse_stop_result
 
+    official_stop_result = _stop_trae_official_route_result(log_func=log_func)
+    if not official_stop_result.ok:
+        _push_proxy_step(
+            log_func,
+            step="proxy",
+            status="failed",
+            message=official_stop_result.message,
+        )
+        return official_stop_result
+
     hosts_result = modify_hosts_file_result(action="remove", log_func=log_func)
     if not hosts_result.ok:
         log_func(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
@@ -535,6 +625,57 @@ def _proxy_start_all_trae(
             debug_mode=body.debug_mode,
             disable_ssl_strict_mode=body.disable_ssl_strict_mode,
         ),
+        log_func=log_func,
+    )
+    _push_proxy_step(
+        log_func,
+        step="proxy",
+        status="ok" if start_result.ok else "failed",
+        message=start_result.message,
+    )
+    return start_result
+
+
+def _proxy_start_all_trae_official_base_url(
+    config: dict[str, Any],
+    log_func: LogFunc,
+) -> OperationResult:
+    _push_proxy_step(log_func, step="proxy", status="started")
+    log_func(
+        "Trae 官方 base_url 路线："
+        "跳过证书、hosts 和 patch，仅启动本地 loopback"
+    )
+
+    reverse_stop_result = _stop_proxy_instance_result(
+        log_func=log_func,
+        reason="restart",
+        show_idle_message=False,
+    )
+    if not reverse_stop_result.ok:
+        _push_proxy_step(
+            log_func,
+            step="proxy",
+            status="failed",
+            message=reverse_stop_result.message,
+        )
+        return reverse_stop_result
+
+    native_stop_result = _stop_trae_native_route_result(log_func=log_func)
+    if not native_stop_result.ok:
+        _push_proxy_step(
+            log_func,
+            step="proxy",
+            status="failed",
+            message=native_stop_result.message,
+        )
+        return native_stop_result
+
+    hosts_result = modify_hosts_file_result(action="remove", log_func=log_func)
+    if not hosts_result.ok:
+        log_func(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
+
+    start_result = _get_trae_official_route_manager().start(
+        TraeOfficialBaseUrlRouteConfig(runtime_config=config),
         log_func=log_func,
     )
     _push_proxy_step(
@@ -577,8 +718,11 @@ async def proxy_start(body: ProxyStartPayload) -> dict[str, Any]:
     if proxy_mode == "trae_native":
         result = _proxy_start_all_trae(body, config, log_func)
         return build_result_payload(result, logs, "代理服务器启动完成")
+    if proxy_mode == "trae_official_base_url":
+        result = _proxy_start_all_trae_official_base_url(config, log_func)
+        return build_result_payload(result, logs, "代理服务器启动完成")
 
-    trae_stop_result = _stop_trae_native_route_result(log_func=log_func)
+    trae_stop_result = _stop_all_trae_routes_result(log_func=log_func)
     if not trae_stop_result.ok:
         return build_result_payload(trae_stop_result, logs, "代理服务器启动失败")
 
@@ -588,6 +732,16 @@ async def proxy_start(body: ProxyStartPayload) -> dict[str, Any]:
         success_message="✅ 代理服务器启动成功",
     )
     return build_result_payload(result, logs, "代理服务器启动完成")
+
+
+async def proxy_runtime_status() -> dict[str, Any]:
+    logs: list[str] = []
+    status = _build_proxy_runtime_status()
+    result = OperationResult.success(
+        running=status.running,
+        active_mode=status.active_mode,
+    )
+    return build_result_payload(result, logs, "代理运行状态读取完成")
 
 
 async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
@@ -609,6 +763,11 @@ async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
         result = trae_manager.apply_runtime_config(config)
         return build_result_payload(result, logs, "代理配置应用完成")
 
+    trae_official_manager = _get_trae_official_route_manager()
+    if trae_official_manager.is_running():
+        result = trae_official_manager.apply_runtime_config(config)
+        return build_result_payload(result, logs, "代理配置应用完成")
+
     instance = _get_proxy_instance()
     if not instance or not instance.is_running():
         return build_result_payload(
@@ -626,9 +785,8 @@ async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
 
 async def proxy_stop() -> dict[str, Any]:
     logs, log_func = collect_logs()
-    trae_result = _stop_trae_native_route_result(
+    trae_result = _stop_all_trae_routes_result(
         log_func=log_func,
-        show_idle_message=True,
     )
     result = proxy_orchestration.stop_proxy_instance_result(
         get_proxy_instance=_get_proxy_instance,
@@ -669,6 +827,8 @@ async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
             log_func(f"当前代理模式: {proxy_mode}")
             if proxy_mode == "trae_native":
                 result = _proxy_start_all_trae(body, config, log_func)
+            elif proxy_mode == "trae_official_base_url":
+                result = _proxy_start_all_trae_official_base_url(config, log_func)
             else:
                 result = _proxy_start_all_cert(log_func)
         if result is None:
@@ -697,6 +857,7 @@ async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
 
 def register_proxy_commands(commands: Commands) -> None:
     commands.set_command("proxy_start", proxy_start)
+    commands.set_command("proxy_runtime_status", proxy_runtime_status)
     commands.set_command("proxy_apply_current_config", proxy_apply_current_config)
     commands.set_command("proxy_stop", proxy_stop)
     commands.set_command("proxy_check_network", proxy_check_network)

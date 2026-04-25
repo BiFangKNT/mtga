@@ -13,14 +13,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from werkzeug.serving import WSGIRequestHandler
-
-from modules.proxy.proxy_app import ProxyApp
-from modules.proxy.proxy_runtime import StoppableWSGIServer
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
 from modules.runtime.thread_manager import ThreadManager
+from modules.services.trae_loopback import (
+    DEFAULT_TRAE_LOOPBACK_HOST,
+    DEFAULT_TRAE_LOOPBACK_PORT,
+    TraeLoopbackConfig,
+    TraeLoopbackManager,
+    build_trae_loopback_chat_url,
+)
 from modules.trae_patch.backends import (
     UnsupportedNativeBackendError,
     get_native_backend,
@@ -33,12 +36,9 @@ from modules.trae_patch.common.types import (
 
 type LogFunc = Callable[[str], None]
 
-DEFAULT_TRAE_LOOPBACK_HOST = "127.0.0.1"
-DEFAULT_TRAE_LOOPBACK_PORT = 18083
 DEFAULT_TRAE_CDP_HOST = "127.0.0.1"
 DEFAULT_TRAE_CDP_PORT = 9330
 DEFAULT_REWRITER_WAIT_SECONDS = 20.0
-DEFAULT_LOOPBACK_WAIT_SECONDS = 5.0
 REWRITER_WATCH_INTERVAL_SECONDS = 1.0
 TRAE_AI_AGENT_DLL_RELATIVE_PATH = Path(
     "resources/app/modules/ai-agent/ai_agent.dll"
@@ -62,9 +62,6 @@ class TraeNativeRouteConfig:
 
 @dataclass
 class _TraeNativeRouteState:
-    proxy_app: ProxyApp | None = None
-    server: StoppableWSGIServer | None = None
-    server_task_id: str | None = None
     rewriter_task_id: str | None = None
     rewriter_error: str | None = None
     rewriter_summary: dict[str, Any] | None = None
@@ -99,15 +96,6 @@ def _is_port_open(host: str, port: int) -> bool:
     with contextlib.suppress(OSError), socket.create_connection((host, port), timeout=0.5):
         return True
     return False
-
-
-def _wait_port(host: str, port: int, timeout_seconds: float) -> bool:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if _is_port_open(host, port):
-            return True
-        time.sleep(0.15)
-    return _is_port_open(host, port)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -185,18 +173,26 @@ class TraeNativeRouteManager:
     ) -> None:
         self._thread_manager = thread_manager
         self._resource_manager = resource_manager
+        self._loopback = TraeLoopbackManager(
+            thread_manager=thread_manager,
+            resource_manager=resource_manager,
+        )
         self._state = _TraeNativeRouteState()
         self._lock = threading.Lock()
 
     def is_running(self) -> bool:
-        return self._state.running
+        with self._lock:
+            if self._state.running and not self._loopback.is_running():
+                self._state.running = False
+            return self._state.running
 
     def apply_runtime_config(self, raw_config: dict[str, Any] | None) -> OperationResult:
         with self._lock:
-            proxy_app = self._state.proxy_app
-            if not self._state.running or proxy_app is None:
+            if self._state.running and not self._loopback.is_running():
+                self._state.running = False
+            if not self._state.running:
                 return OperationResult.failure("Trae native 路线未运行")
-            return proxy_app.apply_runtime_config(raw_config)
+        return self._loopback.apply_runtime_config(raw_config)
 
     def start(self, config: TraeNativeRouteConfig, *, log_func: LogFunc) -> OperationResult:
         with self._lock:
@@ -213,7 +209,15 @@ class TraeNativeRouteManager:
                 return compatibility_result
 
             log_func("Trae native 路线：启动本地 custom model loopback")
-            loopback_result = self._start_loopback_locked(config, log_func=log_func)
+            loopback_result = self._loopback.start(
+                TraeLoopbackConfig(
+                    runtime_config=config.runtime_config,
+                    loopback_host=config.loopback_host,
+                    loopback_port=config.loopback_port,
+                ),
+                log_func=log_func,
+                task_name="trae_native_loopback",
+            )
             if not loopback_result.ok:
                 self._stop_locked(log_func=log_func, show_idle_message=False)
                 return loopback_result
@@ -227,7 +231,7 @@ class TraeNativeRouteManager:
             if not rewriter_result.ok:
                 log_func(
                     "⚠️ native rewriter 启动失败；Trae 已由 MTGA 拉起但不会自动关闭，"
-                    "请关闭 Trae 后重试，或切回默认反代路线。"
+                    "请关闭 Trae 后重试，或切回官方、反代路线。"
                 )
                 self._stop_locked(log_func=log_func, show_idle_message=False)
                 return rewriter_result
@@ -237,7 +241,10 @@ class TraeNativeRouteManager:
             log_func("✅ Trae native 路线已就绪")
             return OperationResult.success(
                 "Trae native 路线已就绪",
-                loopback_url=self._loopback_url(config),
+                loopback_url=build_trae_loopback_chat_url(
+                    config.loopback_host,
+                    config.loopback_port,
+                ),
             )
 
     def stop(
@@ -309,69 +316,6 @@ class TraeNativeRouteManager:
             log_func(f"⚠️ Trae native manifest 读取异常，按未知版本处理: {report.manifest_error}")
         return OperationResult.success("Trae native 兼容性检查通过", **details)
 
-    def _start_loopback_locked(
-        self,
-        config: TraeNativeRouteConfig,
-        *,
-        log_func: LogFunc,
-    ) -> OperationResult:
-        if _is_port_open(config.loopback_host, config.loopback_port):
-            message = f"Trae loopback 端口已被占用: {config.loopback_host}:{config.loopback_port}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.PORT_IN_USE)
-
-        proxy_app = ProxyApp(
-            config.runtime_config,
-            log_func,
-            resource_manager=self._resource_manager,
-        )
-        if not proxy_app.valid or proxy_app.app is None:
-            proxy_app.close()
-            return OperationResult.failure("Trae loopback 初始化失败", code=ErrorCode.UNKNOWN)
-
-        try:
-            server = StoppableWSGIServer(
-                config.loopback_host,
-                config.loopback_port,
-                proxy_app.app,
-            )
-            server.RequestHandlerClass = WSGIRequestHandler
-        except OSError as exc:
-            proxy_app.close()
-            message = f"Trae loopback 监听失败: {exc}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.PORT_IN_USE)
-        except Exception as exc:  # noqa: BLE001
-            proxy_app.close()
-            message = f"Trae loopback 创建失败: {exc}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
-
-        ready_event = threading.Event()
-
-        def run_server() -> None:
-            ready_event.set()
-            try:
-                server.serve_forever()
-            except Exception as exc:  # noqa: BLE001
-                log_func(f"Trae loopback 运行异常: {exc}")
-
-        task_id = self._thread_manager.run(
-            "trae_native_loopback",
-            run_server,
-            allow_parallel=False,
-        )
-        self._state.proxy_app = proxy_app
-        self._state.server = server
-        self._state.server_task_id = task_id
-
-        if not ready_event.wait(timeout=DEFAULT_LOOPBACK_WAIT_SECONDS):
-            return OperationResult.failure("Trae loopback 启动超时", code=ErrorCode.UNKNOWN)
-
-        log_func(f"Trae custom model loopback 已启动: {self._loopback_base_url(config)}/v1")
-        log_func(f"Trae custom model loopback chat 入口: {self._loopback_url(config)}")
-        return OperationResult.success()
-
     def _launch_trae_locked(
         self,
         config: TraeNativeRouteConfig,
@@ -425,7 +369,7 @@ class TraeNativeRouteManager:
             "已拉起 Trae，并注入参数: "
             f"--remote-debugging-port={config.cdp_port}"
         )
-        if not _wait_port(config.cdp_host, config.cdp_port, timeout_seconds=8):
+        if not self._wait_port(config.cdp_host, config.cdp_port, timeout_seconds=8):
             log_func(
                 f"⚠️ 未检测到 CDP 端口 {config.cdp_host}:{config.cdp_port}，"
                 "继续等待 native rewriter 挂载 ai_agent.dll"
@@ -534,7 +478,10 @@ class TraeNativeRouteManager:
             rewriter_config = backend.create_rewriter_config(
                 RewriterConfigRequest(
                     module_path=module_path,
-                    new_url=self._loopback_url(config),
+                    new_url=build_trae_loopback_chat_url(
+                        config.loopback_host,
+                        config.loopback_port,
+                    ),
                     compatibility_report=(
                         compatibility_report.to_dict()
                         if compatibility_report is not None
@@ -742,23 +689,6 @@ class TraeNativeRouteManager:
         self._state.rewriter_events_path = None
         self._state.rewriter_watcher_task_id = None
 
-    def _stop_loopback_locked(self) -> bool:
-        clean = True
-        server = self._state.server
-        if server is not None:
-            with contextlib.suppress(Exception):
-                server.server_close()
-        if self._state.server_task_id:
-            clean = self._thread_manager.wait(self._state.server_task_id, timeout=5)
-        self._state.server = None
-        self._state.server_task_id = None
-
-        if self._state.proxy_app is not None:
-            with contextlib.suppress(Exception):
-                self._state.proxy_app.close()
-            self._state.proxy_app = None
-        return clean
-
     def _stop_locked(
         self,
         *,
@@ -769,8 +699,7 @@ class TraeNativeRouteManager:
             (
                 self._state.running,
                 self._state.rewriter_task_id is not None,
-                self._state.server is not None,
-                self._state.proxy_app is not None,
+                self._loopback.is_running(),
             )
         )
         if not had_runtime:
@@ -784,7 +713,7 @@ class TraeNativeRouteManager:
         log_func("正在停止 Trae native 路线...")
         self._state.stopping = True
         rewriter_stopped = self._stop_rewriter_locked(log_func=log_func)
-        loopback_stopped = self._stop_loopback_locked()
+        loopback_stopped = self._loopback.stop()
         clean = rewriter_stopped and loopback_stopped
 
         self._state.running = False
@@ -798,8 +727,10 @@ class TraeNativeRouteManager:
         return OperationResult.failure("Trae native 路线未完全停止", code=ErrorCode.UNKNOWN)
 
     @staticmethod
-    def _loopback_base_url(config: TraeNativeRouteConfig) -> str:
-        return f"http://{config.loopback_host}:{config.loopback_port}"
-
-    def _loopback_url(self, config: TraeNativeRouteConfig) -> str:
-        return f"{self._loopback_base_url(config)}/v1/chat/completions"
+    def _wait_port(host: str, port: int, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if _is_port_open(host, port):
+                return True
+            time.sleep(0.15)
+        return _is_port_open(host, port)

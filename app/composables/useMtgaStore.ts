@@ -43,7 +43,7 @@ const DEFAULT_RUNTIME_OPTIONS: RuntimeOptions = {
   streamMode: "true",
 };
 
-const DEFAULT_PROXY_MODE: ProxyMode = "reverse_hosts";
+const DEFAULT_PROXY_MODE: ProxyMode = "trae_official_base_url";
 const DEFAULT_TRAE_PATH = "";
 const DEFAULT_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
 
@@ -80,7 +80,7 @@ const isProxyStartStepEvent = (value: unknown): value is ProxyStartStepEvent => 
 };
 
 const isProxyMode = (value: unknown): value is ProxyMode =>
-  value === "reverse_hosts" || value === "trae_native";
+  value === "reverse_hosts" || value === "trae_native" || value === "trae_official_base_url";
 
 const normalizeProxyStepPayload = (payload: unknown): ProxyStartStepEvent | null => {
   if (isProxyStartStepEvent(payload)) {
@@ -225,6 +225,7 @@ export const useMtgaStore = () => {
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
   const proxyMode = useState<ProxyMode>("mtga-proxy-mode", () => DEFAULT_PROXY_MODE);
+  const savedProxyMode = useState<ProxyMode>("mtga-saved-proxy-mode", () => DEFAULT_PROXY_MODE);
   const traePath = useState<string>("mtga-trae-path", () => DEFAULT_TRAE_PATH);
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
@@ -800,6 +801,7 @@ export const useMtgaStore = () => {
     mappedModelId.value = coerceText(result.mapped_model_id);
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
     proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
+    savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
     if (Array.isArray(result.warnings)) {
       result.warnings.forEach((warning) => {
@@ -824,7 +826,40 @@ export const useMtgaStore = () => {
       trae_path: coerceText(traePath.value).trim(),
     };
     const ok = await api.saveConfig(payload);
+    if (ok) {
+      savedProxyMode.value = payload.proxy_mode;
+    }
     return Boolean(ok);
+  };
+
+  const fetchProxyRuntimeStatus = async (): Promise<{
+    running: boolean;
+    active_mode: ProxyMode | null;
+  } | null> => {
+    const result = await api.proxyRuntimeStatus();
+    if (!result) {
+      appendLog("读取代理运行状态失败：无法连接后端");
+      return null;
+    }
+    if (!result.ok) {
+      appendLog(result.message?.trim() || "读取代理运行状态失败");
+      return null;
+    }
+    if (!isRecord(result.details)) {
+      return null;
+    }
+    const running = result.details["running"];
+    const activeMode = result.details["active_mode"];
+    if (
+      typeof running !== "boolean" ||
+      (activeMode !== null && typeof activeMode !== "undefined" && !isProxyMode(activeMode))
+    ) {
+      return null;
+    }
+    return {
+      running,
+      active_mode: activeMode ?? null,
+    };
   };
 
   const loadAppInfo = async () => {
@@ -1245,6 +1280,7 @@ export const useMtgaStore = () => {
     mappedModelId,
     mtgaAuthKey,
     proxyMode,
+    savedProxyMode,
     traePath,
     runtimeOptions,
     logs,
@@ -1276,6 +1312,7 @@ export const useMtgaStore = () => {
     scheduleLazyWarmup,
     loadConfig,
     saveConfig,
+    fetchProxyRuntimeStatus,
     init,
     runGenerateCertificates,
     runInstallCaCert,

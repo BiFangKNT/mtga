@@ -21,6 +21,8 @@ const clearConfirmOpen = ref(false);
 const clearConfirmTitle = "确认清除数据";
 const clearConfirmMessage =
   "确定要清除用户数据吗？该操作将删除配置文件、SSL 证书和 hosts 备份（历史 backups 保留）。";
+const proxyModeSwitchConfirmOpen = ref(false);
+const currentProxyModeForConfirm = ref<ProxyMode | null>(null);
 const themeDialogOpen = ref(false);
 const proxySettingsSaving = ref(false);
 const traePathBrowsing = ref(false);
@@ -47,14 +49,55 @@ const traePath = computed({
   },
 });
 
-const traeNativeEnabled = computed({
-  get: () => proxyMode.value === "trae_native",
-  set: (value: boolean) => {
-    proxyMode.value = value ? "trae_native" : "reverse_hosts";
-  },
-});
+const traeNativeEnabled = computed(() => proxyMode.value === "trae_native");
+const traeOfficialBaseUrlEnabled = computed(() => proxyMode.value === "trae_official_base_url");
+const savedProxyMode = computed(() => store.savedProxyMode.value);
+const proxyModeDirty = computed(() => proxyMode.value !== savedProxyMode.value);
 
 const traePathMissing = computed(() => traeNativeEnabled.value && !traePath.value.trim());
+
+const proxyModeBadgeClass = computed(() => {
+  if (traeNativeEnabled.value) {
+    return "border-amber-500/40 bg-amber-50 text-amber-700";
+  }
+  if (traeOfficialBaseUrlEnabled.value) {
+    return "border-emerald-500/40 bg-emerald-50 text-emerald-700";
+  }
+  return "border-slate-200 bg-white/60 text-slate-500";
+});
+
+const proxyModeDotClass = computed(() => {
+  if (traeNativeEnabled.value) {
+    return "bg-amber-500";
+  }
+  if (traeOfficialBaseUrlEnabled.value) {
+    return "bg-emerald-500";
+  }
+  return "bg-slate-300";
+});
+
+const proxyModeBadgeLabel = computed(() => {
+  if (traeNativeEnabled.value) {
+    return "Trae native";
+  }
+  if (traeOfficialBaseUrlEnabled.value) {
+    return "官方 Base URL";
+  }
+  return "反代";
+});
+
+const formatProxyModeLabel = (value: ProxyMode | null | undefined) => {
+  if (value === "trae_native") {
+    return "Trae native";
+  }
+  if (value === "trae_official_base_url") {
+    return "官方 Base URL";
+  }
+  if (value === "reverse_hosts") {
+    return "反代";
+  }
+  return "未运行";
+};
 
 /**
  * 打开目录的工具提示内容
@@ -102,8 +145,9 @@ const clearTooltip = [
 ].join("\n");
 
 const proxyModeTooltip = [
-  "默认关闭：沿用当前反代 + hosts 路线",
-  "打开后：切换到 Trae native 自定义模型路线",
+  "官方 Base URL：走官方接口，只启动本地 loopback",
+  "反代：沿用旧的 hosts + HTTPS 路线",
+  "Trae native：MTGA 拉起 Trae，并挂载 native rewriter",
   "后续一键启动会按所选模式切分启动流程",
 ].join("\n");
 
@@ -111,6 +155,12 @@ const traePathTooltip = [
   "用于选择 Trae 可执行文件路径",
   "建议直接通过右侧“浏览”选择，避免手填路径出错",
   "启用该模式后，一键启动会自动拉起 Trae，并挂载 native SSE URL rewriter",
+].join("\n");
+
+const officialBaseUrlTooltip = [
+  "该模式只启动本地 loopback，不会修改 hosts，也不会安装证书",
+  "请在 Trae 自定义模型配置里手动填写固定地址",
+  "固定地址：http://127.0.0.1:18083/v1",
 ].join("\n");
 
 /**
@@ -166,20 +216,64 @@ const setProxyMode = (value: ProxyMode) => {
   proxyMode.value = value;
 };
 
+const saveProxySettings = async (options?: { stopRunningProxy?: boolean }) => {
+  const stopRunningProxy = options?.stopRunningProxy === true;
+  if (proxySettingsSaving.value) {
+    return;
+  }
+
+  proxySettingsSaving.value = true;
+  proxyModeSwitchConfirmOpen.value = false;
+  currentProxyModeForConfirm.value = null;
+  try {
+    const ok = await store.saveConfig();
+    if (!ok) {
+      store.appendLog("保存代理模式设置失败");
+      return;
+    }
+
+    if (!stopRunningProxy) {
+      store.appendLog("代理模式设置已保存");
+      return;
+    }
+
+    store.appendLog("代理模式设置已保存，正在停止当前代理...");
+    const stopped = await store.runProxyStop();
+    if (stopped) {
+      store.appendLog("当前代理已停止；请按新路线重新启动");
+      return;
+    }
+    store.appendLog("代理模式设置已保存，但停止当前代理失败");
+  } finally {
+    proxySettingsSaving.value = false;
+  }
+};
+
 const handleProxySettingsSave = async () => {
   if (proxyMode.value === "trae_native" && !traePath.value.trim()) {
     store.appendLog("错误: 启用 Trae native 路线前，请先选择 Trae 路径");
     return;
   }
 
-  proxySettingsSaving.value = true;
-  const ok = await store.saveConfig();
-  proxySettingsSaving.value = false;
-  if (ok) {
-    store.appendLog("代理模式设置已保存");
-  } else {
-    store.appendLog("保存代理模式设置失败");
+  if (proxyModeDirty.value) {
+    const runtimeStatus = await store.fetchProxyRuntimeStatus();
+    if (runtimeStatus?.running) {
+      currentProxyModeForConfirm.value = runtimeStatus.active_mode;
+      proxyModeSwitchConfirmOpen.value = true;
+      return;
+    }
   }
+
+  await saveProxySettings();
+};
+
+const cancelProxyModeSwitch = () => {
+  proxyModeSwitchConfirmOpen.value = false;
+  currentProxyModeForConfirm.value = null;
+};
+
+const confirmProxyModeSwitch = async () => {
+  await saveProxySettings({ stopRunningProxy: true });
 };
 
 const openThemeDialog = () => {
@@ -253,26 +347,19 @@ const handleThemeSave = (value: ThemeConfig) => {
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-slate-900">启动路线</div>
-          <div class="text-xs text-slate-500">决定一键启动使用哪条接入链路</div>
+          <div class="text-xs text-slate-500">决定使用哪条接入链路</div>
         </div>
         <span
           class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-          :class="
-            traeNativeEnabled
-              ? 'border-amber-500/40 bg-amber-50 text-amber-700'
-              : 'border-slate-200 bg-white/60 text-slate-500'
-          "
+          :class="proxyModeBadgeClass"
         >
-          <span
-            class="h-1.5 w-1.5 rounded-full"
-            :class="traeNativeEnabled ? 'bg-amber-500' : 'bg-slate-300'"
-          />
-          {{ traeNativeEnabled ? "Trae native" : "默认反代" }}
+          <span class="h-1.5 w-1.5 rounded-full" :class="proxyModeDotClass" />
+          {{ proxyModeBadgeLabel }}
         </span>
       </div>
 
       <div
-        class="tooltip mtga-tooltip grid grid-cols-2 gap-2"
+        class="tooltip mtga-tooltip grid grid-cols-1 gap-2 md:grid-cols-3"
         :data-tip="proxyModeTooltip"
         style="--mtga-tooltip-max: 360px"
       >
@@ -280,13 +367,28 @@ const handleThemeSave = (value: ThemeConfig) => {
           type="button"
           class="cursor-pointer rounded-xl border px-3 py-2 text-left transition-all active:scale-[0.99]"
           :class="
-            !traeNativeEnabled
+            traeOfficialBaseUrlEnabled
+              ? 'border-emerald-500/50 bg-emerald-50/80 shadow-sm shadow-emerald-500/10'
+              : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-white/70'
+          "
+          @click="setProxyMode('trae_official_base_url')"
+        >
+          <span class="block text-sm font-semibold text-slate-800">官方 Base URL</span>
+          <span class="mt-0.5 block text-[11px] leading-4 text-slate-500"
+            >仅 loopback，无 patch</span
+          >
+        </button>
+        <button
+          type="button"
+          class="cursor-pointer rounded-xl border px-3 py-2 text-left transition-all active:scale-[0.99]"
+          :class="
+            proxyMode === 'reverse_hosts'
               ? 'border-amber-500/50 bg-amber-50/80 shadow-sm shadow-amber-500/10'
               : 'border-slate-200/80 bg-white/40 hover:border-slate-300 hover:bg-white/70'
           "
           @click="setProxyMode('reverse_hosts')"
         >
-          <span class="block text-sm font-semibold text-slate-800">默认反代</span>
+          <span class="block text-sm font-semibold text-slate-800">反代</span>
           <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">hosts + HTTPS 代理</span>
         </button>
         <button
@@ -300,7 +402,7 @@ const handleThemeSave = (value: ThemeConfig) => {
           @click="setProxyMode('trae_native')"
         >
           <span class="block text-sm font-semibold text-slate-800">Trae native</span>
-          <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">native SSE rewriter</span>
+          <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">patch trae 源码</span>
         </button>
       </div>
 
@@ -339,6 +441,27 @@ const handleThemeSave = (value: ThemeConfig) => {
         </div>
       </div>
 
+      <div
+        v-if="traeOfficialBaseUrlEnabled"
+        class="mtga-tooltip w-full rounded-xl border border-emerald-200/70 bg-emerald-50/50 p-3"
+        :data-tip="officialBaseUrlTooltip"
+        style="--mtga-tooltip-max: 360px"
+      >
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-semibold text-emerald-800">Trae 自定义模型 Base URL</div>
+            <div class="text-[11px] text-emerald-700/80">
+              该路线只启动本地 loopback，Trae 需要手动配置 base_url
+            </div>
+          </div>
+        </div>
+        <div
+          class="rounded-lg border border-emerald-200/70 bg-white/80 px-3 py-2 font-mono text-sm text-emerald-900"
+        >
+          http://127.0.0.1:18083/v1
+        </div>
+      </div>
+
       <div class="flex items-center justify-end">
         <button
           class="btn btn-primary btn-sm rounded-xl px-4"
@@ -368,6 +491,20 @@ const handleThemeSave = (value: ThemeConfig) => {
     @cancel="cancelClear"
     @confirm="confirmClear"
   />
+
+  <ConfirmDialog
+    :open="proxyModeSwitchConfirmOpen"
+    title="确认切换路线"
+    message="当前代理正在运行。保存新路线后，MTGA 会立即停止当前代理；下次启动将按新路线生效。"
+    confirm-text="保存并停止代理"
+    @cancel="cancelProxyModeSwitch"
+    @confirm="confirmProxyModeSwitch"
+  >
+    <div class="space-y-2 text-sm text-slate-600">
+      <p>当前运行：{{ formatProxyModeLabel(currentProxyModeForConfirm) }}</p>
+      <p>将切换为：{{ formatProxyModeLabel(proxyMode) }}</p>
+    </div>
+  </ConfirmDialog>
 
   <ThemeSettingsDialog
     v-model:open="themeDialogOpen"

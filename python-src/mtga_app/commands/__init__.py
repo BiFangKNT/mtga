@@ -119,6 +119,7 @@ _LAZY_COMMAND_GROUPS: tuple[CommandGroupSpec, ...] = (
         register_name="register_proxy_commands",
         commands=(
             CommandSpec("proxy_start", "body"),
+            CommandSpec("proxy_runtime_status"),
             CommandSpec("proxy_apply_current_config", "body"),
             CommandSpec("proxy_stop"),
             CommandSpec("proxy_check_network"),

@@ -59,6 +59,7 @@ export const useMtgaApi = () => {
     proxy_mode?: string | null;
     trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_start", payload);
+  const proxyRuntimeStatus = () => safeInvoke<InvokeResult>("proxy_runtime_status");
   const proxyApplyCurrentConfig = (payload: {
     debug_mode: boolean;
     disable_ssl_strict_mode: boolean;
@@ -149,6 +150,7 @@ export const useMtgaApi = () => {
     installCaCert,
     clearCaCert,
     proxyStart,
+    proxyRuntimeStatus,
     proxyApplyCurrentConfig,
     proxyStop,
     proxyCheckNetwork,

@@ -13,8 +13,16 @@ from modules.proxy.proxy_config import (
 )
 
 DEFAULT_PROVIDER = OPENAI_CHAT_COMPLETION_PROVIDER
-DEFAULT_PROXY_MODE = "reverse_hosts"
+OFFICIAL_BASE_URL_PROXY_MODE = "trae_official_base_url"
+DEFAULT_PROXY_MODE = OFFICIAL_BASE_URL_PROXY_MODE
 NATIVE_PROXY_MODE = "trae_native"
+SUPPORTED_PROXY_MODES = frozenset(
+    {
+        DEFAULT_PROXY_MODE,
+        NATIVE_PROXY_MODE,
+        OFFICIAL_BASE_URL_PROXY_MODE,
+    }
+)
 # Breaking change:
 # `config_groups[*].mapped_model_id` 已经不符合当前“一份全局映射模型ID + 多个配置组”的语义。
 # 新版本不会自动迁移该字段；读取时会直接忽略，保存时会按当前 schema 清理掉。
@@ -39,8 +47,10 @@ CONFIG_GROUP_ALLOWED_KEYS = frozenset(
 
 
 def _normalize_proxy_mode(value: Any) -> str:
-    if isinstance(value, str) and value.strip() == NATIVE_PROXY_MODE:
-        return NATIVE_PROXY_MODE
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized in SUPPORTED_PROXY_MODES:
+            return normalized
     return DEFAULT_PROXY_MODE
 
 

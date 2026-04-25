@@ -1,5 +1,5 @@
 export type ProviderId = "openai_chat_completion" | "openai_response" | "anthropic" | "gemini";
-export type ProxyMode = "reverse_hosts" | "trae_native";
+export type ProxyMode = "reverse_hosts" | "trae_native" | "trae_official_base_url";
 
 export type ConfigGroup = {
   name?: string;
@@ -72,6 +72,11 @@ export type ProxyStartStepEvent = {
   status: "ok" | "skipped" | "failed" | "started";
   message?: string | null;
   panel_target?: "config-group" | "global-config" | "settings" | null;
+};
+
+export type ProxyRuntimeStatusPayload = {
+  running: boolean;
+  active_mode: ProxyMode | null;
 };
 
 export type SystemPromptDelta = {
