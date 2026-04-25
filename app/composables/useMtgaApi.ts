@@ -31,7 +31,12 @@ const safeInvoke = async <T>(
 
 export const useMtgaApi = () => {
   let proxyStepChannel: Channel<string> | null = null;
+  let proxyStatusChannel: Channel<string> | null = null;
   type ProxyStepChannelOptions = {
+    reset?: boolean;
+    startFromLatest?: boolean;
+  };
+  type ProxyStatusChannelOptions = {
     reset?: boolean;
     startFromLatest?: boolean;
   };
@@ -137,6 +142,36 @@ export const useMtgaApi = () => {
     }
   };
 
+  const startProxyStatusChannel = async (
+    onMessage: (payload: unknown) => void,
+    options?: ProxyStatusChannelOptions,
+  ): Promise<boolean> => {
+    if (!canInvoke()) {
+      return false;
+    }
+    try {
+      if (proxyStatusChannel && options?.reset) {
+        proxyStatusChannel.onmessage = () => {};
+        proxyStatusChannel = null;
+      }
+      if (proxyStatusChannel) {
+        proxyStatusChannel.onmessage = onMessage;
+        return true;
+      }
+      proxyStatusChannel = new Channel<string>();
+      proxyStatusChannel.onmessage = onMessage;
+      await invoke("proxy_status_channel", {
+        channel: proxyStatusChannel,
+        start_from_latest: options?.startFromLatest ?? false,
+      });
+      return true;
+    } catch (error) {
+      proxyStatusChannel = null;
+      console.warn("[mtga] proxy status channel failed", error);
+      return false;
+    }
+  };
+
   return {
     loadConfig,
     saveConfig,
@@ -169,5 +204,6 @@ export const useMtgaApi = () => {
     systemPromptsDelete,
     pullLogs,
     startProxyStepChannel,
+    startProxyStatusChannel,
   };
 };

@@ -349,6 +349,41 @@ fn pull_proxy_steps(
     })
 }
 
+fn ensure_proxy_status_watcher_started() -> PyResult<()> {
+    Python::with_gil(|py| {
+        let module = PyModule::import(py, "mtga_app.commands.proxy")?;
+        let starter = module.getattr("ensure_proxy_status_watcher_started")?;
+        starter.call0()?;
+        Ok(())
+    })
+}
+
+fn pull_proxy_status(
+    after_id: Option<i64>,
+    timeout_ms: i64,
+    max_items: i64,
+) -> PyResult<(Vec<String>, Option<i64>)> {
+    Python::with_gil(|py| {
+        let module = PyModule::import(py, "modules.runtime.proxy_status_bus")?;
+        let pull_status = module.getattr("pull_status")?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("after_id", after_id)?;
+        kwargs.set_item("timeout_ms", timeout_ms)?;
+        kwargs.set_item("max_items", max_items)?;
+        let result = pull_status.call((), Some(&kwargs))?;
+        let dict = result.downcast::<PyDict>()?;
+        let items = match dict.get_item("items")? {
+            Some(value) => value.extract::<Vec<String>>()?,
+            None => Vec::new(),
+        };
+        let next_id = match dict.get_item("next_id")? {
+            Some(value) => value.extract::<Option<i64>>()?,
+            None => None,
+        };
+        Ok((items, next_id))
+    })
+}
+
 #[tauri::command]
 fn proxy_step_channel(channel: Channel<String>, start_from_latest: Option<bool>) {
     let start_from_latest = start_from_latest.unwrap_or(false);
@@ -390,6 +425,60 @@ fn proxy_step_channel(channel: Channel<String>, start_from_latest: Option<bool>)
             }
         }
     });
+}
+
+#[tauri::command]
+fn proxy_status_channel(
+    channel: Channel<String>,
+    start_from_latest: Option<bool>,
+) -> Result<(), String> {
+    let start_from_latest = start_from_latest.unwrap_or(false);
+    ensure_proxy_status_watcher_started().map_err(|error| {
+        log::warn!(
+            target: "boot",
+            "label=proxy_status_watcher_start_failed error={}",
+            error
+        );
+        error.to_string()
+    })?;
+
+    std::thread::spawn(move || {
+        let mut after_id: Option<i64> = None;
+        if start_from_latest {
+            if let Ok((_, next_id)) = pull_proxy_status(None, 0, 1) {
+                after_id = next_id;
+            }
+        }
+
+        loop {
+            let result = pull_proxy_status(after_id, 1000, 200);
+
+            match result {
+                Ok((items, next_id)) => {
+                    if let Some(value) = next_id {
+                        after_id = Some(value);
+                    }
+                    if items.is_empty() {
+                        continue;
+                    }
+                    for item in items {
+                        if channel.send(item).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::warn!(
+                        target: "boot",
+                        "label=proxy_status_pull_failed error={}",
+                        error
+                    );
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+        }
+    });
+    Ok(())
 }
 
 fn start_log_event_stream(app_handle: AppHandle) {
@@ -499,7 +588,10 @@ pub fn run() {
     let backend_init_started = Arc::new(AtomicBool::new(false));
 
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![proxy_step_channel])
+        .invoke_handler(tauri::generate_handler![
+            proxy_step_channel,
+            proxy_status_channel
+        ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_pytauri::init(py_invoke_handler))
         .plugin(tauri_plugin_shell::init())

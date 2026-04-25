@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -14,6 +16,7 @@ from modules.cert.ca_metadata import load_ca_info
 from modules.network.network_environment import check_network_environment
 from modules.runtime.log_bus import push_log as default_push_log
 from modules.runtime.operation_result import OperationResult
+from modules.runtime.proxy_status_bus import push_status as push_proxy_status
 from modules.runtime.proxy_step_bus import push_step as push_proxy_step
 from modules.runtime.resource_manager import ResourceManager
 from modules.runtime.thread_manager import ThreadManager
@@ -39,6 +42,19 @@ from modules.services.trae_official_base_url_route import (
 from .common import build_result_payload, collect_logs
 
 type LogFunc = Callable[[str], None]
+
+_proxy_status_poll_interval_seconds = 0.5
+_proxy_status_watcher_start_lock = threading.Lock()
+_proxy_status_payload_lock = threading.Lock()
+
+
+@dataclass
+class _ProxyStatusWatcherState:
+    started: bool = False
+    last_payload: str | None = None
+
+
+_proxy_status_state = _ProxyStatusWatcherState()
 
 
 class ProxyStartPayload(BaseModel):
@@ -136,7 +152,39 @@ def _build_proxy_runtime_status() -> ProxyRuntimeStatusEvent:
     return ProxyRuntimeStatusEvent(running=False, active_mode=None)
 
 
+def _publish_proxy_runtime_status(*, force: bool = False) -> ProxyRuntimeStatusEvent:
+    status = _build_proxy_runtime_status()
+    payload = status.model_dump_json()
+    with _proxy_status_payload_lock:
+        if force or payload != _proxy_status_state.last_payload:
+            push_proxy_status(payload)
+            _proxy_status_state.last_payload = payload
+    return status
+
+
+def _proxy_status_watch_loop() -> None:
+    while True:
+        with suppress(Exception):
+            _publish_proxy_runtime_status()
+        time.sleep(_proxy_status_poll_interval_seconds)
+
+
+def ensure_proxy_status_watcher_started() -> None:
+    with _proxy_status_watcher_start_lock:
+        if _proxy_status_state.started:
+            return
+        _proxy_status_state.started = True
+        _publish_proxy_runtime_status(force=True)
+        watcher = threading.Thread(
+            target=_proxy_status_watch_loop,
+            name="proxy-status-watcher",
+            daemon=True,
+        )
+        watcher.start()
+
+
 def stop_proxy_for_shutdown(*, log_func: LogFunc | None = None) -> OperationResult:
+    ensure_proxy_status_watcher_started()
     effective_log: LogFunc
     if log_func is None:
         def _default_log(message: str) -> None:
@@ -163,7 +211,9 @@ def stop_proxy_for_shutdown(*, log_func: LogFunc | None = None) -> OperationResu
     if not hosts_result.ok:
         _log(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
     if not trae_result.ok:
+        _publish_proxy_runtime_status(force=True)
         return trae_result
+    _publish_proxy_runtime_status(force=True)
     return result
 
 
@@ -688,53 +738,58 @@ def _proxy_start_all_trae_official_base_url(
 
 
 async def proxy_start(body: ProxyStartPayload) -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs, log_func = collect_logs()
-    ready = _ensure_global_config_ready(log_func=log_func)
-    if not ready.ok:
-        _push_proxy_step(
-            log_func,
-            step="proxy",
-            status="failed",
-            message=ready.message or "全局配置缺失",
-        )
-        return build_result_payload(ready, logs, "代理服务器启动失败")
+    try:
+        ready = _ensure_global_config_ready(log_func=log_func)
+        if not ready.ok:
+            _push_proxy_step(
+                log_func,
+                step="proxy",
+                status="failed",
+                message=ready.message or "全局配置缺失",
+            )
+            return build_result_payload(ready, logs, "代理服务器启动失败")
 
-    config = _build_proxy_config(body, log_func=log_func)
-    if not config:
-        _push_proxy_step(
-            log_func,
-            step="proxy",
-            status="failed",
-            message="没有可用的配置组",
-        )
-        return build_result_payload(
-            OperationResult.failure("没有可用的配置组"),
-            logs,
-            "代理服务器启动失败",
-        )
+        config = _build_proxy_config(body, log_func=log_func)
+        if not config:
+            _push_proxy_step(
+                log_func,
+                step="proxy",
+                status="failed",
+                message="没有可用的配置组",
+            )
+            return build_result_payload(
+                OperationResult.failure("没有可用的配置组"),
+                logs,
+                "代理服务器启动失败",
+            )
 
-    proxy_mode = _resolve_proxy_mode(body)
-    log_func(f"当前代理模式: {proxy_mode}")
-    if proxy_mode == "trae_native":
-        result = _proxy_start_all_trae(body, config, log_func)
+        proxy_mode = _resolve_proxy_mode(body)
+        log_func(f"当前代理模式: {proxy_mode}")
+        if proxy_mode == "trae_native":
+            result = _proxy_start_all_trae(body, config, log_func)
+            return build_result_payload(result, logs, "代理服务器启动完成")
+        if proxy_mode == "trae_official_base_url":
+            result = _proxy_start_all_trae_official_base_url(config, log_func)
+            return build_result_payload(result, logs, "代理服务器启动完成")
+
+        trae_stop_result = _stop_all_trae_routes_result(log_func=log_func)
+        if not trae_stop_result.ok:
+            return build_result_payload(trae_stop_result, logs, "代理服务器启动失败")
+
+        result = _restart_proxy_result(
+            config=config,
+            log_func=log_func,
+            success_message="✅ 代理服务器启动成功",
+        )
         return build_result_payload(result, logs, "代理服务器启动完成")
-    if proxy_mode == "trae_official_base_url":
-        result = _proxy_start_all_trae_official_base_url(config, log_func)
-        return build_result_payload(result, logs, "代理服务器启动完成")
-
-    trae_stop_result = _stop_all_trae_routes_result(log_func=log_func)
-    if not trae_stop_result.ok:
-        return build_result_payload(trae_stop_result, logs, "代理服务器启动失败")
-
-    result = _restart_proxy_result(
-        config=config,
-        log_func=log_func,
-        success_message="✅ 代理服务器启动成功",
-    )
-    return build_result_payload(result, logs, "代理服务器启动完成")
+    finally:
+        _publish_proxy_runtime_status(force=True)
 
 
 async def proxy_runtime_status() -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs: list[str] = []
     status = _build_proxy_runtime_status()
     result = OperationResult.success(
@@ -745,6 +800,7 @@ async def proxy_runtime_status() -> dict[str, Any]:
 
 
 async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs: list[str] = []
     ready = _ensure_global_config_ready_silent()
     if not ready.ok:
@@ -784,6 +840,7 @@ async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
 
 
 async def proxy_stop() -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs, log_func = collect_logs()
     trae_result = _stop_all_trae_routes_result(
         log_func=log_func,
@@ -799,10 +856,12 @@ async def proxy_stop() -> dict[str, Any]:
         log_func(f"⚠️ {hosts_result.message or 'hosts 条目清理失败'}")
     if not trae_result.ok:
         result = trae_result
+    _publish_proxy_runtime_status(force=True)
     return build_result_payload(result, logs, "代理服务器停止完成")
 
 
 async def proxy_check_network() -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs, log_func = collect_logs()
     report = check_network_environment(log_func=log_func, emit_logs=True)
     if not report.explicit_proxy_detected:
@@ -816,6 +875,7 @@ async def proxy_check_network() -> dict[str, Any]:
 
 
 async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
+    ensure_proxy_status_watcher_started()
     logs, log_func = collect_logs()
     result: OperationResult | None
     summary = "一键启动失败"
@@ -852,10 +912,12 @@ async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
 
     if result is None:
         result = OperationResult.failure("一键启动失败")
+    _publish_proxy_runtime_status(force=True)
     return build_result_payload(result, logs, summary)
 
 
 def register_proxy_commands(commands: Commands) -> None:
+    ensure_proxy_status_watcher_started()
     commands.set_command("proxy_start", proxy_start)
     commands.set_command("proxy_runtime_status", proxy_runtime_status)
     commands.set_command("proxy_apply_current_config", proxy_apply_current_config)

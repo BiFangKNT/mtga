@@ -12,6 +12,7 @@ import type {
   LogPullResult,
   MainTabKey,
   ProxyMode,
+  ProxyRuntimeStatusPayload,
   ProxyStartStepEvent,
   SystemPromptItem,
 } from "./mtgaTypes";
@@ -82,6 +83,14 @@ const isProxyStartStepEvent = (value: unknown): value is ProxyStartStepEvent => 
 const isProxyMode = (value: unknown): value is ProxyMode =>
   value === "reverse_hosts" || value === "trae_native" || value === "trae_official_base_url";
 
+const isProxyRuntimeStatusPayload = (value: unknown): value is ProxyRuntimeStatusPayload => {
+  if (!isRecord(value) || typeof value.running !== "boolean") {
+    return false;
+  }
+  const activeMode = value.active_mode;
+  return activeMode === null || typeof activeMode === "undefined" || isProxyMode(activeMode);
+};
+
 const normalizeProxyStepPayload = (payload: unknown): ProxyStartStepEvent | null => {
   if (isProxyStartStepEvent(payload)) {
     return payload;
@@ -91,6 +100,29 @@ const normalizeProxyStepPayload = (payload: unknown): ProxyStartStepEvent | null
       const parsed = JSON.parse(payload);
       if (isProxyStartStepEvent(parsed)) {
         return parsed;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const normalizeProxyRuntimeStatusPayload = (payload: unknown): ProxyRuntimeStatusPayload | null => {
+  if (isProxyRuntimeStatusPayload(payload)) {
+    return {
+      running: payload.running,
+      active_mode: payload.active_mode ?? null,
+    };
+  }
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      if (isProxyRuntimeStatusPayload(parsed)) {
+        return {
+          running: parsed.running,
+          active_mode: parsed.active_mode ?? null,
+        };
       }
     } catch {
       return null;
@@ -227,6 +259,7 @@ export const useMtgaStore = () => {
   const proxyMode = useState<ProxyMode>("mtga-proxy-mode", () => DEFAULT_PROXY_MODE);
   const savedProxyMode = useState<ProxyMode>("mtga-saved-proxy-mode", () => DEFAULT_PROXY_MODE);
   const traePath = useState<string>("mtga-trae-path", () => DEFAULT_TRAE_PATH);
+  const savedTraePath = useState<string>("mtga-saved-trae-path", () => DEFAULT_TRAE_PATH);
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -249,6 +282,16 @@ export const useMtgaStore = () => {
   const proxyStepListenerActive = useState<boolean>("mtga-proxy-step-listener-active", () => false);
   const proxyStepQueue = useState<MainTabKey[]>("mtga-proxy-step-queue", () => []);
   const proxyStepProcessing = useState<boolean>("mtga-proxy-step-processing", () => false);
+  const proxyStatusListenerActive = useState<boolean>(
+    "mtga-proxy-status-listener-active",
+    () => false,
+  );
+  const proxyRuntimeKnown = useState<boolean>("mtga-proxy-runtime-known", () => false);
+  const proxyRuntimeRunning = useState<boolean>("mtga-proxy-runtime-running", () => false);
+  const proxyRuntimeActiveMode = useState<ProxyMode | null>(
+    "mtga-proxy-runtime-active-mode",
+    () => null,
+  );
   const lazyWarmupStatus = useState<LazyWarmupStatus>("mtga-lazy-warmup-status", () => "idle");
   const lazyWarmupVisible = useState<boolean>("mtga-lazy-warmup-visible", () => false);
   const lazyWarmupLabel = useState<string>("mtga-lazy-warmup-label", () => "");
@@ -340,6 +383,12 @@ export const useMtgaStore = () => {
     if (normalized.status === "started") {
       enqueueProxyStep(normalized.step);
     }
+  };
+
+  const applyProxyRuntimeStatus = (payload: ProxyRuntimeStatusPayload) => {
+    proxyRuntimeKnown.value = true;
+    proxyRuntimeRunning.value = payload.running;
+    proxyRuntimeActiveMode.value = payload.active_mode ?? null;
   };
 
   const appendLogs = (entries?: string[]) => {
@@ -523,6 +572,29 @@ export const useMtgaStore = () => {
       }
       proxyStepUnlisten = null;
     }
+  };
+
+  const startProxyStatusListener = async () => {
+    if (proxyStatusListenerActive.value) {
+      return true;
+    }
+    proxyStatusListenerActive.value = true;
+    const ok = await api.startProxyStatusChannel(
+      (payload) => {
+        const normalized = normalizeProxyRuntimeStatusPayload(payload);
+        if (!proxyStatusListenerActive.value || !normalized) {
+          return;
+        }
+        applyProxyRuntimeStatus(normalized);
+      },
+      {
+        startFromLatest: true,
+      },
+    );
+    if (!ok) {
+      proxyStatusListenerActive.value = false;
+    }
+    return ok;
   };
 
   const clearLazyWarmupShowTimer = () => {
@@ -803,6 +875,7 @@ export const useMtgaStore = () => {
     proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
     savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
+    savedTraePath.value = traePath.value;
     if (Array.isArray(result.warnings)) {
       result.warnings.forEach((warning) => {
         const text = coerceText(warning).trim();
@@ -828,6 +901,7 @@ export const useMtgaStore = () => {
     const ok = await api.saveConfig(payload);
     if (ok) {
       savedProxyMode.value = payload.proxy_mode;
+      savedTraePath.value = payload.trae_path;
     }
     return Boolean(ok);
   };
@@ -856,10 +930,12 @@ export const useMtgaStore = () => {
     ) {
       return null;
     }
-    return {
+    const normalized = {
       running,
       active_mode: activeMode ?? null,
     };
+    applyProxyRuntimeStatus(normalized);
+    return normalized;
   };
 
   const loadAppInfo = async () => {
@@ -944,6 +1020,7 @@ export const useMtgaStore = () => {
     if (initialized.value) {
       startLogStream();
       startProxyStepListener();
+      void startProxyStatusListener();
       startLazyWarmupListener();
       scheduleLazyWarmup();
       return;
@@ -951,8 +1028,14 @@ export const useMtgaStore = () => {
     initialized.value = true;
     startLogStream();
     startProxyStepListener();
+    await startProxyStatusListener();
     startLazyWarmupListener();
-    await Promise.all([loadAppInfo(), loadConfig(), loadStartupStatus()]);
+    await Promise.all([
+      loadAppInfo(),
+      loadConfig(),
+      loadStartupStatus(),
+      fetchProxyRuntimeStatus(),
+    ]);
     scheduleLazyWarmup();
   };
 
@@ -961,8 +1044,8 @@ export const useMtgaStore = () => {
     disable_ssl_strict_mode: runtimeOptions.value.disableSslStrict,
     force_stream: runtimeOptions.value.forceStream,
     stream_mode: runtimeOptions.value.streamMode,
-    proxy_mode: proxyMode.value,
-    trae_path: coerceText(traePath.value).trim(),
+    proxy_mode: savedProxyMode.value,
+    trae_path: coerceText(savedTraePath.value).trim(),
   });
 
   const runGenerateCertificates = async () => {
@@ -996,7 +1079,11 @@ export const useMtgaStore = () => {
   const runProxyStart = async () => {
     const result = await api.proxyStart(buildProxyPayload());
     navigateProxyMissingConfigPanel(result?.message);
-    return applyInvokeResult(result, "启动代理服务器");
+    const ok = applyInvokeResult(result, "启动代理服务器");
+    if (ok) {
+      void fetchProxyRuntimeStatus();
+    }
+    return ok;
   };
 
   const runProxyApplyCurrentConfig = async () => {
@@ -1038,7 +1125,11 @@ export const useMtgaStore = () => {
 
   const runProxyStop = async () => {
     const result = await api.proxyStop();
-    return applyInvokeResult(result, "停止代理服务器");
+    const ok = applyInvokeResult(result, "停止代理服务器");
+    if (ok) {
+      void fetchProxyRuntimeStatus();
+    }
+    return ok;
   };
 
   const runProxyCheckNetwork = async () => {
@@ -1058,7 +1149,11 @@ export const useMtgaStore = () => {
     }
     const result = await api.proxyStartAll(buildProxyPayload());
     navigateProxyMissingConfigPanel(result?.message);
-    return applyInvokeResult(result, "一键启动全部服务");
+    const ok = applyInvokeResult(result, "一键启动全部服务");
+    if (ok) {
+      void fetchProxyRuntimeStatus();
+    }
+    return ok;
   };
 
   const runConfigGroupTest = async (index: number) => {
@@ -1281,6 +1376,9 @@ export const useMtgaStore = () => {
     mtgaAuthKey,
     proxyMode,
     savedProxyMode,
+    proxyRuntimeKnown,
+    proxyRuntimeRunning,
+    proxyRuntimeActiveMode,
     traePath,
     runtimeOptions,
     logs,
@@ -1307,6 +1405,7 @@ export const useMtgaStore = () => {
     stopLogStream,
     startProxyStepListener,
     stopProxyStepListener,
+    startProxyStatusListener,
     startLazyWarmupListener,
     stopLazyWarmupListener,
     scheduleLazyWarmup,

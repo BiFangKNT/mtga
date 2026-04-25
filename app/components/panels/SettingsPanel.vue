@@ -53,38 +53,11 @@ const traeNativeEnabled = computed(() => proxyMode.value === "trae_native");
 const traeOfficialBaseUrlEnabled = computed(() => proxyMode.value === "trae_official_base_url");
 const savedProxyMode = computed(() => store.savedProxyMode.value);
 const proxyModeDirty = computed(() => proxyMode.value !== savedProxyMode.value);
+const proxyRuntimeKnown = computed(() => store.proxyRuntimeKnown.value);
+const proxyRuntimeRunning = computed(() => store.proxyRuntimeRunning.value);
+const proxyRuntimeActiveMode = computed(() => store.proxyRuntimeActiveMode.value);
 
 const traePathMissing = computed(() => traeNativeEnabled.value && !traePath.value.trim());
-
-const proxyModeBadgeClass = computed(() => {
-  if (traeNativeEnabled.value) {
-    return "border-amber-500/40 bg-amber-50 text-amber-700";
-  }
-  if (traeOfficialBaseUrlEnabled.value) {
-    return "border-emerald-500/40 bg-emerald-50 text-emerald-700";
-  }
-  return "border-slate-200 bg-white/60 text-slate-500";
-});
-
-const proxyModeDotClass = computed(() => {
-  if (traeNativeEnabled.value) {
-    return "bg-amber-500";
-  }
-  if (traeOfficialBaseUrlEnabled.value) {
-    return "bg-emerald-500";
-  }
-  return "bg-slate-300";
-});
-
-const proxyModeBadgeLabel = computed(() => {
-  if (traeNativeEnabled.value) {
-    return "Trae native";
-  }
-  if (traeOfficialBaseUrlEnabled.value) {
-    return "官方 Base URL";
-  }
-  return "反代";
-});
 
 const formatProxyModeLabel = (value: ProxyMode | null | undefined) => {
   if (value === "trae_native") {
@@ -98,6 +71,33 @@ const formatProxyModeLabel = (value: ProxyMode | null | undefined) => {
   }
   return "未运行";
 };
+
+const runtimeStatusBadgeClass = computed(() => {
+  if (!proxyRuntimeKnown.value) {
+    return "border-slate-200 bg-white/60 text-slate-500";
+  }
+  if (proxyRuntimeRunning.value) {
+    return "border-emerald-500/40 bg-emerald-50 text-emerald-700";
+  }
+  return "border-slate-200 bg-white/60 text-slate-500";
+});
+
+const runtimeStatusDotClass = computed(() => {
+  if (!proxyRuntimeKnown.value) {
+    return "bg-slate-300";
+  }
+  return proxyRuntimeRunning.value ? "bg-emerald-500" : "bg-slate-300";
+});
+
+const runtimeStatusLabel = computed(() => {
+  if (!proxyRuntimeKnown.value) {
+    return "运行态同步中";
+  }
+  if (proxyRuntimeRunning.value) {
+    return formatProxyModeLabel(proxyRuntimeActiveMode.value);
+  }
+  return "未运行";
+});
 
 /**
  * 打开目录的工具提示内容
@@ -351,10 +351,10 @@ const handleThemeSave = (value: ThemeConfig) => {
         </div>
         <span
           class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-          :class="proxyModeBadgeClass"
+          :class="runtimeStatusBadgeClass"
         >
-          <span class="h-1.5 w-1.5 rounded-full" :class="proxyModeDotClass" />
-          {{ proxyModeBadgeLabel }}
+          <span class="h-1.5 w-1.5 rounded-full" :class="runtimeStatusDotClass" />
+          实时运行态：{{ runtimeStatusLabel }}
         </span>
       </div>
 
