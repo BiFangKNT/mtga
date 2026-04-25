@@ -76,6 +76,7 @@ class ProxyStartStepEvent(BaseModel):
 class ProxyRuntimeStatusEvent(BaseModel):
     running: bool
     active_mode: Literal["reverse_hosts", "trae_native", "trae_official_base_url"] | None = None
+    loopback_port: int | None = None
 
 
 @dataclass
@@ -136,13 +137,18 @@ def _build_proxy_runtime_status() -> ProxyRuntimeStatusEvent:
 
     trae_manager = state.trae_route_manager
     if trae_manager is not None and trae_manager.is_running():
-        return ProxyRuntimeStatusEvent(running=True, active_mode="trae_native")
+        return ProxyRuntimeStatusEvent(
+            running=True,
+            active_mode="trae_native",
+            loopback_port=trae_manager.current_loopback_port(),
+        )
 
     trae_official_manager = state.trae_official_route_manager
     if trae_official_manager is not None and trae_official_manager.is_running():
         return ProxyRuntimeStatusEvent(
             running=True,
             active_mode="trae_official_base_url",
+            loopback_port=trae_official_manager.current_loopback_port(),
         )
 
     instance = state.proxy_instance
@@ -795,6 +801,7 @@ async def proxy_runtime_status() -> dict[str, Any]:
     result = OperationResult.success(
         running=status.running,
         active_mode=status.active_mode,
+        loopback_port=status.loopback_port,
     )
     return build_result_payload(result, logs, "代理运行状态读取完成")
 

@@ -4,7 +4,6 @@ import contextlib
 import importlib.util
 import json
 import os
-import socket
 import subprocess
 import threading
 import time
@@ -13,6 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from modules.network.network_utils import (
+    DEFAULT_PORT_SCAN_ATTEMPTS,
+    get_process_name,
+    get_tcp_listener_pids,
+    get_tcp_listener_process_names,
+    is_host_port_open,
+    iter_port_candidates,
+)
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
 from modules.runtime.resource_manager import ResourceManager
@@ -22,7 +29,6 @@ from modules.services.trae_loopback import (
     DEFAULT_TRAE_LOOPBACK_PORT,
     TraeLoopbackConfig,
     TraeLoopbackManager,
-    build_trae_loopback_chat_url,
 )
 from modules.trae_patch.backends import (
     UnsupportedNativeBackendError,
@@ -39,6 +45,7 @@ type LogFunc = Callable[[str], None]
 DEFAULT_TRAE_CDP_HOST = "127.0.0.1"
 DEFAULT_TRAE_CDP_PORT = 9330
 DEFAULT_REWRITER_WAIT_SECONDS = 20.0
+DEFAULT_CDP_PORT_SEARCH = DEFAULT_PORT_SCAN_ATTEMPTS
 REWRITER_WATCH_INTERVAL_SECONDS = 1.0
 TRAE_AI_AGENT_DLL_RELATIVE_PATH = Path(
     "resources/app/modules/ai-agent/ai_agent.dll"
@@ -72,6 +79,7 @@ class _TraeNativeRouteState:
     native_backend: NativeBackend | None = None
     compatibility_report: CompatibilityReport | None = None
     trae_process: subprocess.Popen[bytes] | None = None
+    cdp_port: int | None = None
     running: bool = False
     stopping: bool = False
 
@@ -90,14 +98,6 @@ def resolve_trae_path(path: str) -> Path:
 
 def _resolve_ai_agent_dll_path(trae_exe: Path) -> Path:
     return trae_exe.parent / TRAE_AI_AGENT_DLL_RELATIVE_PATH
-
-
-def _is_port_open(host: str, port: int) -> bool:
-    with contextlib.suppress(OSError), socket.create_connection((host, port), timeout=0.5):
-        return True
-    return False
-
-
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -186,6 +186,9 @@ class TraeNativeRouteManager:
                 self._state.running = False
             return self._state.running
 
+    def current_loopback_port(self) -> int | None:
+        return self._loopback.current_selected_port()
+
     def apply_runtime_config(self, raw_config: dict[str, Any] | None) -> OperationResult:
         with self._lock:
             if self._state.running and not self._loopback.is_running():
@@ -239,12 +242,11 @@ class TraeNativeRouteManager:
             self._state.running = True
             self._start_rewriter_watcher_locked(log_func=log_func)
             log_func("✅ Trae native 路线已就绪")
+            loopback_url = self._loopback.current_chat_url()
             return OperationResult.success(
                 "Trae native 路线已就绪",
-                loopback_url=build_trae_loopback_chat_url(
-                    config.loopback_host,
-                    config.loopback_port,
-                ),
+                loopback_url=loopback_url,
+                cdp_port=self._state.cdp_port,
             )
 
     def stop(
@@ -322,58 +324,38 @@ class TraeNativeRouteManager:
         *,
         log_func: LogFunc,
     ) -> OperationResult:
-        if not config.trae_path.strip():
-            message = "trae_path_missing"
-            log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
-            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+        validation_result = self._validate_trae_launch_locked(config, log_func=log_func)
+        if not validation_result.ok:
+            return validation_result
 
-        trae_exe = resolve_trae_path(config.trae_path)
-        if not trae_exe.is_file():
-            message = "trae_path_invalid"
-            log_func(f"❌ Trae 路径无效: {trae_exe}")
-            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
+        trae_exe = cast(Path, validation_result.details.get("trae_exe"))
 
-        if _is_port_open(config.cdp_host, config.cdp_port):
-            message = (
-                f"检测到已有 Trae CDP 端口 {config.cdp_host}:{config.cdp_port}。"
-                "为避免复用失效 custom model tunnel，请先完全关闭 Trae 后再启动。"
-            )
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+        cdp_port_result = self._resolve_cdp_port_locked(config, log_func=log_func)
+        if not cdp_port_result.ok:
+            return cdp_port_result
 
-        existing_pids = _list_existing_trae_pids()
-        if existing_pids:
-            preview = ", ".join(str(pid) for pid in existing_pids[:TRAE_PID_LOG_LIMIT])
-            suffix = "..." if len(existing_pids) > TRAE_PID_LOG_LIMIT else ""
-            message = (
-                f"检测到 Trae 已在运行 pid={preview}{suffix}。"
-                "请先完全关闭 Trae，再由 MTGA 拉起干净实例。"
-            )
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
-
-        command = [str(trae_exe), f"--remote-debugging-port={config.cdp_port}"]
-        try:
-            self._state.trae_process = subprocess.Popen(
-                command,
-                cwd=str(trae_exe.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:  # noqa: BLE001
-            message = f"Trae 拉起失败: {exc}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+        cdp_port = int(cdp_port_result.details.get("cdp_port") or config.cdp_port)
+        self._state.cdp_port = cdp_port
+        spawn_result = self._spawn_trae_process_locked(
+            trae_exe,
+            cdp_port=cdp_port,
+            log_func=log_func,
+        )
+        if not spawn_result.ok:
+            return spawn_result
 
         log_func(
             "已拉起 Trae，并注入参数: "
-            f"--remote-debugging-port={config.cdp_port}"
+            f"--remote-debugging-port={cdp_port}"
         )
-        if not self._wait_port(config.cdp_host, config.cdp_port, timeout_seconds=8):
-            log_func(
-                f"⚠️ 未检测到 CDP 端口 {config.cdp_host}:{config.cdp_port}，"
-                "继续等待 native rewriter 挂载 ai_agent.dll"
-            )
+        cdp_wait_result = self._wait_for_cdp_port_locked(
+            host=config.cdp_host,
+            port=cdp_port,
+            timeout_seconds=8,
+            log_func=log_func,
+        )
+        if not cdp_wait_result.ok:
+            return cdp_wait_result
         return OperationResult.success()
 
     def _start_rewriter_locked(
@@ -382,28 +364,17 @@ class TraeNativeRouteManager:
         *,
         log_func: LogFunc,
     ) -> OperationResult:
-        backend = self._state.native_backend
-        if backend is None:
-            try:
-                backend = get_native_backend()
-            except UnsupportedNativeBackendError as exc:
-                message = str(exc)
-                log_func(f"❌ {message}")
-                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
-            self._state.native_backend = backend
+        prereq_result = self._resolve_rewriter_prerequisites_locked(config, log_func=log_func)
+        if not prereq_result.ok:
+            return prereq_result
 
-        if importlib.util.find_spec(backend.rewriter_module) is None:
-            message = f"未找到 native rewriter 模块: {backend.rewriter_module}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
-
-        trae_exe = resolve_trae_path(config.trae_path)
-        module_path = _resolve_ai_agent_dll_path(trae_exe)
+        module_path = cast(Path, prereq_result.details.get("module_path"))
+        loopback_url = str(prereq_result.details.get("loopback_url") or "")
 
         files = self._open_rewriter_files()
         task_result = self._start_rewriter_task_locked(
-            config,
             module_path=module_path,
+            loopback_url=loopback_url,
             files=files,
             log_func=log_func,
         )
@@ -461,9 +432,9 @@ class TraeNativeRouteManager:
 
     def _start_rewriter_task_locked(
         self,
-        config: TraeNativeRouteConfig,
         *,
         module_path: Path,
+        loopback_url: str,
         files: _RewriterFiles,
         log_func: LogFunc,
     ) -> OperationResult:
@@ -478,10 +449,7 @@ class TraeNativeRouteManager:
             rewriter_config = backend.create_rewriter_config(
                 RewriterConfigRequest(
                     module_path=module_path,
-                    new_url=build_trae_loopback_chat_url(
-                        config.loopback_host,
-                        config.loopback_port,
-                    ),
+                    new_url=loopback_url,
                     compatibility_report=(
                         compatibility_report.to_dict()
                         if compatibility_report is not None
@@ -718,6 +686,7 @@ class TraeNativeRouteManager:
 
         self._state.running = False
         self._state.stopping = False
+        self._state.cdp_port = None
         if clean:
             self._state.native_backend = None
             self._state.compatibility_report = None
@@ -726,11 +695,191 @@ class TraeNativeRouteManager:
             return OperationResult.success()
         return OperationResult.failure("Trae native 路线未完全停止", code=ErrorCode.UNKNOWN)
 
-    @staticmethod
-    def _wait_port(host: str, port: int, timeout_seconds: float) -> bool:
+    def _validate_trae_launch_locked(
+        self,
+        config: TraeNativeRouteConfig,
+        *,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        if not config.trae_path.strip():
+            message = "trae_path_missing"
+            log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+        trae_exe = resolve_trae_path(config.trae_path)
+        if not trae_exe.is_file():
+            message = "trae_path_invalid"
+            log_func(f"❌ Trae 路径无效: {trae_exe}")
+            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
+
+        existing_pids = _list_existing_trae_pids()
+        if existing_pids:
+            preview = ", ".join(str(pid) for pid in existing_pids[:TRAE_PID_LOG_LIMIT])
+            suffix = "..." if len(existing_pids) > TRAE_PID_LOG_LIMIT else ""
+            message = (
+                f"检测到 Trae 已在运行 pid={preview}{suffix}。"
+                "请先完全关闭 Trae，再由 MTGA 拉起干净实例。"
+            )
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+        return OperationResult.success(trae_exe=trae_exe)
+
+    def _spawn_trae_process_locked(
+        self,
+        trae_exe: Path,
+        *,
+        cdp_port: int,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        command = [str(trae_exe), f"--remote-debugging-port={cdp_port}"]
+        try:
+            self._state.trae_process = subprocess.Popen(
+                command,
+                cwd=str(trae_exe.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = f"Trae 拉起失败: {exc}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+        return OperationResult.success()
+
+    def _resolve_rewriter_prerequisites_locked(
+        self,
+        config: TraeNativeRouteConfig,
+        *,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        backend = self._state.native_backend
+        if backend is None:
+            try:
+                backend = get_native_backend()
+            except UnsupportedNativeBackendError as exc:
+                message = str(exc)
+                log_func(f"❌ {message}")
+                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+            self._state.native_backend = backend
+
+        if importlib.util.find_spec(backend.rewriter_module) is None:
+            message = f"未找到 native rewriter 模块: {backend.rewriter_module}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
+
+        trae_exe = resolve_trae_path(config.trae_path)
+        module_path = _resolve_ai_agent_dll_path(trae_exe)
+        loopback_url = self._loopback.current_chat_url()
+        if not loopback_url:
+            message = "Trae loopback URL 状态异常"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+
+        return OperationResult.success(
+            module_path=module_path,
+            loopback_url=loopback_url,
+        )
+
+    def _resolve_cdp_port_locked(
+        self,
+        config: TraeNativeRouteConfig,
+        *,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        preferred_port = config.cdp_port
+        if is_host_port_open(config.cdp_host, preferred_port, timeout=0.5):
+            owner_names = get_tcp_listener_process_names(preferred_port)
+            owner_display = ", ".join(owner_names) if owner_names else "<unknown>"
+            if any(name.lower() == "trae.exe" for name in owner_names):
+                message = (
+                    f"检测到已有 Trae CDP 端口 {config.cdp_host}:{preferred_port}。"
+                    "为避免复用失效 custom model tunnel，请先完全关闭 Trae 后再启动。"
+                )
+                log_func(f"❌ {message}")
+                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+            for candidate_port in iter_port_candidates(
+                preferred_port + 1,
+                max_tries=DEFAULT_CDP_PORT_SEARCH - 1,
+            ):
+                if not is_host_port_open(config.cdp_host, candidate_port, timeout=0.5):
+                    log_func(
+                        "⚠️ Trae CDP 首选端口已被占用，"
+                        f"owner={owner_display} "
+                        f"preferred={preferred_port} "
+                        f"selected={candidate_port}"
+                    )
+                    return OperationResult.success(
+                        cdp_port=candidate_port,
+                        preferred_cdp_port=preferred_port,
+                        cdp_port_shifted=True,
+                    )
+
+            message = (
+                "Trae CDP 未找到可用端口: "
+                f"preferred={preferred_port} max_search={DEFAULT_CDP_PORT_SEARCH}"
+            )
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.PORT_IN_USE)
+
+        return OperationResult.success(
+            cdp_port=preferred_port,
+            preferred_cdp_port=preferred_port,
+            cdp_port_shifted=False,
+        )
+
+    def _wait_for_cdp_port_locked(
+        self,
+        *,
+        host: str,
+        port: int,
+        timeout_seconds: float,
+        log_func: LogFunc,
+    ) -> OperationResult:
+        trae_process = self._state.trae_process
+        expected_pid = trae_process.pid if trae_process is not None else None
         deadline = time.monotonic() + timeout_seconds
+        owner_resolution_seen = False
+
         while time.monotonic() < deadline:
-            if _is_port_open(host, port):
-                return True
+            if not is_host_port_open(host, port, timeout=0.5):
+                time.sleep(0.15)
+                continue
+
+            listener_pids = get_tcp_listener_pids(port)
+            if listener_pids:
+                owner_resolution_seen = True
+                if expected_pid is None or expected_pid in listener_pids:
+                    return OperationResult.success()
+            else:
+                time.sleep(0.15)
+                continue
+
             time.sleep(0.15)
-        return _is_port_open(host, port)
+
+        if is_host_port_open(host, port, timeout=0.5):
+            listener_pids = get_tcp_listener_pids(port)
+            if expected_pid is not None and listener_pids:
+                owner_names = [
+                    name
+                    for pid in listener_pids
+                    if (name := get_process_name(pid))
+                ]
+                owner_display = ", ".join(owner_names) if owner_names else "<unknown>"
+                message = (
+                    "Trae CDP 端口已打开但不属于本次拉起的 Trae 进程: "
+                    f"port={port} expected_pid={expected_pid} owner_pids={listener_pids} "
+                    f"owner_names={owner_display}"
+                )
+                log_func(f"❌ {message}")
+                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+            if not owner_resolution_seen:
+                log_func(
+                    f"⚠️ CDP 端口 {host}:{port} 已打开，但未能解析监听 PID；继续等待 native rewriter"
+                )
+                return OperationResult.success()
+
+        log_func(
+            f"⚠️ 未检测到 CDP 端口 {host}:{port}，继续等待 native rewriter 挂载 ai_agent.dll"
+        )
+        return OperationResult.success()

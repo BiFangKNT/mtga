@@ -77,6 +77,7 @@ export type ProxyStartStepEvent = {
 export type ProxyRuntimeStatusPayload = {
   running: boolean;
   active_mode: ProxyMode | null;
+  loopback_port?: number | null;
 };
 
 export type SystemPromptDelta = {

@@ -83,12 +83,31 @@ const isProxyStartStepEvent = (value: unknown): value is ProxyStartStepEvent => 
 const isProxyMode = (value: unknown): value is ProxyMode =>
   value === "reverse_hosts" || value === "trae_native" || value === "trae_official_base_url";
 
+const normalizeOptionalPort = (value: unknown): number | null => {
+  if (typeof value === "undefined" || value === null || value === "") {
+    return null;
+  }
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  return port;
+};
+
 const isProxyRuntimeStatusPayload = (value: unknown): value is ProxyRuntimeStatusPayload => {
   if (!isRecord(value) || typeof value.running !== "boolean") {
     return false;
   }
   const activeMode = value.active_mode;
-  return activeMode === null || typeof activeMode === "undefined" || isProxyMode(activeMode);
+  const loopbackPort = normalizeOptionalPort(value.loopback_port);
+  if (activeMode !== null && typeof activeMode !== "undefined" && !isProxyMode(activeMode)) {
+    return false;
+  }
+  return (
+    typeof value.loopback_port === "undefined" ||
+    value.loopback_port === null ||
+    loopbackPort !== null
+  );
 };
 
 const normalizeProxyStepPayload = (payload: unknown): ProxyStartStepEvent | null => {
@@ -113,6 +132,7 @@ const normalizeProxyRuntimeStatusPayload = (payload: unknown): ProxyRuntimeStatu
     return {
       running: payload.running,
       active_mode: payload.active_mode ?? null,
+      loopback_port: normalizeOptionalPort(payload.loopback_port),
     };
   }
   if (typeof payload === "string") {
@@ -122,6 +142,7 @@ const normalizeProxyRuntimeStatusPayload = (payload: unknown): ProxyRuntimeStatu
         return {
           running: parsed.running,
           active_mode: parsed.active_mode ?? null,
+          loopback_port: normalizeOptionalPort(parsed.loopback_port),
         };
       }
     } catch {
@@ -292,6 +313,10 @@ export const useMtgaStore = () => {
     "mtga-proxy-runtime-active-mode",
     () => null,
   );
+  const proxyRuntimeLoopbackPort = useState<number | null>(
+    "mtga-proxy-runtime-loopback-port",
+    () => null,
+  );
   const lazyWarmupStatus = useState<LazyWarmupStatus>("mtga-lazy-warmup-status", () => "idle");
   const lazyWarmupVisible = useState<boolean>("mtga-lazy-warmup-visible", () => false);
   const lazyWarmupLabel = useState<string>("mtga-lazy-warmup-label", () => "");
@@ -388,6 +413,7 @@ export const useMtgaStore = () => {
     proxyRuntimeKnown.value = true;
     proxyRuntimeRunning.value = payload.running;
     proxyRuntimeActiveMode.value = payload.active_mode ?? null;
+    proxyRuntimeLoopbackPort.value = normalizeOptionalPort(payload.loopback_port);
   };
 
   const appendLogs = (entries?: string[]) => {
@@ -871,6 +897,7 @@ export const useMtgaStore = () => {
   const fetchProxyRuntimeStatus = async (): Promise<{
     running: boolean;
     active_mode: ProxyMode | null;
+    loopback_port: number | null;
   } | null> => {
     const result = await api.proxyRuntimeStatus();
     if (!result) {
@@ -886,6 +913,7 @@ export const useMtgaStore = () => {
     }
     const running = result.details["running"];
     const activeMode = result.details["active_mode"];
+    const loopbackPort = normalizeOptionalPort(result.details["loopback_port"]);
     if (
       typeof running !== "boolean" ||
       (activeMode !== null && typeof activeMode !== "undefined" && !isProxyMode(activeMode))
@@ -895,6 +923,7 @@ export const useMtgaStore = () => {
     const normalized = {
       running,
       active_mode: activeMode ?? null,
+      loopback_port: loopbackPort,
     };
     applyProxyRuntimeStatus(normalized);
     return normalized;
@@ -1341,6 +1370,7 @@ export const useMtgaStore = () => {
     proxyRuntimeKnown,
     proxyRuntimeRunning,
     proxyRuntimeActiveMode,
+    proxyRuntimeLoopbackPort,
     traePath,
     runtimeOptions,
     logs,

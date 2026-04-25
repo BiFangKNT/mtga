@@ -14,7 +14,6 @@ from modules.services.trae_loopback import (
     DEFAULT_TRAE_LOOPBACK_PORT,
     TraeLoopbackConfig,
     TraeLoopbackManager,
-    build_trae_loopback_base_url,
 )
 
 type LogFunc = Callable[[str], None]
@@ -46,6 +45,9 @@ class TraeOfficialBaseUrlRouteManager:
             if self._running and not self._loopback.is_running():
                 self._running = False
             return self._running
+
+    def current_loopback_port(self) -> int | None:
+        return self._loopback.current_selected_port()
 
     def apply_runtime_config(self, raw_config: dict[str, Any] | None) -> OperationResult:
         with self._lock:
@@ -83,13 +85,23 @@ class TraeOfficialBaseUrlRouteManager:
                 return loopback_result
 
             self._running = True
-            api_base_url = self._api_base_url(config)
+            api_base_url = str(loopback_result.details.get("base_url") or "")
+            loopback_url = str(loopback_result.details.get("loopback_url") or "")
+            selected_port = loopback_result.details.get("selected_port")
             log_func(f"Trae 自定义模型 base_url 请填写: {api_base_url}")
+            if loopback_result.details.get("port_shifted") is True:
+                log_func(
+                    "⚠️ Trae 官方 base_url 路线发生端口顺延："
+                    f"preferred={config.loopback_port} selected={selected_port}"
+                )
             log_func("✅ Trae 官方 base_url 路线已就绪")
             return OperationResult.success(
                 "Trae 官方 base_url 路线已就绪",
                 base_url=api_base_url,
-                loopback_url=f"{api_base_url}/chat/completions",
+                loopback_url=loopback_url,
+                preferred_port=config.loopback_port,
+                selected_port=selected_port,
+                port_shifted=loopback_result.details.get("port_shifted"),
             )
 
     def stop(
@@ -126,7 +138,3 @@ class TraeOfficialBaseUrlRouteManager:
             "Trae 官方 base_url 路线未完全停止",
             code=ErrorCode.UNKNOWN,
         )
-
-    @staticmethod
-    def _api_base_url(config: TraeOfficialBaseUrlRouteConfig) -> str:
-        return f"{build_trae_loopback_base_url(config.loopback_host, config.loopback_port)}/v1"

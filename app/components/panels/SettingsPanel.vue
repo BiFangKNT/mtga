@@ -56,8 +56,12 @@ const proxyModeDirty = computed(() => proxyMode.value !== savedProxyMode.value);
 const proxyRuntimeKnown = computed(() => store.proxyRuntimeKnown.value);
 const proxyRuntimeRunning = computed(() => store.proxyRuntimeRunning.value);
 const proxyRuntimeActiveMode = computed(() => store.proxyRuntimeActiveMode.value);
+const proxyRuntimeLoopbackPort = computed(() => store.proxyRuntimeLoopbackPort.value);
 
 const traePathMissing = computed(() => traeNativeEnabled.value && !traePath.value.trim());
+const PREFERRED_TRAE_OFFICIAL_BASE_URL = "http://127.0.0.1:18083/v1";
+
+const buildTraeOfficialBaseUrl = (port: number) => `http://127.0.0.1:${port}/v1`;
 
 const formatProxyModeLabel = (value: ProxyMode | null | undefined) => {
   if (value === "trae_native") {
@@ -159,9 +163,36 @@ const traePathTooltip = [
 
 const officialBaseUrlTooltip = [
   "该模式只启动本地 loopback，不会修改 hosts，也不会安装证书",
-  "请在 Trae 自定义模型配置里手动填写固定地址",
-  "固定地址：http://127.0.0.1:18083/v1",
+  `优先使用：${PREFERRED_TRAE_OFFICIAL_BASE_URL}`,
+  "若 18083 被占用，会自动顺延到下一个可用端口",
+  "启动后会在此处自动显示实际地址",
 ].join("\n");
+
+const officialRuntimeLoopbackPort = computed(() => {
+  if (!proxyRuntimeRunning.value || proxyRuntimeActiveMode.value !== "trae_official_base_url") {
+    return null;
+  }
+  return proxyRuntimeLoopbackPort.value;
+});
+
+const officialBaseUrlDisplay = computed(() => {
+  const runtimePort = officialRuntimeLoopbackPort.value;
+  if (typeof runtimePort === "number") {
+    return buildTraeOfficialBaseUrl(runtimePort);
+  }
+  return PREFERRED_TRAE_OFFICIAL_BASE_URL;
+});
+
+const officialBaseUrlStatusText = computed(() => {
+  const runtimePort = officialRuntimeLoopbackPort.value;
+  if (runtimePort === null) {
+    return "未启动时显示首选地址；启动后会自动更新为实际端口";
+  }
+  if (runtimePort === 18083) {
+    return "当前运行中的实际地址";
+  }
+  return `当前运行中的实际地址，端口已顺延到 ${runtimePort}`;
+});
 
 /**
  * 处理打开数据目录
@@ -458,7 +489,10 @@ const handleThemeSave = (value: ThemeConfig) => {
         <div
           class="rounded-lg border border-emerald-200/70 bg-white/80 px-3 py-2 font-mono text-sm text-emerald-900"
         >
-          http://127.0.0.1:18083/v1
+          {{ officialBaseUrlDisplay }}
+        </div>
+        <div class="mt-2 text-[11px] text-emerald-700/80">
+          {{ officialBaseUrlStatusText }}
         </div>
       </div>
 
