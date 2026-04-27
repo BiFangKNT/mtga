@@ -15,6 +15,7 @@ const {
   runCheckUpdatesOnce,
   closeUpdateDialog,
   openUpdateRelease,
+  startDeferredRuntimeWork,
   stopLogStream,
   stopProxyStepListener,
   stopLazyWarmupListener,
@@ -69,6 +70,30 @@ const supportsAnchor =
 
 // 记录当前激活了锚点的元素，用于及时清理
 let lastAnchorTarget: HTMLElement | null = null;
+
+const emitFrontendReady = async () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const tauriWindow = window as Window & {
+    __TAURI__?: {
+      event?: {
+        emit?: (event: string, payload?: unknown) => Promise<unknown> | unknown;
+      };
+    };
+  };
+  const emit = tauriWindow.__TAURI__?.event?.emit;
+  if (typeof emit !== "function") {
+    return;
+  }
+  try {
+    await emit("mtga:frontend-ready", {
+      ts_ms: Date.now(),
+    });
+  } catch {
+    // ignore
+  }
+};
 
 /**
  * 监听全局鼠标悬停，捕获 mtga-tooltip 元素
@@ -143,8 +168,14 @@ watch(
 );
 
 onMounted(async () => {
-  await init();
-  await runCheckUpdatesOnce();
+  try {
+    await init();
+    await nextTick();
+  } finally {
+    await emitFrontendReady();
+    startDeferredRuntimeWork();
+  }
+  void runCheckUpdatesOnce();
 });
 
 onBeforeUnmount(() => {

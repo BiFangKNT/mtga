@@ -194,6 +194,12 @@ const officialBaseUrlStatusText = computed(() => {
   return `当前运行中的实际地址，端口已顺延到 ${runtimePort}`;
 });
 
+onMounted(() => {
+  void store.startProxyStatusListener().finally(() => {
+    void store.fetchProxyRuntimeStatus();
+  });
+});
+
 /**
  * 处理打开数据目录
  */

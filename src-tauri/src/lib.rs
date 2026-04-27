@@ -45,6 +45,7 @@ fn resolve_python_home() -> Option<PathBuf> {
 static PY_WARMUP: OnceLock<PyObject> = OnceLock::new();
 static BACKEND_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_PAGE_READY: AtomicBool = AtomicBool::new(false);
+static FRONTEND_READY: AtomicBool = AtomicBool::new(false);
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
 
 fn set_env_var_during_startup<K, V>(key: K, value: V)
@@ -75,7 +76,10 @@ fn is_splash_url(url: &Url) -> bool {
 }
 
 fn try_show_main(app_handle: &AppHandle) {
-    if !BACKEND_READY.load(Ordering::SeqCst) || !MAIN_PAGE_READY.load(Ordering::SeqCst) {
+    if !BACKEND_READY.load(Ordering::SeqCst)
+        || !MAIN_PAGE_READY.load(Ordering::SeqCst)
+        || !FRONTEND_READY.load(Ordering::SeqCst)
+    {
         return;
     }
     let Some(main) = app_handle.get_webview_window("main") else {
@@ -128,6 +132,11 @@ fn schedule_try_show_main(app_handle: AppHandle) {
         log::warn!(target: "boot", "label=run_on_main_thread_failed error={}", error);
         try_show_main(&app_handle);
     }
+}
+
+fn mark_frontend_ready(app_handle: &AppHandle) {
+    FRONTEND_READY.store(true, Ordering::SeqCst);
+    schedule_try_show_main(app_handle.clone());
 }
 
 fn resolve_python_paths(python_home: &Path) -> Vec<PathBuf> {
@@ -629,6 +638,10 @@ pub fn run() {
                 }
                 if let Some(window) = app.get_webview_window("main") {
                     inject_runtime_tag(&window);
+                    let listener_handle = app.handle().clone();
+                    window.listen("mtga:frontend-ready", move |_event| {
+                        mark_frontend_ready(&listener_handle);
+                    });
                 }
                 if let Some(splash) = app.get_webview_window("splash") {
                     let listener_handle = app.handle().clone();
@@ -639,6 +652,17 @@ pub fn run() {
                         );
                     });
                 }
+                let frontend_fallback_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(8));
+                    if !FRONTEND_READY.load(Ordering::SeqCst) {
+                        log::warn!(
+                            target: "boot",
+                            "label=frontend_ready_timeout_fallback"
+                        );
+                        mark_frontend_ready(&frontend_fallback_handle);
+                    }
+                });
                 Ok(())
             }
         })

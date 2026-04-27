@@ -56,6 +56,7 @@ const LAZY_WARMUP_ERROR_HIDE_MS = 2200;
 const LAZY_WARMUP_MIN_VISIBLE_MS = 640;
 const LAZY_WARMUP_POLL_INTERVAL_MS = 220;
 const LAZY_WARMUP_POLL_TIMEOUT_MS = 15000;
+const DEFERRED_LAZY_WARMUP_DELAY_MS = 2500;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -326,6 +327,10 @@ export const useMtgaStore = () => {
   const lazyWarmupRequested = useState<boolean>("mtga-lazy-warmup-requested", () => false);
   const lazyWarmupListenerActive = useState<boolean>(
     "mtga-lazy-warmup-listener-active",
+    () => false,
+  );
+  const deferredRuntimeWorkScheduled = useState<boolean>(
+    "mtga-deferred-runtime-work-scheduled",
     () => false,
   );
 
@@ -929,6 +934,36 @@ export const useMtgaStore = () => {
     return normalized;
   };
 
+  const startDeferredRuntimeWork = () => {
+    if (!isTauriRuntime() || typeof window === "undefined") {
+      return;
+    }
+    if (deferredRuntimeWorkScheduled.value) {
+      return;
+    }
+    deferredRuntimeWorkScheduled.value = true;
+
+    const launchWarmup = () => {
+      scheduleLazyWarmup();
+    };
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    };
+    window.setTimeout(() => {
+      if (typeof idleWindow.requestIdleCallback === "function") {
+        idleWindow.requestIdleCallback(
+          () => {
+            launchWarmup();
+          },
+          { timeout: 2000 },
+        );
+        return;
+      }
+      launchWarmup();
+    }, DEFERRED_LAZY_WARMUP_DELAY_MS);
+  };
+
   const loadAppInfo = async () => {
     const info = await api.getAppInfo();
     if (!info) {
@@ -1011,23 +1046,14 @@ export const useMtgaStore = () => {
     if (initialized.value) {
       startLogStream();
       startProxyStepListener();
-      void startProxyStatusListener();
       startLazyWarmupListener();
-      scheduleLazyWarmup();
       return;
     }
     initialized.value = true;
     startLogStream();
     startProxyStepListener();
-    await startProxyStatusListener();
     startLazyWarmupListener();
-    await Promise.all([
-      loadAppInfo(),
-      loadConfig(),
-      loadStartupStatus(),
-      fetchProxyRuntimeStatus(),
-    ]);
-    scheduleLazyWarmup();
+    await Promise.all([loadAppInfo(), loadConfig(), loadStartupStatus()]);
   };
 
   const buildProxyPayload = () => ({
@@ -1400,6 +1426,7 @@ export const useMtgaStore = () => {
     startProxyStatusListener,
     startLazyWarmupListener,
     stopLazyWarmupListener,
+    startDeferredRuntimeWork,
     scheduleLazyWarmup,
     loadConfig,
     saveConfig,
