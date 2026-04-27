@@ -59,6 +59,40 @@ class ThreadManager:
                 self._name_locks[name] = lock
             return lock
 
+    @staticmethod
+    def _record_finished(record: TaskRecord) -> bool:
+        if record.thread is not None and record.thread.is_alive():
+            return False
+        return record.done_event.is_set() or record.status in {"finished", "failed"}
+
+    def _remove_task_locked(self, task_id: str) -> bool:
+        record = self._tasks.pop(task_id, None)
+        if record is None:
+            return False
+
+        ids = self._tasks_by_name.get(record.name)
+        if ids is not None:
+            self._tasks_by_name[record.name] = [item for item in ids if item != task_id]
+            if not self._tasks_by_name[record.name]:
+                self._tasks_by_name.pop(record.name, None)
+        return True
+
+    def _prune_finished_locked(self, *, name: str | None = None) -> int:
+        task_ids: list[str]
+        if name is None:
+            task_ids = list(self._tasks.keys())
+        else:
+            task_ids = list(self._tasks_by_name.get(name, []))
+
+        removed = 0
+        for task_id in task_ids:
+            record = self._tasks.get(task_id)
+            if record is None or not self._record_finished(record):
+                continue
+            if self._remove_task_locked(task_id):
+                removed += 1
+        return removed
+
     def run(  # noqa: PLR0913
         self,
         name: str,
@@ -95,6 +129,7 @@ class ThreadManager:
         record.thread = thread
 
         with self._lock:
+            self._prune_finished_locked(name=name)
             self._tasks[task_id] = record
             self._tasks_by_name.setdefault(name, []).append(task_id)
 
@@ -166,6 +201,11 @@ class ThreadManager:
                 if record.thread and record.thread.is_alive():
                     snapshots.append(record.snapshot())
         return snapshots
+
+    def prune_finished(self, *, name: str | None = None) -> int:
+        """回收已结束任务，避免长期累积状态记录。"""
+        with self._lock:
+            return self._prune_finished_locked(name=name)
 
 
 __all__ = ["ThreadManager", "TaskRecord"]

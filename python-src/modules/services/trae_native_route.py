@@ -74,6 +74,7 @@ class _TraeNativeRouteState:
     rewriter_events_path: Path | None = None
     rewriter_stop_path: Path | None = None
     rewriter_watcher_task_id: str | None = None
+    process_watcher_task_id: str | None = None
     native_backend: NativeBackend | None = None
     compatibility_report: CompatibilityReport | None = None
     launch_preparation_summary: dict[str, Any] | None = None
@@ -155,6 +156,8 @@ def _get_process_name_for_platform(pid: int) -> str | None:
 
     name = completed.stdout.strip()
     return name or None
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -286,6 +289,8 @@ class TraeNativeRouteManager:
             if not launch_result.ok:
                 self._stop_locked(log_func=log_func, show_idle_message=False)
                 return launch_result
+
+            self._start_process_watcher_locked(log_func=log_func)
 
             rewriter_result = self._start_rewriter_locked(config, log_func=log_func)
             if not rewriter_result.ok:
@@ -755,6 +760,79 @@ class TraeNativeRouteManager:
             allow_parallel=False,
         )
 
+    def _start_process_watcher_locked(self, *, log_func: LogFunc) -> None:
+        process = self._state.trae_process
+        if process is None:
+            return
+
+        def watch_process() -> None:
+            while True:
+                with self._lock:
+                    active = (
+                        self._state.trae_process is process
+                        and not self._state.stopping
+                    )
+                if not active:
+                    return
+
+                exit_code = process.poll()
+                if exit_code is None:
+                    time.sleep(REWRITER_WATCH_INTERVAL_SECONDS)
+                    continue
+
+                self._handle_trae_process_exit_locked(
+                    watched_process=process,
+                    exit_code=exit_code,
+                    log_func=log_func,
+                )
+                return
+
+        self._thread_manager.prune_finished(name="trae_native_process_watcher")
+        task_id = self._thread_manager.run(
+            "trae_native_process_watcher",
+            watch_process,
+            allow_parallel=False,
+        )
+        self._state.process_watcher_task_id = task_id
+
+    def _handle_trae_process_exit_locked(
+        self,
+        *,
+        watched_process: subprocess.Popen[bytes],
+        exit_code: int,
+        log_func: LogFunc,
+    ) -> None:
+        with self._lock:
+            if (
+                self._state.trae_process is not watched_process
+                or self._state.stopping
+            ):
+                return
+
+            self._state.running = False
+            self._state.stopping = True
+            self._state.cdp_port = None
+            self._state.process_watcher_task_id = None
+
+            rewriter_stopped = self._stop_rewriter_locked(log_func=log_func)
+            loopback_stopped = self._loopback.stop()
+
+            with contextlib.suppress(Exception):
+                watched_process.wait(timeout=0)
+
+            self._state.trae_process = None
+            self._state.stopping = False
+            self._state.native_backend = None
+            self._state.compatibility_report = None
+            self._state.launch_preparation_summary = None
+            self._state.launch_requires_runtime_rewriter = True
+
+        log_func(
+            "❌ Trae 客户端已退出，Trae native 路线已失效；"
+            f"exit_code={exit_code} loopback_stopped={loopback_stopped} "
+            f"rewriter_stopped={rewriter_stopped}"
+        )
+
     @staticmethod
     def _log_first_rewrite_event(events_path: Path, *, log_func: LogFunc) -> bool:
         for record in _read_jsonl(events_path):
@@ -833,10 +911,14 @@ class TraeNativeRouteManager:
             (
                 self._state.running,
                 self._state.rewriter_task_id is not None,
+                self._state.process_watcher_task_id is not None,
                 self._loopback.is_running(),
             )
         )
         if not had_runtime:
+            self._state.process_watcher_task_id = None
+            self._state.trae_process = None
+            self._state.cdp_port = None
             self._state.native_backend = None
             self._state.compatibility_report = None
             self._state.launch_preparation_summary = None
@@ -848,10 +930,16 @@ class TraeNativeRouteManager:
 
         log_func("正在停止 Trae native 路线...")
         self._state.stopping = True
+        self._state.process_watcher_task_id = None
         rewriter_stopped = self._stop_rewriter_locked(log_func=log_func)
         loopback_stopped = self._loopback.stop()
         clean = rewriter_stopped and loopback_stopped
 
+        trae_process = self._state.trae_process
+        if trae_process is not None and trae_process.poll() is not None:
+            with contextlib.suppress(Exception):
+                trae_process.wait(timeout=0)
+        self._state.trae_process = None
         self._state.running = False
         self._state.stopping = False
         self._state.cdp_port = None
@@ -927,6 +1015,16 @@ class TraeNativeRouteManager:
         owner_resolution_seen = False
 
         while time.monotonic() < deadline:
+            if trae_process is not None:
+                exit_code = trae_process.poll()
+                if exit_code is not None:
+                    message = (
+                        "Trae 在启动阶段已退出: "
+                        f"expected_pid={expected_pid} exit_code={exit_code}"
+                    )
+                    log_func(f"❌ {message}")
+                    return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+
             if not _is_port_open(host, port):
                 time.sleep(0.15)
                 continue
@@ -941,6 +1039,16 @@ class TraeNativeRouteManager:
                 continue
 
             time.sleep(0.15)
+
+        if trae_process is not None:
+            exit_code = trae_process.poll()
+            if exit_code is not None:
+                message = (
+                    "Trae 在启动阶段已退出: "
+                    f"expected_pid={expected_pid} exit_code={exit_code}"
+                )
+                log_func(f"❌ {message}")
+                return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
 
         if _is_port_open(host, port):
             listener_pids = _get_tcp_listener_pids_for_platform(port)
