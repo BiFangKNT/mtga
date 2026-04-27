@@ -50,6 +50,16 @@ DEFAULT_REWRITER_WAIT_SECONDS = 20.0
 DEFAULT_CDP_PORT_SEARCH = DEFAULT_PORT_SCAN_ATTEMPTS
 REWRITER_WATCH_INTERVAL_SECONDS = 1.0
 TRAE_PID_LOG_LIMIT = 8
+TRAE_LAUNCH_ENV_VARS_TO_CLEAR = (
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONEXECUTABLE",
+    "PYTHONPLATLIBDIR",
+    "__PYVENV_LAUNCHER__",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "MTGA_ENV_FILE",
+)
 
 
 @dataclass(frozen=True)
@@ -156,6 +166,13 @@ def _get_process_name_for_platform(pid: int) -> str | None:
 
     name = completed.stdout.strip()
     return name or None
+
+
+def _build_trae_launch_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in TRAE_LAUNCH_ENV_VARS_TO_CLEAR:
+        env.pop(key, None)
+    return env
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -442,9 +459,11 @@ class TraeNativeRouteManager:
         launch_executable = preparation.trae_executable
         command, cwd = backend.build_launch_command(launch_executable, cdp_port=cdp_port)
         try:
+            launch_env = _build_trae_launch_env()
             self._state.trae_process = subprocess.Popen(
                 command,
                 cwd=str(cwd),
+                env=launch_env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
