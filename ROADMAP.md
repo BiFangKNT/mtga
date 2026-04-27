@@ -4,8 +4,8 @@
 
 这份文档用于定义 `v2.4.0` 到 `v2.6.0` 的产品方向、版本边界和协作规则。
 
-- 目标是先固定里程碑与约束，再让 issue / PR 在明确边界内推进。
-- 这不是完整设计文档；实现细节应在具体 issue、设计讨论或 PR 中展开。
+- 目标是先固定里程碑与约束，再让 Admin 任务、issue 或 Contributor PR 在明确边界内推进。
+- 这不是完整设计文档；实现细节应在具体 issue、设计讨论、Admin 任务或 Contributor PR 中展开。
 - 如路线图与临时实现方案冲突，以路线图约束为准。
 
 ## 状态约定
@@ -88,7 +88,7 @@
 - 对流式、非流式和异常响应的回归测试。
 - provider 支持范围与限制说明文档。
 
-**建议 PR 拆分**
+**建议任务拆分**
 
 1. 后端基础设施：引入 LiteLLM，建立上游适配入口，并补齐 MTGA 运行时配置到 LiteLLM 调用参数的映射层。
 2. 后端 provider 打通：接入至少 2 个非 OpenAI provider，并统一流式、非流式响应归一化行为。
@@ -107,7 +107,7 @@
 
 - 将代理日志从普通字符串升级为结构化 `trace`。
 - 新增“代理日志”页，用于查看请求列表与详情。
-- 让当前单模型映射架构支持并发请求处理。
+- 验证并加固当前单模型映射架构下的并发请求处理。
 - 将右侧日志区收敛为摘要日志，而不是完整代理详情。
 - 明确 `trace` 是 MTGA 自有的数据模型与产品能力，不随 LiteLLM 选型外包出去。
 
@@ -116,9 +116,13 @@
 - 后端新增 trace 总线或 trace 存储，不再复用纯字符串 `log_bus` 作为代理详情载体。
 - 前端新增“代理日志”页，交互可参考现有“系统提示词”页的列表区。
 - 右侧运行日志区只记录一行摘要，例如“收到代理请求”或“已转发到上游”。
-- 代理运行时改造为并发处理请求。
+- 对现有代理运行时做并发安全审计和必要加固，重点保证并发请求下的 trace 完整性。
 - 并发范围仅限“当前单映射模型下的并发处理”，不提前引入多发布模型路由。
 - 如 LiteLLM 提供回调、raw request/response 或 observability 集成，只作为 trace 打点的数据来源之一，不作为日志页主存储模型。
+- trace 存储必须独立于纯字符串 `log_bus`，`log_bus` 只保留面向右侧运行日志的摘要文本。
+- 请求体、响应体和错误详情必须有脱敏、截断与保留策略，不保存可泄露的鉴权信息。
+- 流式请求以生成器结束、上游异常或客户端断开作为 trace 结束点，不以 Flask handler 返回 `Response` 作为结束点。
+- 清空代理日志不应破坏正在进行中的 trace；清空语义必须明确 active trace 的处理方式。
 
 **本版本不做**
 
@@ -137,23 +141,26 @@
 - 并发代理运行时。
 - “代理日志”页列表与详情视图。
 - LiteLLM 打点与 `ProxyTrace` 的字段映射策略说明。
+- 请求体、响应体、鉴权信息脱敏、截断与保留策略。
 - 并发请求、trace 完整性、清理逻辑测试。
-- trace 字段、并发边界与内存保留策略说明文档。
+- trace 字段、并发边界、清空语义与内存保留策略说明文档。
 
-**建议 PR 拆分**
+**建议任务拆分**
 
 1. 后端 trace 基础：定义 `ProxyTrace` 数据结构、生命周期和存储保留策略，并提供列表、详情、清空接口。
 2. 后端 trace 打点：把 `proxy_app` 全链路请求处理接入 trace，并明确 LiteLLM 打点到 `ProxyTrace` 的字段映射边界。
-3. 后端并发运行时：升级代理运行时以支持并发处理，并确保并发场景下 trace 完整性不丢失。
+3. 后端并发安全：审计并加固现有代理运行时，确保并发场景下 trace 完整性不丢失。
 4. 前端日志页：新增“代理日志”页的列表与详情视图，支持查看请求体、响应体、状态码、耗时和错误。
 5. 前端日志收敛：调整右侧日志区，仅保留代理摘要日志，避免与 trace 详情重复。
-6. 测试与文档：补充并发请求、trace 完整性、清理逻辑测试，并说明 trace 字段、并发边界与内存保留策略。
+6. 测试与文档：补充并发请求、流式结束、客户端断开、trace 完整性、清理逻辑测试，并说明 trace 字段、并发边界与内存保留策略。
 
 **完成标准**
 
 - 同一模型可同时处理多个请求，不互相阻塞。
 - 并发请求可在“代理日志”页中独立追踪。
 - 日志页能定位单次请求的完整请求体与响应体。
+- 流式请求在完成、异常或客户端断开时都能落到明确的 trace 终态。
+- 清空代理日志不会导致正在处理中的请求 trace 丢失或结束回写失败。
 - `pnpm py:check` 与 `pnpm app:check` 通过。
 
 ### `v2.6.0` 模型路由重构
@@ -210,7 +217,7 @@
 - 迁移、动态路由、热切换、`429` 故障转移和 target 复用测试。
 - 术语、迁移说明和故障转移风险说明文档。
 
-**建议 PR 拆分**
+**建议任务拆分**
 
 1. 配置模型重构：定义新 schema 与类型，并实现旧 schema 到新 schema 的迁移逻辑。
 2. 路由解析主链路：实现 `request.model -> published_model -> primary_target/failover_pool` 解析器，并让 `/models` 返回全部启用发布模型。
@@ -281,36 +288,64 @@ published_models:
 ## 附录 A：`v2.5.0` trace 草案
 
 ```ts
+type ProxyTraceStatus = "active" | "completed" | "failed" | "cancelled";
+
+type ProxyTraceEvent = {
+  at: string;
+  kind: string;
+  message?: string;
+  data?: Record<string, unknown>;
+};
+
+type ProxyTraceBodyCapture = {
+  value?: unknown;
+  bytes?: number;
+  truncated?: boolean;
+  truncated_reason?: "size_limit" | "stream_limit" | "unsupported_type";
+  redacted?: boolean;
+};
+
 type ProxyTrace = {
   trace_id: string;
   request_id: string;
+  status: ProxyTraceStatus;
+  method: string;
   request_path: string;
+  route_mode?: "reverse_hosts" | "trae_native" | "trae_official_base_url";
+  provider?: string;
+  request_api?: "chat_completions" | "responses";
   request_model?: string;
+  client_model?: string;
   resolved_target_label?: string;
   target_api_base_url?: string;
   upstream_model?: string;
+  target_model?: string;
   is_stream: boolean;
   status_code?: number;
   started_at: string;
+  first_chunk_at?: string;
   ended_at?: string;
   duration_ms?: number;
-  request_body?: unknown;
-  response_body?: unknown;
+  chunk_count?: number;
+  finish_reason?: string;
+  request_body?: ProxyTraceBodyCapture;
+  response_body?: ProxyTraceBodyCapture;
   error?: string;
-  events?: string[];
+  events: ProxyTraceEvent[];
 };
 ```
 
 ## 协作与合并规则
 
-- 单个 PR 只覆盖一个里程碑，不跨 `v2.4.0`、`v2.5.0`、`v2.6.0`。
-- 设计型 PR 必须先在 issue 中确认术语和边界，再进入实现。
+- Contributor 贡献默认通过 PR；Admin 可按同样任务边界直接提交或合并，不受 PR 流程约束。
+- Contributor 单个 PR 只覆盖一个里程碑，不跨 `v2.4.0`、`v2.5.0`、`v2.6.0`；Admin 直接提交也应避免跨里程碑混合改动。
+- Contributor 设计型 PR 必须先在 issue 中确认术语和边界，再进入实现；Admin 直接推进设计时也应先在 issue、设计讨论或路线图中固定边界。
 - 涉及 Python 的变更必须运行 `pnpm py:check`。
 - 涉及 JS/TS/Vue 的变更必须运行 `pnpm app:check`。
-- 涉及配置 schema 的 PR 必须写迁移说明。
-- 涉及日志或 trace 的 PR 必须说明数据保留策略和内存上限。
-- 涉及代理并发的 PR 必须提供至少一个并发行为测试。
-- 涉及 UI 的 PR 必须附截图或录屏。
+- 涉及配置 schema 的变更必须写迁移说明。
+- 涉及日志或 trace 的变更必须说明数据保留策略和内存上限。
+- 涉及代理并发的变更必须提供至少一个并发行为测试。
+- 涉及 UI 的 Contributor PR 必须附截图或录屏；Admin 直接提交 UI 变更时也应在交付说明中说明验证方式。
 
 ## 对现有 PR 的处理建议
 
