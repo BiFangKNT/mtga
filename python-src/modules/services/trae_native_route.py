@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -36,6 +37,7 @@ from modules.trae_patch.backends import (
 )
 from modules.trae_patch.common.types import (
     CompatibilityReport,
+    LaunchPreparationRequest,
     NativeBackend,
     RewriterConfigRequest,
 )
@@ -47,10 +49,6 @@ DEFAULT_TRAE_CDP_PORT = 9330
 DEFAULT_REWRITER_WAIT_SECONDS = 20.0
 DEFAULT_CDP_PORT_SEARCH = DEFAULT_PORT_SCAN_ATTEMPTS
 REWRITER_WATCH_INTERVAL_SECONDS = 1.0
-TRAE_AI_AGENT_DLL_RELATIVE_PATH = Path(
-    "resources/app/modules/ai-agent/ai_agent.dll"
-)
-TASKLIST_MIN_COLUMNS = 2
 TRAE_PID_LOG_LIMIT = 8
 
 
@@ -78,6 +76,8 @@ class _TraeNativeRouteState:
     rewriter_watcher_task_id: str | None = None
     native_backend: NativeBackend | None = None
     compatibility_report: CompatibilityReport | None = None
+    launch_preparation_summary: dict[str, Any] | None = None
+    launch_requires_runtime_rewriter: bool = True
     trae_process: subprocess.Popen[bytes] | None = None
     cdp_port: int | None = None
     running: bool = False
@@ -92,12 +92,69 @@ class _RewriterFiles:
     log_fp: Any
 
 
-def resolve_trae_path(path: str) -> Path:
-    return Path(os.path.expanduser(os.path.expandvars(path.strip()))).resolve()
+def _is_port_open(host: str, port: int) -> bool:
+    with contextlib.suppress(OSError), socket.create_connection((host, port), timeout=0.5):
+        return True
+    return False
 
 
-def _resolve_ai_agent_dll_path(trae_exe: Path) -> Path:
-    return trae_exe.parent / TRAE_AI_AGENT_DLL_RELATIVE_PATH
+def _wait_port(host: str, port: int, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _is_port_open(host, port):
+            return True
+        time.sleep(0.15)
+    return _is_port_open(host, port)
+
+
+def _get_tcp_listener_pids_for_platform(port: int) -> list[int]:
+    if os.name == "nt":
+        return get_tcp_listener_pids(port)
+
+    try:
+        completed = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=3,
+        )
+    except Exception:
+        return []
+
+    pids: list[int] = []
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        with contextlib.suppress(ValueError):
+            pid = int(line)
+            if pid not in pids:
+                pids.append(pid)
+    return pids
+
+
+def _get_process_name_for_platform(pid: int) -> str | None:
+    if os.name == "nt":
+        return get_process_name(pid)
+
+    try:
+        completed = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=3,
+        )
+    except Exception:
+        return None
+
+    name = completed.stdout.strip()
+    return name or None
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -129,39 +186,32 @@ def _summary_value(summary: dict[str, Any] | None, key: str) -> str:
     return str(value) if value is not None else "<empty>"
 
 
-def _list_existing_trae_pids() -> list[int]:
-    if os.name != "nt":
-        return []
-    try:
-        completed = subprocess.run(
-            [
-                "tasklist",
-                "/FI",
-                "IMAGENAME eq Trae.exe",
-                "/FO",
-                "CSV",
-                "/NH",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=3,
-        )
-    except Exception:
-        return []
-    pids: list[int] = []
-    for raw_line in completed.stdout.splitlines():
-        line = raw_line.strip()
-        if not line or "INFO:" in line:
-            continue
-        columns = [part.strip().strip('"') for part in line.split(",")]
-        if len(columns) < TASKLIST_MIN_COLUMNS or columns[0].lower() != "trae.exe":
-            continue
-        with contextlib.suppress(ValueError):
-            pids.append(int(columns[1]))
-    return sorted(set(pids))
+def _attach_diagnostics_preview(summary: dict[str, Any] | None) -> str:
+    if not isinstance(summary, dict):
+        return ""
+    raw_diagnostics = summary.get("attach_diagnostics")
+    if not isinstance(raw_diagnostics, dict):
+        return ""
+    diagnostics = cast(dict[str, Any], raw_diagnostics)
+    raw_signals = diagnostics.get("signals")
+    signals = cast(list[Any], raw_signals) if isinstance(raw_signals, list) else None
+    signal_text = (
+        ",".join(str(item) for item in signals)
+        if signals is not None
+        else "<empty>"
+    )
+    return (
+        " attach_reason="
+        f"{diagnostics.get('reason') or '<empty>'}"
+        " developer_mode="
+        f"{diagnostics.get('developer_mode_enabled')}"
+        " target_runtime="
+        f"{diagnostics.get('target_codesign_runtime')}"
+        " target_get_task_allow="
+        f"{diagnostics.get('target_get_task_allow')}"
+        " signals="
+        f"{signal_text}"
+    )
 
 
 class TraeNativeRouteManager:
@@ -196,6 +246,13 @@ class TraeNativeRouteManager:
             if not self._state.running:
                 return OperationResult.failure("Trae native 路线未运行")
         return self._loopback.apply_runtime_config(raw_config)
+
+    def _get_or_create_native_backend_locked(self) -> NativeBackend:
+        backend = self._state.native_backend
+        if backend is None:
+            backend = get_native_backend()
+            self._state.native_backend = backend
+        return backend
 
     def start(self, config: TraeNativeRouteConfig, *, log_func: LogFunc) -> OperationResult:
         with self._lock:
@@ -278,16 +335,16 @@ class TraeNativeRouteManager:
 
         if not config.trae_path.strip():
             message = "trae_path_missing"
-            log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
+            log_func(f"❌ Trae 路径为空，请先在设置中选择 {backend.path_prompt_name}")
             return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
 
-        trae_exe = resolve_trae_path(config.trae_path)
+        trae_exe = backend.resolve_trae_executable(config.trae_path)
         if not trae_exe.is_file():
             message = "trae_path_invalid"
             log_func(f"❌ Trae 路径无效: {trae_exe}")
             return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
 
-        module_path = _resolve_ai_agent_dll_path(trae_exe)
+        module_path = backend.resolve_module_path(trae_exe)
         report = backend.build_compatibility_report(module_path)
         self._state.native_backend = backend
         self._state.compatibility_report = report
@@ -299,7 +356,7 @@ class TraeNativeRouteManager:
                 f"reason={report.reason} "
                 f"pattern_count={report.pattern_count} "
                 f"sha={sha_preview} "
-                f"dll={module_path}"
+                f"{backend.module_display_name}={module_path}"
             )
             return OperationResult.failure(
                 "Trae native 兼容性检查失败",
@@ -318,17 +375,24 @@ class TraeNativeRouteManager:
             log_func(f"⚠️ Trae native manifest 读取异常，按未知版本处理: {report.manifest_error}")
         return OperationResult.success("Trae native 兼容性检查通过", **details)
 
-    def _launch_trae_locked(
+    def _launch_trae_locked(  # noqa: PLR0911, PLR0915
         self,
         config: TraeNativeRouteConfig,
         *,
         log_func: LogFunc,
     ) -> OperationResult:
-        validation_result = self._validate_trae_launch_locked(config, log_func=log_func)
-        if not validation_result.ok:
-            return validation_result
+        backend = self._get_or_create_native_backend_locked()
 
-        trae_exe = cast(Path, validation_result.details.get("trae_exe"))
+        if not config.trae_path.strip():
+            message = "trae_path_missing"
+            log_func(f"❌ Trae 路径为空，请先在设置中选择 {backend.path_prompt_name}")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+        trae_exe = backend.resolve_trae_executable(config.trae_path)
+        if not trae_exe.is_file():
+            message = "trae_path_invalid"
+            log_func(f"❌ Trae 路径无效: {trae_exe}")
+            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
 
         cdp_port_result = self._resolve_cdp_port_locked(config, log_func=log_func)
         if not cdp_port_result.ok:
@@ -336,40 +400,138 @@ class TraeNativeRouteManager:
 
         cdp_port = int(cdp_port_result.details.get("cdp_port") or config.cdp_port)
         self._state.cdp_port = cdp_port
-        spawn_result = self._spawn_trae_process_locked(
-            trae_exe,
-            cdp_port=cdp_port,
-            log_func=log_func,
-        )
-        if not spawn_result.ok:
-            return spawn_result
+        loopback_url = self._loopback.current_chat_url()
+        if not loopback_url:
+            message = "Trae loopback URL 状态异常"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+        existing_processes = backend.list_existing_trae_processes()
+        if existing_processes:
+            preview = ", ".join(
+                str(process.pid) for process in existing_processes[:TRAE_PID_LOG_LIMIT]
+            )
+            suffix = "..." if len(existing_processes) > TRAE_PID_LOG_LIMIT else ""
+            message = (
+                f"检测到 Trae 已在运行 pid={preview}{suffix}。"
+                "请先完全关闭 Trae，再由 MTGA 拉起干净实例。"
+            )
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
+
+        try:
+            preparation = backend.prepare_launch(
+                LaunchPreparationRequest(
+                    trae_executable=trae_exe,
+                    new_url=loopback_url,
+                    user_data_dir=Path(self._resource_manager.user_data_dir),
+                    logs_dir=Path(self._resource_manager.get_logs_dir()),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = f"Trae 启动前准备失败: {exc}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
+
+        self._state.launch_preparation_summary = preparation.summary
+        self._state.launch_requires_runtime_rewriter = preparation.requires_runtime_rewriter
+        launch_executable = preparation.trae_executable
+        command, cwd = backend.build_launch_command(launch_executable, cdp_port=cdp_port)
+        try:
+            self._state.trae_process = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = f"Trae 拉起失败: {exc}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
 
         log_func(
             "已拉起 Trae，并注入参数: "
             f"--remote-debugging-port={cdp_port}"
         )
+        summary = preparation.summary
+        if isinstance(summary, dict):
+            prepared_summary = summary
+            prepared_app = prepared_summary.get("prepared_app")
+            raw_clone = prepared_summary.get("clone")
+            clone = cast(dict[str, Any], raw_clone) if isinstance(raw_clone, dict) else None
+            clone_mode = clone.get("mode") if clone is not None else None
+            raw_patch_records = prepared_summary.get("patch_records")
+            patch_records = (
+                cast(list[object], raw_patch_records)
+                if isinstance(raw_patch_records, list)
+                else None
+            )
+            patched_offsets = 0
+            if patch_records is not None:
+                patched_offsets = sum(
+                    int(cast(dict[str, Any], record).get("replacement_count") or 0)
+                    for record in patch_records
+                    if isinstance(record, dict)
+                )
+            if prepared_app:
+                log_func(
+                    "Trae native 启动前已准备 patched copy: "
+                    f"path={prepared_app} clone_mode={clone_mode or '<empty>'} "
+                    f"patched_offsets={patched_offsets}"
+                )
+        if not _wait_port(config.cdp_host, cdp_port, timeout_seconds=8):
+            wait_target = (
+                f"native rewriter 挂载 {backend.module_display_name}"
+                if preparation.requires_runtime_rewriter
+                else "patched copy 工作台完成初始化"
+            )
+            log_func(
+                f"⚠️ 未检测到 CDP 端口 {config.cdp_host}:{cdp_port}，"
+                f"继续等待 {wait_target}"
+            )
         cdp_wait_result = self._wait_for_cdp_port_locked(
             host=config.cdp_host,
             port=cdp_port,
-            timeout_seconds=8,
+            timeout_seconds=0.5,
             log_func=log_func,
         )
         if not cdp_wait_result.ok:
             return cdp_wait_result
         return OperationResult.success()
 
-    def _start_rewriter_locked(
+    def _start_rewriter_locked(  # noqa: PLR0911
         self,
         config: TraeNativeRouteConfig,
         *,
         log_func: LogFunc,
     ) -> OperationResult:
-        prereq_result = self._resolve_rewriter_prerequisites_locked(config, log_func=log_func)
-        if not prereq_result.ok:
-            return prereq_result
+        backend = self._get_or_create_native_backend_locked()
+        if not self._state.launch_requires_runtime_rewriter:
+            summary = self._state.launch_preparation_summary or {}
+            raw_recipe = summary.get("recipe")
+            recipe = cast(dict[str, Any], raw_recipe) if isinstance(raw_recipe, dict) else {}
+            raw_site = recipe.get("site")
+            site = cast(dict[str, Any], raw_site) if isinstance(raw_site, dict) else {}
+            site_label = site.get("label")
+            site_offset = site.get("file_offset")
+            log_func(
+                "Trae native static patch 已就绪: "
+                f"site={site_label or '<empty>'} "
+                f"offset={site_offset or '<empty>'}"
+            )
+            return OperationResult.success()
 
-        module_path = cast(Path, prereq_result.details.get("module_path"))
-        loopback_url = str(prereq_result.details.get("loopback_url") or "")
+        if importlib.util.find_spec(backend.rewriter_module) is None:
+            message = f"未找到 native rewriter 模块: {backend.rewriter_module}"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
+
+        trae_exe = backend.resolve_trae_executable(config.trae_path)
+        module_path = backend.resolve_module_path(trae_exe)
+        loopback_url = self._loopback.current_chat_url()
+        if not loopback_url:
+            message = "Trae loopback URL 状态异常"
+            log_func(f"❌ {message}")
+            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
 
         files = self._open_rewriter_files()
         task_result = self._start_rewriter_task_locked(
@@ -398,16 +560,16 @@ class TraeNativeRouteManager:
             return OperationResult.failure("native rewriter 未就绪", code=ErrorCode.UNKNOWN)
 
         breakpoint_rva = str(armed.get("breakpoint_rva") or "")
-        dll_sha = str(armed.get("dll_sha256") or "<empty>")[:12]
+        module_sha = str(armed.get("dll_sha256") or "<empty>")[:12]
         if armed.get("compatibility_changed_since_preflight") is True:
             log_func(
-                "⚠️ Trae ai_agent.dll 在启动期间发生变化，"
+                f"⚠️ Trae {backend.module_display_name} 在启动期间发生变化，"
                 "已使用 rewriter attach 前重新定位的 RVA"
             )
         log_func(
             "Trae native rewriter 已就绪: "
             f"breakpoint_rva={breakpoint_rva} "
-            f"dll_sha={dll_sha}"
+            f"module_sha={module_sha}"
         )
         return OperationResult.success()
 
@@ -521,10 +683,14 @@ class TraeNativeRouteManager:
             status = self._thread_manager.get_status(task_id=task_id)
             if status is not None and status.get("status") in {"failed", "finished"}:
                 tail = _read_tail(log_path)
+                summary = self._state.rewriter_summary
                 log_func(
                     "❌ native rewriter 提前退出 "
                     f"status={status.get('status')}; "
                     f"error={self._state.rewriter_error or status.get('error') or '<empty>'}; "
+                    f"summary_status={_summary_value(summary, 'status')}; "
+                    f"summary_error={_summary_value(summary, 'error')};"
+                    f"{_attach_diagnostics_preview(summary)} "
                     f"log_tail={tail or '<empty>'}"
                 )
                 return None
@@ -673,6 +839,8 @@ class TraeNativeRouteManager:
         if not had_runtime:
             self._state.native_backend = None
             self._state.compatibility_report = None
+            self._state.launch_preparation_summary = None
+            self._state.launch_requires_runtime_rewriter = True
             self._state.stopping = False
             if show_idle_message:
                 log_func("Trae native 路线未运行")
@@ -690,95 +858,12 @@ class TraeNativeRouteManager:
         if clean:
             self._state.native_backend = None
             self._state.compatibility_report = None
+            self._state.launch_preparation_summary = None
+            self._state.launch_requires_runtime_rewriter = True
         log_func("Trae native 路线已停止；不会关闭 Trae 客户端进程")
         if clean:
             return OperationResult.success()
         return OperationResult.failure("Trae native 路线未完全停止", code=ErrorCode.UNKNOWN)
-
-    def _validate_trae_launch_locked(
-        self,
-        config: TraeNativeRouteConfig,
-        *,
-        log_func: LogFunc,
-    ) -> OperationResult:
-        if not config.trae_path.strip():
-            message = "trae_path_missing"
-            log_func("❌ Trae 路径为空，请先在设置中选择 Trae.exe")
-            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
-
-        trae_exe = resolve_trae_path(config.trae_path)
-        if not trae_exe.is_file():
-            message = "trae_path_invalid"
-            log_func(f"❌ Trae 路径无效: {trae_exe}")
-            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
-
-        existing_pids = _list_existing_trae_pids()
-        if existing_pids:
-            preview = ", ".join(str(pid) for pid in existing_pids[:TRAE_PID_LOG_LIMIT])
-            suffix = "..." if len(existing_pids) > TRAE_PID_LOG_LIMIT else ""
-            message = (
-                f"检测到 Trae 已在运行 pid={preview}{suffix}。"
-                "请先完全关闭 Trae，再由 MTGA 拉起干净实例。"
-            )
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
-
-        return OperationResult.success(trae_exe=trae_exe)
-
-    def _spawn_trae_process_locked(
-        self,
-        trae_exe: Path,
-        *,
-        cdp_port: int,
-        log_func: LogFunc,
-    ) -> OperationResult:
-        command = [str(trae_exe), f"--remote-debugging-port={cdp_port}"]
-        try:
-            self._state.trae_process = subprocess.Popen(
-                command,
-                cwd=str(trae_exe.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:  # noqa: BLE001
-            message = f"Trae 拉起失败: {exc}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
-        return OperationResult.success()
-
-    def _resolve_rewriter_prerequisites_locked(
-        self,
-        config: TraeNativeRouteConfig,
-        *,
-        log_func: LogFunc,
-    ) -> OperationResult:
-        backend = self._state.native_backend
-        if backend is None:
-            try:
-                backend = get_native_backend()
-            except UnsupportedNativeBackendError as exc:
-                message = str(exc)
-                log_func(f"❌ {message}")
-                return OperationResult.failure(message, code=ErrorCode.CONFIG_INVALID)
-            self._state.native_backend = backend
-
-        if importlib.util.find_spec(backend.rewriter_module) is None:
-            message = f"未找到 native rewriter 模块: {backend.rewriter_module}"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.FILE_NOT_FOUND)
-
-        trae_exe = resolve_trae_path(config.trae_path)
-        module_path = _resolve_ai_agent_dll_path(trae_exe)
-        loopback_url = self._loopback.current_chat_url()
-        if not loopback_url:
-            message = "Trae loopback URL 状态异常"
-            log_func(f"❌ {message}")
-            return OperationResult.failure(message, code=ErrorCode.UNKNOWN)
-
-        return OperationResult.success(
-            module_path=module_path,
-            loopback_url=loopback_url,
-        )
 
     def _resolve_cdp_port_locked(
         self,
@@ -842,11 +927,11 @@ class TraeNativeRouteManager:
         owner_resolution_seen = False
 
         while time.monotonic() < deadline:
-            if not is_host_port_open(host, port, timeout=0.5):
+            if not _is_port_open(host, port):
                 time.sleep(0.15)
                 continue
 
-            listener_pids = get_tcp_listener_pids(port)
+            listener_pids = _get_tcp_listener_pids_for_platform(port)
             if listener_pids:
                 owner_resolution_seen = True
                 if expected_pid is None or expected_pid in listener_pids:
@@ -857,13 +942,13 @@ class TraeNativeRouteManager:
 
             time.sleep(0.15)
 
-        if is_host_port_open(host, port, timeout=0.5):
-            listener_pids = get_tcp_listener_pids(port)
+        if _is_port_open(host, port):
+            listener_pids = _get_tcp_listener_pids_for_platform(port)
             if expected_pid is not None and listener_pids:
                 owner_names = [
                     name
                     for pid in listener_pids
-                    if (name := get_process_name(pid))
+                    if (name := _get_process_name_for_platform(pid))
                 ]
                 owner_display = ", ".join(owner_names) if owner_names else "<unknown>"
                 message = (

@@ -52,6 +52,28 @@ class RewriterConfigRequest:
     quiet: bool
 
 
+@dataclass(frozen=True)
+class NativeProcessInfo:
+    pid: int
+    name: str
+    command: str
+
+
+@dataclass(frozen=True)
+class LaunchPreparationRequest:
+    trae_executable: Path
+    new_url: str
+    user_data_dir: Path
+    logs_dir: Path
+
+
+@dataclass(frozen=True)
+class LaunchPreparationResult:
+    trae_executable: Path
+    requires_runtime_rewriter: bool
+    summary: dict[str, Any] | None = None
+
+
 class NativeBackend(Protocol):
     @property
     def name(self) -> str: ...
@@ -59,7 +81,28 @@ class NativeBackend(Protocol):
     @property
     def rewriter_module(self) -> str: ...
 
+    @property
+    def module_display_name(self) -> str: ...
+
+    @property
+    def path_prompt_name(self) -> str: ...
+
+    def resolve_trae_executable(self, raw_path: str) -> Path: ...
+
+    def resolve_module_path(self, trae_executable: Path) -> Path: ...
+
+    def build_launch_command(
+        self,
+        trae_executable: Path,
+        *,
+        cdp_port: int,
+    ) -> tuple[list[str], Path]: ...
+
+    def list_existing_trae_processes(self) -> list[NativeProcessInfo]: ...
+
     def build_compatibility_report(self, module_path: Path) -> CompatibilityReport: ...
+
+    def prepare_launch(self, request: LaunchPreparationRequest) -> LaunchPreparationResult: ...
 
     def create_rewriter_config(self, request: RewriterConfigRequest) -> object: ...
 
@@ -69,6 +112,9 @@ class NativeBackend(Protocol):
 __all__ = [
     "CompatibilityReport",
     "CompatibilityStatusLike",
+    "LaunchPreparationRequest",
+    "LaunchPreparationResult",
     "NativeBackend",
+    "NativeProcessInfo",
     "RewriterConfigRequest",
 ]

@@ -271,6 +271,8 @@ async def resolve_trae_dialog_path(body: ResolvePathPayload) -> dict[str, str]:
     raw_path = body.path.strip()
     if not raw_path:
         return {"path": ""}
+    if sys.platform == "darwin" and raw_path == "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe":
+        return {"path": "/Applications/Trae.app"}
     return {"path": os.path.expanduser(os.path.expandvars(raw_path))}
 
 
@@ -280,10 +282,14 @@ def _browse_trae_path_sync(raw_path: str) -> str:
 
     expanded = os.path.expanduser(os.path.expandvars(raw_path.strip()))
     initial_dir = ""
-    initial_file = "Trae.exe"
+    initial_file = "Trae.app" if sys.platform == "darwin" else "Trae.exe"
     if expanded:
         candidate = Path(expanded)
-        if candidate.is_dir():
+        if sys.platform == "darwin" and candidate.suffix.lower() == ".app":
+            if candidate.parent.exists():
+                initial_dir = str(candidate.parent)
+            initial_file = candidate.name
+        elif candidate.is_dir():
             initial_dir = str(candidate)
         else:
             if candidate.parent.exists():
@@ -298,10 +304,13 @@ def _browse_trae_path_sync(raw_path: str) -> str:
     try:
         selected = filedialog.askopenfilename(
             parent=root,
-            title="选择 Trae 可执行文件",
+            title="选择 Trae 应用或可执行文件",
             initialdir=initial_dir or None,
             initialfile=initial_file,
-            filetypes=(("Trae 可执行文件", "*.exe"), ("所有文件", "*.*")),
+            filetypes=(
+                ("Trae 应用", "*.app *.exe"),
+                ("所有文件", "*"),
+            ),
         )
     finally:
         root.destroy()

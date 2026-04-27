@@ -103,6 +103,13 @@ const runtimeStatusLabel = computed(() => {
   return "未运行";
 });
 
+const traePathPlaceholder = computed(() => {
+  if (import.meta.client && /Mac/i.test(navigator.platform)) {
+    return "/Applications/Trae.app";
+  }
+  return "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
+});
+
 /**
  * 打开目录的工具提示内容
  */
@@ -459,8 +466,8 @@ const handleThemeSave = (value: ThemeConfig) => {
           <MtgaInput
             v-model="traePath"
             class="min-w-0 flex-1"
-            placeholder="%LOCALAPPDATA%\Programs\Trae\Trae.exe"
-            :error="traePathMissing ? '启用 Trae native 路线前需要先选择 Trae.exe。' : ''"
+            :placeholder="traePathPlaceholder"
+            :error="traePathMissing ? '启用 Trae native 路线前需要先选择 Trae 路径。' : ''"
           />
           <button
             type="button"

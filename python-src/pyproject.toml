@@ -30,7 +30,7 @@ exclude = ["build*", "target*", "pyembed*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-modules = ["resources/ca/**", "resources/trae/**"]
+modules = ["resources/ca/**", "resources/trae/**", "trae_patch/macos/*.json"]
 
 [dependency-groups]
 dev = [

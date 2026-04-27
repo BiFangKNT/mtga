@@ -54,3 +54,4 @@ tmp
 logs
 mtga-tauri/src-tauri/mtga_app.egg-info
 mtga-tauri/src-tauri/pyembed/python
+python-src/artifacts

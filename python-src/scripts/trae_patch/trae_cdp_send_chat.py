@@ -16,13 +16,27 @@ DEFAULT_REMOTE_DEBUGGING_PORT = 9330
 DEFAULT_TARGET_URL_SUBSTRING = "workbench/workbench.html"
 DEFAULT_TARGET_TITLE_SUBSTRING = ""
 DEFAULT_WAIT_AFTER_SEND_SECONDS = 0.5
+DEFAULT_TARGET_WAIT_SECONDS = 20.0
+DEFAULT_TARGET_POLL_SECONDS = 0.25
+DEFAULT_CHAT_MODE = "ide"
+DEFAULT_AGENT_NAME = "Builder"
 
 SEND_EXPRESSION_TEMPLATE = r"""(async () => {
   const message = __MESSAGE__;
+  const targetMode = __TARGET_MODE__;
+  const targetAgentName = __TARGET_AGENT_NAME__;
 
   function preview(value, limit = 160) {
     const text = String(value ?? "").replace(/\s+/g, " ").trim();
     return text.length > limit ? `${text.slice(0, limit)}...(len=${text.length})` : text;
+  }
+
+  function normalizeLabel(value) {
+    return String(value ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^@+/, "")
+      .toLowerCase();
   }
 
   function isVisible(element) {
@@ -75,6 +89,24 @@ SEND_EXPRESSION_TEMPLATE = r"""(async () => {
     const className = String(element.className || "").toLowerCase();
     const haystack = `${placeholder} ${ariaLabel} ${className}`;
     const rect = element.getBoundingClientRect();
+    const isChatInput = (
+      className.includes("chat-input") ||
+      Boolean(element.closest("[class*='chat-input']"))
+    );
+    const isEditorInput = (
+      className.includes("inputarea") ||
+      className.includes("monaco") ||
+      ariaLabel.includes("编辑器") ||
+      ariaLabel.includes("screen reader") ||
+      ariaLabel.includes("现在无法访问编辑器")
+    );
+
+    if (isEditorInput) {
+      score -= 500;
+    }
+    if (isChatInput) {
+      score += 400;
+    }
 
     if (tag === "textarea") {
       score += 60;
@@ -242,6 +274,36 @@ SEND_EXPRESSION_TEMPLATE = r"""(async () => {
     element.click();
   }
 
+  function isChatInputElement(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    const className = String(element.className || "").toLowerCase();
+    const ariaLabel = (element.getAttribute("aria-label") || "").toLowerCase();
+    return (
+      className.includes("chat-input") ||
+      Boolean(element.closest("[class*='chat-input']")) ||
+      ariaLabel.includes("solo coder") ||
+      ariaLabel.includes("builder") ||
+      ariaLabel.includes("chat")
+    );
+  }
+
+  function isEditorInputElement(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    const className = String(element.className || "").toLowerCase();
+    const ariaLabel = (element.getAttribute("aria-label") || "").toLowerCase();
+    return (
+      className.includes("inputarea") ||
+      className.includes("monaco") ||
+      ariaLabel.includes("编辑器") ||
+      ariaLabel.includes("screen reader") ||
+      ariaLabel.includes("现在无法访问编辑器")
+    );
+  }
+
   function submitByKeyboard(element) {
     element.focus();
     const options = {
@@ -262,6 +324,239 @@ SEND_EXPRESSION_TEMPLATE = r"""(async () => {
 
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function collectInputCandidates() {
+    const selectors = [
+      ".chat-input-v2-input-box-editable",
+      "[class*='chat-input'][role='textbox']",
+      "textarea",
+      "input[type='text']",
+      "input:not([type])",
+      "[contenteditable='true']",
+      "[role='textbox']",
+    ];
+    return Array.from(document.querySelectorAll(selectors.join(",")))
+      .filter((element) => isVisible(element) && !isDisabled(element))
+      .map((element) => ({
+        element,
+        score: scoreInput(element),
+        kind: isChatInputElement(element)
+          ? "chat"
+          : isEditorInputElement(element)
+            ? "editor"
+            : "generic",
+      }))
+      .sort((left, right) => right.score - left.score);
+  }
+
+  function summarizeInputCandidate(candidate) {
+    return {
+      kind: candidate.kind,
+      score: Math.round(candidate.score),
+      element: summarizeElement(candidate.element),
+    };
+  }
+
+  function findPrimaryInput() {
+    const candidates = collectInputCandidates();
+    if (candidates.length === 0) {
+      return {
+        input: null,
+        candidates,
+      };
+    }
+    const chatCandidate = candidates.find((candidate) => candidate.kind === "chat");
+    if (chatCandidate) {
+      return {
+        input: chatCandidate.element,
+        candidates,
+      };
+    }
+    return {
+      input: candidates[0].element,
+      candidates,
+    };
+  }
+
+  function clickIfVisible(element) {
+    if (!(element instanceof HTMLElement) || !isVisible(element) || isDisabled(element)) {
+      return false;
+    }
+    clickButton(element);
+    return true;
+  }
+
+  function findModeTrigger(mode) {
+    const selectorMap = {
+      solo: [
+        ".icube-mode-tab-item-solo",
+        ".icube-mode-tab-item.icube-mode-tab-item-solo",
+        ".icube-mode-tab-switch",
+      ],
+      ide: [
+        ".icube-mode-tab-item-ide",
+        ".icube-mode-tab-item.icube-mode-tab-item-ide",
+      ],
+    };
+    const selectors = selectorMap[mode] || [];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element instanceof HTMLElement && isVisible(element) && !isDisabled(element)) {
+        return {
+          element,
+          label: `click:${selector}`,
+        };
+      }
+    }
+
+    const allElements = Array.from(
+      document.querySelectorAll("button, [role='button'], a, div, span")
+    );
+    const soloByText = allElements.find((element) => {
+      const text = [
+        element.getAttribute("aria-label") || "",
+        element.getAttribute("title") || "",
+        element.textContent || "",
+        String(element.className || ""),
+      ].join(" ").toLowerCase();
+      return text.includes(mode);
+    });
+    if (soloByText instanceof HTMLElement && isVisible(soloByText) && !isDisabled(soloByText)) {
+      return {
+        element: soloByText,
+        label: `click:text=${mode}`,
+      };
+    }
+    return null;
+  }
+
+  async function switchToMode(mode) {
+    const actions = [];
+    if (mode === "current") {
+      return actions;
+    }
+
+    const trigger = findModeTrigger(mode);
+    if (trigger && clickIfVisible(trigger.element)) {
+      actions.push(trigger.label);
+      await sleep(1200);
+      return actions;
+    }
+
+    if (mode !== "solo") {
+      return actions;
+    }
+
+    const target = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.body;
+    const options = {
+      key: "\\",
+      code: "Backslash",
+      which: 220,
+      keyCode: 220,
+      bubbles: true,
+      cancelable: true,
+      altKey: true,
+      metaKey: true,
+      ctrlKey: false,
+      shiftKey: false,
+    };
+    target.dispatchEvent(new KeyboardEvent("keydown", options));
+    target.dispatchEvent(new KeyboardEvent("keyup", options));
+    actions.push("shortcut:Alt+Meta+Backslash");
+    await sleep(1200);
+    return actions;
+  }
+
+  function readSelectedAgent() {
+    const element = document.querySelector(".chat-input-selected-agent-name");
+    if (!(element instanceof HTMLElement)) {
+      return "";
+    }
+    return String(element.innerText || element.textContent || "").trim();
+  }
+
+  function isExpectedAgentSelected() {
+    if (!targetAgentName || targetAgentName === "current") {
+      return true;
+    }
+    return normalizeLabel(readSelectedAgent()) === normalizeLabel(targetAgentName);
+  }
+
+  async function ensureChatInput() {
+    const modeAttempts = [];
+    let state = findPrimaryInput();
+
+    for (let index = 0; index < 12; index += 1) {
+      const selectedAgent = readSelectedAgent();
+      state = findPrimaryInput();
+      if (
+        state.input &&
+        isChatInputElement(state.input) &&
+        isExpectedAgentSelected()
+      ) {
+        return {
+          input: state.input,
+          candidates: state.candidates,
+          modeAttempts,
+          selectedAgent,
+          agentMatched: true,
+        };
+      }
+
+      const actions = await switchToMode(targetMode);
+      if (actions.length > 0) {
+        modeAttempts.push(...actions);
+        state = findPrimaryInput();
+        if (
+          state.input &&
+          isChatInputElement(state.input) &&
+          isExpectedAgentSelected()
+        ) {
+          return {
+            input: state.input,
+            candidates: state.candidates,
+            modeAttempts,
+            selectedAgent: readSelectedAgent(),
+            agentMatched: true,
+          };
+        }
+      }
+
+      await sleep(500);
+    }
+
+    modeAttempts.push(...await switchToMode(targetMode));
+    state = findPrimaryInput();
+    if (state.input) {
+      if (isChatInputElement(state.input) && isExpectedAgentSelected()) {
+        return {
+          input: state.input,
+          candidates: state.candidates,
+          modeAttempts,
+          selectedAgent: readSelectedAgent(),
+          agentMatched: true,
+        };
+      }
+      const panelToggle = document.querySelector(
+        ".icube-panel-toggle-button, .icube-panel-toggle-button-icon"
+      );
+      if (clickIfVisible(panelToggle)) {
+        modeAttempts.push("click:panel-toggle");
+        await sleep(800);
+        state = findPrimaryInput();
+      }
+    }
+    return {
+      input: state.input,
+      candidates: state.candidates,
+      modeAttempts,
+      selectedAgent: readSelectedAgent(),
+      agentMatched: isExpectedAgentSelected(),
+    };
   }
 
   async function submitWithRetries(input, originalMessage) {
@@ -344,21 +639,27 @@ SEND_EXPRESSION_TEMPLATE = r"""(async () => {
     return null;
   }
 
-  const inputSelectors = [
-    "textarea",
-    "input[type='text']",
-    "input:not([type])",
-    "[contenteditable='true']",
-    "[role='textbox']",
-  ];
-
-  const inputs = Array.from(document.querySelectorAll(inputSelectors.join(",")))
-    .filter((element) => isVisible(element) && !isDisabled(element))
-    .sort((left, right) => scoreInput(right) - scoreInput(left));
-
-  const input = inputs[0];
-  if (!input) {
-    return { status: "no_input" };
+  const ready = await ensureChatInput();
+  const input = ready.input;
+  if (!ready.agentMatched) {
+    return {
+      status: "agent_mismatch",
+      modeTarget: targetMode,
+      agentTarget: targetAgentName,
+      selectedAgent: ready.selectedAgent,
+      modeAttempts: ready.modeAttempts,
+      candidates: ready.candidates.slice(0, 6).map(summarizeInputCandidate),
+    };
+  }
+  if (!input || !isChatInputElement(input)) {
+    return {
+      status: "no_input",
+      modeTarget: targetMode,
+      agentTarget: targetAgentName,
+      selectedAgent: ready.selectedAgent,
+      modeAttempts: ready.modeAttempts,
+      candidates: ready.candidates.slice(0, 6).map(summarizeInputCandidate),
+    };
   }
 
   const fillMode = fillInput(input, message);
@@ -367,11 +668,16 @@ SEND_EXPRESSION_TEMPLATE = r"""(async () => {
 
   return {
     status: submitResult.cleared ? "sent" : "submission_unverified",
+    modeTarget: targetMode,
+    agentTarget: targetAgentName,
+    selectedAgent: ready.selectedAgent,
     fillMode,
     submitMode: submitResult.submitMode,
     attempts: submitResult.attempts,
     inputCleared: submitResult.cleared,
     inputValueAfterSubmit: submitResult.finalValue,
+    modeAttempts: ready.modeAttempts,
+    candidates: ready.candidates.slice(0, 6).map(summarizeInputCandidate),
     input: summarizeElement(input),
     button: button ? summarizeElement(button) : null,
     messagePreview: preview(message),
@@ -459,8 +765,18 @@ def _extract_result_value(result: Mapping[str, Any]) -> Any:
     return inner
 
 
-def _build_send_expression(message: str) -> str:
-    return SEND_EXPRESSION_TEMPLATE.replace("__MESSAGE__", json.dumps(message, ensure_ascii=False))
+def _build_send_expression(
+    message: str,
+    *,
+    mode: str,
+    agent_name: str,
+) -> str:
+    return (
+        SEND_EXPRESSION_TEMPLATE
+        .replace("__MESSAGE__", json.dumps(message, ensure_ascii=False))
+        .replace("__TARGET_MODE__", json.dumps(mode, ensure_ascii=False))
+        .replace("__TARGET_AGENT_NAME__", json.dumps(agent_name, ensure_ascii=False))
+    )
 
 
 def _pick_target(
@@ -500,7 +816,13 @@ def _pick_target(
     )
 
 
-async def _send_message(target: CdpTarget, message: str) -> dict[str, Any]:
+async def _send_message(
+    target: CdpTarget,
+    message: str,
+    *,
+    mode: str,
+    agent_name: str,
+) -> dict[str, Any]:
     if not target.web_socket_debugger_url:
         raise RuntimeError(f"target 缺少 websocket: {target.id}")
 
@@ -509,7 +831,11 @@ async def _send_message(target: CdpTarget, message: str) -> dict[str, Any]:
         result = await client.send(
             "Runtime.evaluate",
             {
-                "expression": _build_send_expression(message),
+                "expression": _build_send_expression(
+                    message,
+                    mode=mode,
+                    agent_name=agent_name,
+                ),
                 "awaitPromise": True,
                 "returnByValue": True,
             },
@@ -528,21 +854,57 @@ async def _send_message(target: CdpTarget, message: str) -> dict[str, Any]:
     }
 
 
+async def _wait_target(
+    *,
+    host: str,
+    port: int,
+    url_substring: str,
+    title_substring: str,
+    timeout_seconds: float,
+) -> CdpTarget:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_error: Exception | None = None
+
+    while True:
+        try:
+            targets = fetch_targets(host, port)
+            return _pick_target(targets, url_substring, title_substring)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(DEFAULT_TARGET_POLL_SECONDS)
+
+    message = str(last_error) if last_error is not None else "page target wait failed"
+    raise RuntimeError(message)
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, Any]:
-    targets = fetch_targets(args.host, args.port)
-    target = _pick_target(
-        targets,
-        args.target_url_substring,
-        args.target_title_substring,
+    target = await _wait_target(
+        host=args.host,
+        port=args.port,
+        url_substring=args.target_url_substring,
+        title_substring=args.target_title_substring,
+        timeout_seconds=args.target_wait_seconds,
     )
-    payload = await _send_message(target, args.message)
+    payload = await _send_message(
+        target,
+        args.message,
+        mode=args.mode,
+        agent_name=args.agent_name,
+    )
     if args.wait_after_send_seconds > 0:
-      await asyncio.sleep(args.wait_after_send_seconds)
+        await asyncio.sleep(args.wait_after_send_seconds)
     return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="通过 CDP 向当前 Trae chat 输入并发送一条消息。")
+    parser = argparse.ArgumentParser(
+        description=(
+            "通过 CDP 向当前 Trae chat 输入并发送一条消息。"
+            "默认切到 IDE，并要求 agent 为 Builder。"
+        )
+    )
     parser.add_argument("--message", required=True, help="要发送的消息")
     parser.add_argument("--host", default=DEFAULT_REMOTE_DEBUGGING_HOST, help="CDP host")
     parser.add_argument("--port", type=int, default=DEFAULT_REMOTE_DEBUGGING_PORT, help="CDP port")
@@ -561,6 +923,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_WAIT_AFTER_SEND_SECONDS,
         help="发送后额外等待秒数",
+    )
+    parser.add_argument(
+        "--target-wait-seconds",
+        type=float,
+        default=DEFAULT_TARGET_WAIT_SECONDS,
+        help="等待 workbench page target 就绪的秒数",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("ide", "solo", "current"),
+        default=DEFAULT_CHAT_MODE,
+        help="发送前优先切换的模式，默认 ide",
+    )
+    parser.add_argument(
+        "--agent-name",
+        default=DEFAULT_AGENT_NAME,
+        help="发送前要求的已选 agent 名称；传 current 可跳过校验，默认 Builder",
     )
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     return parser

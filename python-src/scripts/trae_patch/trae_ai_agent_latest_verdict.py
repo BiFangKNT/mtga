@@ -3,12 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 TRACE_ID_RE = re.compile(r'trace_id="([0-9a-f]+)"')
 CONFIG_NAME_RE = re.compile(r'config_name: "([^"]+)"')
-BASE_URL_RE = re.compile(r'base_url:\s*Some\("([^"]+)"\)')
+CONFIG_SOURCE_RE = re.compile(r"config_source:\s*([A-Za-z]+)")
+BASE_URL_RE = re.compile(r'base_url:\s*Some\("([^"]*)"\)')
+IS_PRESET_RE = re.compile(r"is_preset:\s*(true|false)")
+USE_REMOTE_SERVICE_RE = re.compile(r"use_remote_service:\s*(true|false)")
 STATUS_RE = re.compile(r"Status:\s*(\d+)")
 UNKNOWN_EVENT_RE = re.compile(r'Unknown event: Event \{ event: "([^"]+)"')
 REQUEST_URL_RE = re.compile(r"\[HTTPClient\] request url (\S+)")
@@ -22,6 +26,9 @@ class TraceSummary:
     model_info_line: str | None = None
     config_name: str | None = None
     base_url: str | None = None
+    config_source: str | None = None
+    is_preset: bool | None = None
+    use_remote_service: bool | None = None
     ak_present: bool | None = None
     llm_raw_chat_url: str | None = None
     llm_raw_chat_status: int | None = None
@@ -35,7 +42,40 @@ class TraceSummary:
     main_routine_ok: bool = False
     latest_line_no: int = -1
 
+    def _is_completed(self) -> bool:
+        return self.task_status == "Completed" or self.main_routine_ok
+
+    def _preset_remote_verdict(self) -> str | None:
+        if self.is_preset is not True or self.use_remote_service is not True:
+            return None
+        if self._is_completed():
+            return "preset_remote_chat_completed"
+        if self.first_token_text is not None:
+            return "preset_remote_stream_consumed"
+        if self.provider_error_line:
+            return "preset_remote_provider_error"
+        return "preset_remote_model_info_only"
+
+    def _local_proxy_verdict(self) -> str | None:
+        if not self.base_url or "127.0.0.1" not in self.base_url:
+            return None
+        if self._is_completed():
+            return "local_proxy_chat_completed"
+        if self.first_token_text is not None:
+            return "local_proxy_stream_consumed"
+        if self.provider_error_line:
+            return "local_proxy_provider_error"
+        return "local_proxy_route"
+
     def verdict(self) -> str:
+        local_proxy_verdict = self._local_proxy_verdict()
+        if local_proxy_verdict is not None:
+            return local_proxy_verdict
+
+        preset_remote_verdict = self._preset_remote_verdict()
+        if preset_remote_verdict is not None:
+            return preset_remote_verdict
+
         result = "unknown"
         if self.base_url == "https://api.openai.com/v1" and self.provider_error_line:
             if "Incorrect API key provided: 111" in self.provider_error_line:
@@ -79,7 +119,10 @@ def parse_args() -> argparse.Namespace:
 def find_latest_log(explicit_log: Path | None) -> Path:
     if explicit_log is not None:
         return explicit_log
-    root = Path.home() / "AppData" / "Roaming" / "Trae" / "logs"
+    if sys.platform == "darwin":
+        root = Path.home() / "Library" / "Application Support" / "Trae" / "logs"
+    else:
+        root = Path.home() / "AppData" / "Roaming" / "Trae" / "logs"
     candidates = sorted(
         root.rglob("ai-agent_*_stdout.log"),
         key=lambda item: item.stat().st_mtime,
@@ -106,9 +149,18 @@ def handle_model_info(raw_line: str, summary: TraceSummary) -> bool:
     config_match = CONFIG_NAME_RE.search(raw_line)
     if config_match:
         summary.config_name = config_match.group(1)
+    config_source_match = CONFIG_SOURCE_RE.search(raw_line)
+    if config_source_match:
+        summary.config_source = config_source_match.group(1)
     base_url_match = BASE_URL_RE.search(raw_line)
     if base_url_match:
         summary.base_url = base_url_match.group(1)
+    is_preset_match = IS_PRESET_RE.search(raw_line)
+    if is_preset_match:
+        summary.is_preset = is_preset_match.group(1) == "true"
+    use_remote_service_match = USE_REMOTE_SERVICE_RE.search(raw_line)
+    if use_remote_service_match:
+        summary.use_remote_service = use_remote_service_match.group(1) == "true"
     summary.ak_present = "ak: Some(" in raw_line
     return True
 
@@ -220,7 +272,10 @@ def render_text(log_path: Path, summary: TraceSummary) -> str:
             f"trace_id={summary.trace_id}",
             f"verdict={summary.verdict()}",
             f"config_name={summary.config_name or '<none>'}",
-            f"base_url={summary.base_url or '<none>'}",
+            f"config_source={summary.config_source or '<none>'}",
+            f"is_preset={summary.is_preset}",
+            f"use_remote_service={summary.use_remote_service}",
+            f"base_url={(summary.base_url if summary.base_url is not None else '<none>')!r}",
             f"ak_present={summary.ak_present}",
             f"create_agent_task_url={summary.create_agent_task_url or '<none>'}",
             f"create_agent_task_status={summary.create_agent_task_status}",

@@ -1,0 +1,73 @@
+{
+  "entries": [
+    {
+      "module_sha256": "da8cc14db7fd1c0770d5399f51ee9200c427d1de6c0509fc688f6e5c070c1eac",
+      "module_size": 105489712,
+      "validated_at": "20260425T171610",
+      "site": {
+        "label": "default_handler_final_request_url_load",
+        "symbol": "default_handler_handle_sse_closure",
+        "address": "0x1204b3c",
+        "kind": "reqwest_request_url_pair_load",
+        "why": "DefaultSseProxyHandler 在 reqwest::Client::request 前最后一次装入 URL 对。",
+        "file_offset": "0x1204b3c",
+        "expected_bytes": "83 93 40 a9",
+        "branch_bytes": "f3 aa 27 94",
+        "return_rva": "0x1204b40",
+        "pointer_register": "x3",
+        "length_register": "x4"
+      },
+      "trampoline": {
+        "blob_hex": "83 00 00 10 44 05 80 d2 c0 03 5f d6 1f 20 03 d5 68 74 74 70 3a 2f 2f 31 32 37 2e 30 2e 30 2e 31 3a 31 38 30 38 33 2f 76 31 2f 63 68 61 74 2f 63 6f 6d 70 6c 65 74 69 6f 6e 73 00 00",
+        "blob_len": 60,
+        "new_url_text": "http://127.0.0.1:18083/v1/chat/completions",
+        "new_url_length": 42,
+        "new_url_offset": 16,
+        "code_size": 12,
+        "file_offset": "0x1bef708",
+        "expected_bytes": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+        "branch_distance_bytes": 10398668,
+        "usable_length_bytes": 2296,
+        "stub_rva": "0x1bef708",
+        "return_rva": "0x1204b40",
+        "pointer_register": "x3",
+        "length_register": "x4"
+      },
+      "compatibility_report": {
+        "status": "compatible_unknown",
+        "reason": "structure_compatible_hardened_runtime_lldb_may_fail",
+        "dll_path": "/Applications/Trae.app/Contents/Resources/app/modules/ai-agent/libai_agent.dylib",
+        "dll_size": 105489712,
+        "dll_mtime_ns": 1776657486000000000,
+        "dll_sha256": "da8cc14db7fd1c0770d5399f51ee9200c427d1de6c0509fc688f6e5c070c1eac",
+        "pattern": "/v1/chat/completions",
+        "pattern_count": 2,
+        "pattern_offsets": ["0x2499733", "0x24ef0cb"],
+        "url_copy_call_offset": 0,
+        "url_copy_call_file_offset": "0x2499733",
+        "url_copy_call_rva": "0x2499733",
+        "old_url_present": false,
+        "manifest_hit": false,
+        "manifest_path": null,
+        "manifest_error": null,
+        "macho_cpu_type": "0x100000c",
+        "lldb_path": "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb",
+        "codesign_runtime": true,
+        "get_task_allow": false
+      },
+      "validation": {
+        "artifact_root": "python-src/artifacts/trae_macos_offline_patch_session_runtime1",
+        "verdict": "local_proxy_chat_completed",
+        "loopback_hit": true,
+        "cdp_mode": "ide",
+        "cdp_agent_name": "Builder",
+        "trace_id": "e4ab016f0da886b6fd87899fb7e6d2be",
+        "launched_executable": "/Users/syxdyi/Applications/Trae-MTGA.app/Contents/MacOS/Electron"
+      },
+      "notes": [
+        "该 entry 基于固定副本 /Users/syxdyi/Applications/Trae-MTGA.app 的 runtime1 smoke 验证通过。",
+        "当前 manifest 供 macOS runtime patch 与 scripts/trae_patch 共用。"
+      ]
+    }
+  ]
+}

@@ -1,3 +1,7 @@
+# pyright: reportAttributeAccessIssue=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false
 from __future__ import annotations
 
 import argparse
@@ -2696,4 +2700,3 @@ write_process_memory = _write_memory
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

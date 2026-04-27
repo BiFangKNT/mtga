@@ -46,7 +46,8 @@ const DEFAULT_RUNTIME_OPTIONS: RuntimeOptions = {
 
 const DEFAULT_PROXY_MODE: ProxyMode = "trae_official_base_url";
 const DEFAULT_TRAE_PATH = "";
-const DEFAULT_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
+const WINDOWS_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
+const MACOS_TRAE_DIALOG_PATH = "/Applications/Trae.app";
 
 const FRONTEND_LOG_LIMIT = 2000;
 const LAZY_WARMUP_SHOW_DELAY_MS = 120;
@@ -186,6 +187,13 @@ const formatUnknownError = (error: unknown) => {
     }
   }
   return "";
+};
+
+const getDefaultTraeDialogPath = () => {
+  if (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)) {
+    return MACOS_TRAE_DIALOG_PATH;
+  }
+  return WINDOWS_TRAE_DIALOG_PATH;
 };
 
 const isLazyWarmupPhase = (value: unknown): value is LazyWarmupEventPayload["phase"] =>
@@ -1226,7 +1234,8 @@ export const useMtgaStore = () => {
     }
 
     const currentPath = coerceText(traePath.value).trim();
-    const resolveSource = currentPath || DEFAULT_TRAE_DIALOG_PATH;
+    const fallbackPath = getDefaultTraeDialogPath();
+    const resolveSource = currentPath || fallbackPath;
     const resolvedPathResult = await api.resolveTraeDialogPath({ path: resolveSource });
     const resolvedPath = coerceText(resolvedPathResult?.path).trim();
     const defaultPath = resolvedPath || currentPath || undefined;
@@ -1235,10 +1244,10 @@ export const useMtgaStore = () => {
       appendLog("正在使用 Tauri dialog 选择 Trae 路径...");
       const { open } = await import("@tauri-apps/plugin-dialog");
       const options = {
-        title: "选择 Trae 可执行文件",
+        title: "选择 Trae 应用或可执行文件",
         multiple: false,
         directory: false,
-        filters: [{ name: "Trae 可执行文件", extensions: ["exe"] }],
+        filters: [{ name: "Trae 应用", extensions: ["app", "exe"] }],
       };
       const selected = await open(defaultPath ? { ...options, defaultPath } : options);
       const selectedPath = typeof selected === "string" ? selected.trim() : "";
@@ -1260,7 +1269,7 @@ export const useMtgaStore = () => {
       );
     }
 
-    const result = await api.browseTraePath({ path: currentPath || DEFAULT_TRAE_DIALOG_PATH });
+    const result = await api.browseTraePath({ path: currentPath || fallbackPath });
     if (!result) {
       appendLog("浏览 Trae 路径失败");
       return false;
