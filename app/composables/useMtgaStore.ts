@@ -14,6 +14,8 @@ import type {
   ProxyMode,
   ProxyRuntimeStatusPayload,
   ProxyStartStepEvent,
+  ProxyTrace,
+  ProxyTraceSummary,
   SystemPromptItem,
 } from "./mtgaTypes";
 
@@ -24,7 +26,13 @@ type RuntimeOptions = {
   streamMode: "true" | "false";
 };
 
-type PanelTarget = "config-group" | "global-config" | "main-tabs" | "system-prompts" | "settings";
+type PanelTarget =
+  | "config-group"
+  | "global-config"
+  | "main-tabs"
+  | "proxy-logs"
+  | "system-prompts"
+  | "settings";
 type LazyWarmupStatus = "idle" | "running" | "done" | "error";
 
 const DEFAULT_APP_INFO: AppInfo = {
@@ -50,6 +58,19 @@ const WINDOWS_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
 const MACOS_TRAE_DIALOG_PATH = "/Applications/Trae.app";
 
 const FRONTEND_LOG_LIMIT = 2000;
+const PROXY_REQUEST_LOG_PATTERN = /^\d{2}:\d{2}:\d{2}\.\d{3} \[[0-9a-f]{6}\] /;
+const PROXY_REQUEST_SUMMARY_MARKERS = [
+  "收到 Chat Completions 请求",
+  "返回流式响应",
+  "返回非流式 JSON 响应",
+  "代理服务未就绪",
+  "解析 JSON 失败",
+  "鉴权失败",
+  "上游响应不是 JSON 对象",
+  "目标 API HTTP 错误",
+  "连接目标 API 时出错",
+  "发生意外错误",
+];
 const LAZY_WARMUP_SHOW_DELAY_MS = 120;
 const LAZY_WARMUP_DONE_PEEK_MS = 960;
 const LAZY_WARMUP_HIDE_MS = 850;
@@ -72,6 +93,7 @@ const isPanelTarget = (value: unknown): value is PanelTarget =>
   value === "config-group" ||
   value === "global-config" ||
   value === "main-tabs" ||
+  value === "proxy-logs" ||
   value === "system-prompts" ||
   value === "settings";
 
@@ -189,6 +211,13 @@ const formatUnknownError = (error: unknown) => {
   return "";
 };
 
+const shouldKeepRuntimeLog = (message: string) => {
+  if (!PROXY_REQUEST_LOG_PATTERN.test(message)) {
+    return true;
+  }
+  return PROXY_REQUEST_SUMMARY_MARKERS.some((marker) => message.includes(marker));
+};
+
 const getDefaultTraeDialogPath = () => {
   if (typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)) {
     return MACOS_TRAE_DIALOG_PATH;
@@ -272,6 +301,114 @@ const normalizeSystemPromptList = (value: unknown): SystemPromptItem[] => {
   return normalized;
 };
 
+const isProxyTraceStatus = (value: unknown): value is ProxyTraceSummary["status"] =>
+  value === "active" || value === "completed" || value === "failed" || value === "cancelled";
+
+const normalizeProxyTraceSummary = (value: unknown): ProxyTraceSummary | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const traceId = coerceText(value.trace_id).trim();
+  const requestId = coerceText(value.request_id).trim();
+  const status = value.status;
+  const method = coerceText(value.method).trim();
+  const requestPath = coerceText(value.request_path).trim();
+  const startedAt = coerceText(value.started_at).trim();
+  if (!traceId || !requestId || !isProxyTraceStatus(status) || !method || !requestPath) {
+    return null;
+  }
+  const nextTrace: ProxyTraceSummary = {
+    trace_id: traceId,
+    request_id: requestId,
+    status,
+    method,
+    request_path: requestPath,
+    is_stream: value.is_stream === true,
+    started_at: startedAt,
+  };
+  const textFields = ["request_model", "provider", "upstream_model", "ended_at", "error"] as const;
+  textFields.forEach((field) => {
+    const text = coerceText(value[field]).trim();
+    if (text) {
+      nextTrace[field] = text;
+    }
+  });
+  const numberFields = [
+    "status_code",
+    "duration_ms",
+    "chunk_count",
+    "events_count",
+    "request_body_bytes",
+    "response_body_bytes",
+  ] as const;
+  numberFields.forEach((field) => {
+    const numberValue = Number(value[field]);
+    if (Number.isFinite(numberValue)) {
+      nextTrace[field] = numberValue;
+    }
+  });
+  nextTrace.request_body_truncated = value.request_body_truncated === true;
+  nextTrace.response_body_truncated = value.response_body_truncated === true;
+  return nextTrace;
+};
+
+const normalizeProxyTraceList = (value: unknown): ProxyTraceSummary[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => normalizeProxyTraceSummary(item))
+    .filter((item): item is ProxyTraceSummary => item !== null);
+};
+
+const normalizeProxyTraceDetail = (value: unknown): ProxyTrace | null => {
+  const summary = normalizeProxyTraceSummary(value);
+  if (!summary || !isRecord(value)) {
+    return null;
+  }
+  const detail: ProxyTrace = {
+    ...summary,
+    events: [],
+  };
+  const routeMode = value.route_mode;
+  if (isProxyMode(routeMode)) {
+    detail.route_mode = routeMode;
+  }
+  const textFields = [
+    "request_api",
+    "client_model",
+    "resolved_target_label",
+    "target_api_base_url",
+    "target_model",
+    "first_chunk_at",
+    "finish_reason",
+  ] as const;
+  textFields.forEach((field) => {
+    const text = coerceText(value[field]).trim();
+    if (text) {
+      (detail as Record<string, unknown>)[field] = text;
+    }
+  });
+  if (isRecord(value.request_body)) {
+    detail.request_body = value.request_body;
+  }
+  if (isRecord(value.response_body)) {
+    detail.response_body = value.response_body;
+  }
+  if (Array.isArray(value.events)) {
+    detail.events = value.events
+      .filter(isRecord)
+      .map((event) => ({
+        at: coerceText(event.at),
+        kind: coerceText(event.kind),
+        message: coerceText(event.message) || undefined,
+        data: isRecord(event.data) ? event.data : undefined,
+      }))
+      .filter((event) => event.at && event.kind);
+  }
+  return detail;
+};
+
 const clampIndex = (value: number, max: number) => {
   if (max <= 0) {
     return 0;
@@ -295,6 +432,8 @@ export const useMtgaStore = () => {
   }));
   const logs = useState<string[]>("mtga-logs", () => []);
   const systemPrompts = useState<SystemPromptItem[]>("mtga-system-prompts", () => []);
+  const proxyTraces = useState<ProxyTraceSummary[]>("mtga-proxy-traces", () => []);
+  const selectedProxyTrace = useState<ProxyTrace | null>("mtga-selected-proxy-trace", () => null);
   const logCursor = useState<number>("mtga-log-cursor", () => 0);
   const logStreamActive = useState<boolean>("mtga-log-stream-active", () => false);
   const appInfo = useState<AppInfo>("mtga-app-info", () => ({ ...DEFAULT_APP_INFO }));
@@ -399,6 +538,9 @@ export const useMtgaStore = () => {
   };
 
   const appendLog = (message: string) => {
+    if (!shouldKeepRuntimeLog(message)) {
+      return;
+    }
     logs.value.push(message);
     const overflow = logs.value.length - FRONTEND_LOG_LIMIT;
     if (overflow > 0) {
@@ -1330,6 +1472,60 @@ export const useMtgaStore = () => {
     return true;
   };
 
+  const loadProxyTraces = async () => {
+    const result = await api.proxyTracesList({ limit: 300 });
+    if (!result) {
+      appendLog("加载代理日志失败：无法连接后端");
+      return false;
+    }
+    proxyTraces.value = normalizeProxyTraceList(result.items);
+    const selectedTraceId = selectedProxyTrace.value?.trace_id;
+    if (selectedTraceId && !proxyTraces.value.some((item) => item.trace_id === selectedTraceId)) {
+      selectedProxyTrace.value = null;
+    }
+    return true;
+  };
+
+  const loadProxyTraceDetail = async (traceId: string) => {
+    const normalizedTraceId = traceId.trim();
+    if (!normalizedTraceId) {
+      selectedProxyTrace.value = null;
+      return false;
+    }
+    const result = await api.proxyTraceDetail({ trace_id: normalizedTraceId });
+    const detail = normalizeProxyTraceDetail(result);
+    if (!detail) {
+      appendLog("加载代理日志详情失败：记录不存在");
+      selectedProxyTrace.value = null;
+      return false;
+    }
+    selectedProxyTrace.value = detail;
+    return true;
+  };
+
+  const clearProxyTraces = async () => {
+    const result = await api.proxyTracesClear();
+    if (!result) {
+      appendLog("清空代理日志失败：无法连接后端");
+      return false;
+    }
+    const deletedCount = Number(result.deleted_count || 0);
+    const keptActiveCount = Number(result.kept_active_count || 0);
+    appendLog(
+      keptActiveCount > 0
+        ? `已清空 ${deletedCount} 条代理日志，保留 ${keptActiveCount} 条进行中记录`
+        : `已清空 ${deletedCount} 条代理日志`,
+    );
+    await loadProxyTraces();
+    if (
+      selectedProxyTrace.value &&
+      !proxyTraces.value.some((item) => item.trace_id === selectedProxyTrace.value?.trace_id)
+    ) {
+      selectedProxyTrace.value = null;
+    }
+    return true;
+  };
+
   const updateSystemPrompt = async (payload: { hash: string; edited_text: string }) => {
     const result = await api.systemPromptsUpdate(payload);
     const ok = applyInvokeResult(result, "更新系统提示词");
@@ -1410,6 +1606,8 @@ export const useMtgaStore = () => {
     runtimeOptions,
     logs,
     systemPrompts,
+    proxyTraces,
+    selectedProxyTrace,
     logCursor,
     appInfo,
     hasNewVersion,
@@ -1463,6 +1661,9 @@ export const useMtgaStore = () => {
     closeUpdateDialog,
     openUpdateRelease,
     loadSystemPrompts,
+    loadProxyTraces,
+    loadProxyTraceDetail,
+    clearProxyTraces,
     updateSystemPrompt,
     deleteSystemPrompts,
     runPlaceholder,

@@ -383,6 +383,12 @@ def _resolve_trae_path(payload: ProxyStartPayload) -> str:
     return trae_path.strip()
 
 
+def _attach_route_mode(config: dict[str, Any], proxy_mode: str) -> dict[str, Any]:
+    next_config = dict(config)
+    next_config["route_mode"] = proxy_mode
+    return next_config
+
+
 def _ensure_global_config_ready_silent() -> OperationResult:
     config_store = _get_config_store()
     result = proxy_orchestration.ensure_global_config_ready(
@@ -773,6 +779,7 @@ async def proxy_start(body: ProxyStartPayload) -> dict[str, Any]:
 
         proxy_mode = _resolve_proxy_mode(body)
         log_func(f"当前代理模式: {proxy_mode}")
+        config = _attach_route_mode(config, proxy_mode)
         if proxy_mode == "trae_native":
             result = _proxy_start_all_trae(body, config, log_func)
             return build_result_payload(result, logs, "代理服务器启动完成")
@@ -823,12 +830,16 @@ async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
 
     trae_manager = _get_trae_route_manager()
     if trae_manager.is_running():
-        result = trae_manager.apply_runtime_config(config)
+        result = trae_manager.apply_runtime_config(
+            _attach_route_mode(config, "trae_native")
+        )
         return build_result_payload(result, logs, "代理配置应用完成")
 
     trae_official_manager = _get_trae_official_route_manager()
     if trae_official_manager.is_running():
-        result = trae_official_manager.apply_runtime_config(config)
+        result = trae_official_manager.apply_runtime_config(
+            _attach_route_mode(config, "trae_official_base_url")
+        )
         return build_result_payload(result, logs, "代理配置应用完成")
 
     instance = _get_proxy_instance()
@@ -842,7 +853,7 @@ async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
             "代理配置应用完成",
         )
 
-    result = instance.apply_runtime_config(config)
+    result = instance.apply_runtime_config(_attach_route_mode(config, "reverse_hosts"))
     return build_result_payload(result, logs, "代理配置应用完成")
 
 
@@ -892,6 +903,7 @@ async def proxy_start_all(body: ProxyStartPayload) -> dict[str, Any]:
             log_func("=== 开始一键启动全部服务 ===")
             proxy_mode = _resolve_proxy_mode(body)
             log_func(f"当前代理模式: {proxy_mode}")
+            config = _attach_route_mode(config, proxy_mode)
             if proxy_mode == "trae_native":
                 result = _proxy_start_all_trae(body, config, log_func)
             elif proxy_mode == "trae_official_base_url":

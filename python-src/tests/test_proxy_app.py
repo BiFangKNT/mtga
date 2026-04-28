@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import tempfile
+import shutil
 import unittest
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,12 +19,22 @@ from modules.proxy.upstream_adapter import (
     RESPONSES_REQUEST_API,
     UpstreamRoute,
 )
+from modules.runtime.proxy_trace_store import clear_proxy_traces, get_proxy_trace, list_proxy_traces
+
+_TEST_TEMP_ROOT = Path(__file__).resolve().parent / ".tmp"
 
 
 @dataclass(frozen=True)
 class DummyResourceManager:
     user_data_dir: str
     program_resource_dir: str
+
+
+def _make_test_temp_dir(prefix: str) -> str:
+    _TEST_TEMP_ROOT.mkdir(exist_ok=True)
+    path = _TEST_TEMP_ROOT / f"{prefix}{uuid.uuid4().hex}"
+    path.mkdir()
+    return str(path)
 
 
 def _build_proxy_config(
@@ -65,7 +76,9 @@ class DummyAsyncClosableStream:
 
 class ProxyAppGeminiTests(unittest.TestCase):
     def test_mtga_auth_header_is_not_reused_as_upstream_api_key(self) -> None:
-        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-auth-boundary-")
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-auth-boundary-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
         resource_manager = DummyResourceManager(
             user_data_dir=temp_dir,
             program_resource_dir=temp_dir,
@@ -103,26 +116,29 @@ class ProxyAppGeminiTests(unittest.TestCase):
             return route
 
         transport = app_layer.transport
-        with patch.object(
-            transport.adapter,
-            "build_route",
-            side_effect=fake_build_route,
-        ), patch.object(
-            transport.adapter,
-            "create_chat_completion",
-            return_value={
-                "id": "chatcmpl_123",
-                "object": "chat.completion",
-                "created": 123,
-                "model": "gemini-2.5-pro",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": "ok"},
-                        "finish_reason": "stop",
-                    }
-                ],
-            },
+        with (
+            patch.object(
+                transport.adapter,
+                "build_route",
+                side_effect=fake_build_route,
+            ),
+            patch.object(
+                transport.adapter,
+                "create_chat_completion",
+                return_value={
+                    "id": "chatcmpl_123",
+                    "object": "chat.completion",
+                    "created": 123,
+                    "model": "gemini-2.5-pro",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            ),
         ):
             client = app_layer.app.test_client()
             response = client.post(
@@ -138,9 +154,22 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(captured_fallback_api_key["value"], "")
         self.assertTrue(any("下游 Authorization 仅用于 MTGA 鉴权" in item for item in logs))
+        traces = list_proxy_traces()
+        self.assertEqual(len(traces), 1)
+        trace = get_proxy_trace(traces[0]["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["status"], "completed")
+        self.assertEqual(trace["status_code"], 200)
+        self.assertEqual(trace["provider"], GEMINI_PROVIDER)
+        self.assertEqual(trace["request_model"], "mapped-model")
+        self.assertEqual(trace["target_model"], "gemini-2.5-pro")
+        self.assertIn("request_body", trace)
+        self.assertIn("response_body", trace)
 
     def test_developer_message_enters_system_prompt_override_chain(self) -> None:
-        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-developer-")
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-developer-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
         resource_manager = DummyResourceManager(
             user_data_dir=temp_dir,
             program_resource_dir=temp_dir,
@@ -184,7 +213,8 @@ class ProxyAppGeminiTests(unittest.TestCase):
         )
 
     def test_gemini_non_stream_fallback_preserves_stream_intent(self) -> None:
-        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-")
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
         resource_manager = DummyResourceManager(
             user_data_dir=temp_dir,
             program_resource_dir=temp_dir,
@@ -236,10 +266,13 @@ class ProxyAppGeminiTests(unittest.TestCase):
             return response_payload
 
         transport = app_layer.transport
-        with patch.object(transport.adapter, "build_route", return_value=route), patch.object(
-            transport.adapter,
-            "create_chat_completion",
-            side_effect=fake_create_chat_completion,
+        with (
+            patch.object(transport.adapter, "build_route", return_value=route),
+            patch.object(
+                transport.adapter,
+                "create_chat_completion",
+                side_effect=fake_create_chat_completion,
+            ),
         ):
             client = app_layer.app.test_client()
             response = client.post(
@@ -271,7 +304,9 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertTrue(any("SSE 记录完成" in item for item in logs))
 
     def test_gemini_stream_is_forwarded_to_upstream(self) -> None:
-        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-stream-")
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-stream-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
         resource_manager = DummyResourceManager(
             user_data_dir=temp_dir,
             program_resource_dir=temp_dir,
@@ -337,10 +372,13 @@ class ProxyAppGeminiTests(unittest.TestCase):
             )
 
         transport = app_layer.transport
-        with patch.object(transport.adapter, "build_route", return_value=route), patch.object(
-            transport.adapter,
-            "create_chat_completion",
-            side_effect=fake_create_chat_completion,
+        with (
+            patch.object(transport.adapter, "build_route", return_value=route),
+            patch.object(
+                transport.adapter,
+                "create_chat_completion",
+                side_effect=fake_create_chat_completion,
+            ),
         ):
             client = app_layer.app.test_client()
             response = client.post(
@@ -369,11 +407,24 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertGreater(log_files[0].stat().st_size, 0)
         self.assertTrue(any("返回流式响应" in item for item in logs))
         self.assertFalse(any("Gemini 上游流式返回兼容性较差" in item for item in logs))
+        traces = list_proxy_traces()
+        self.assertEqual(len(traces), 1)
+        trace = get_proxy_trace(traces[0]["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["status"], "completed")
+        self.assertEqual(trace["chunk_count"], 2)
+        self.assertIn("response_body", trace)
+        event_text = str(trace["events"])
+        self.assertIn("调试请求头/请求体已省略", event_text)
+        self.assertNotIn("--- 请求体 (调试模式) ---", event_text)
+        self.assertNotIn("Bearer mtga-auth", event_text)
 
 
 class ProxyAppOpenAIResponseTests(unittest.TestCase):
     def test_openai_response_stream_is_forwarded_and_closed_on_disconnect(self) -> None:
-        temp_dir = tempfile.mkdtemp(prefix="mtga-proxy-app-openai-response-")
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-openai-response-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
         resource_manager = DummyResourceManager(
             user_data_dir=temp_dir,
             program_resource_dir=temp_dir,
@@ -437,10 +488,13 @@ class ProxyAppOpenAIResponseTests(unittest.TestCase):
         )
 
         transport = app_layer.transport
-        with patch.object(transport.adapter, "build_route", return_value=route), patch.object(
-            transport.adapter,
-            "create_chat_completion",
-            return_value=upstream_stream,
+        with (
+            patch.object(transport.adapter, "build_route", return_value=route),
+            patch.object(
+                transport.adapter,
+                "create_chat_completion",
+                return_value=upstream_stream,
+            ),
         ):
             client = app_layer.app.test_client()
             response = client.post(

@@ -5,10 +5,12 @@ import contextlib
 import inspect
 import json
 import logging
+import re
 import threading
 import time
 import uuid
 from collections.abc import Callable, Generator
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from flask import Flask, Response, jsonify, request
@@ -22,12 +24,27 @@ from modules.proxy.upstream_adapter import (
 )
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
+from modules.runtime.proxy_trace_store import (
+    ProxyTraceBodyAccumulator,
+    add_proxy_trace_event,
+    capture_proxy_trace_body,
+    finish_proxy_trace,
+    start_proxy_trace,
+    update_proxy_trace,
+)
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
 
 
 class ProxyApp:
     """代理服务的领域逻辑：配置解析 + Flask 路由 + 上游转发。"""
+
+    _TRACE_LOG_HEADER_REDACTION_PATTERN = re.compile(
+        r"(?im)^(authorization|proxy-authorization|x-api-key|x-goog-api-key):\s*.+$"
+    )
+    _TRACE_LOG_JSON_REDACTION_PATTERN = re.compile(
+        r'(?i)("?(?:api_key|authorization|access_token|refresh_token|password|secret)"?\s*[:=]\s*)("[^"]*"|\S+)'
+    )
 
     def __init__(
         self,
@@ -55,6 +72,7 @@ class ProxyApp:
         self.custom_model_id = ""
         self.target_model_id = ""
         self.stream_mode: str | None = None
+        self.route_mode = str(self.config.get("route_mode") or "")
         self.debug_mode = False
         self.disable_ssl_strict_mode = False
         self.system_prompt_store = SystemPromptStore(resource_manager)
@@ -108,6 +126,7 @@ class ProxyApp:
                 "custom_model_id": self.custom_model_id,
                 "target_model_id": self.target_model_id,
                 "stream_mode": self.stream_mode,
+                "route_mode": self.route_mode,
                 "debug_mode": self.debug_mode,
                 "auth": self.auth,
                 "transport": self.transport,
@@ -119,9 +138,7 @@ class ProxyApp:
             transport = self.transport
             if transport is not None:
                 key = id(transport)
-                self._transport_ref_counts[key] = (
-                    self._transport_ref_counts.get(key, 0) + 1
-                )
+                self._transport_ref_counts[key] = self._transport_ref_counts.get(key, 0) + 1
             return {
                 "inbound_route": self.inbound_route,
                 "target_api_base_url": self.target_api_base_url,
@@ -129,6 +146,7 @@ class ProxyApp:
                 "custom_model_id": self.custom_model_id,
                 "target_model_id": self.target_model_id,
                 "stream_mode": self.stream_mode,
+                "route_mode": self.route_mode,
                 "debug_mode": self.debug_mode,
                 "auth": self.auth,
                 "transport": transport,
@@ -191,6 +209,11 @@ class ProxyApp:
             )
 
         new_auth = ProxyAuth(new_proxy_config.mtga_auth_key)
+        next_route_mode = self.route_mode
+        if isinstance(raw_config, dict):
+            route_mode_obj = raw_config.get("route_mode")
+            if isinstance(route_mode_obj, str):
+                next_route_mode = route_mode_obj.strip()
         new_transport = ProxyTransport(
             resource_manager=self.resource_manager,
             disable_ssl_strict_mode=new_proxy_config.disable_ssl_strict_mode,
@@ -205,6 +228,7 @@ class ProxyApp:
             self.custom_model_id = new_proxy_config.custom_model_id
             self.target_model_id = new_proxy_config.target_model_id
             self.stream_mode = new_proxy_config.stream_mode
+            self.route_mode = next_route_mode
             self.debug_mode = new_proxy_config.debug_mode
             self.disable_ssl_strict_mode = new_proxy_config.disable_ssl_strict_mode
             self.auth = new_auth
@@ -225,6 +249,10 @@ class ProxyApp:
         base = time.strftime("%H:%M:%S", time.localtime(now))
         ms = int((now % 1) * 1000)
         return f"{base}.{ms:03d}"
+
+    @staticmethod
+    def _timestamp_iso() -> str:
+        return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _is_proxy_stream_response(
@@ -267,6 +295,43 @@ class ProxyApp:
 
     def _log_request(self, request_id: str, message: str) -> None:
         self.log_func(f"{self._timestamp_ms()} [{request_id}] {message}")
+
+    @classmethod
+    def _sanitize_trace_log_message(cls, message: str) -> str:
+        if message.startswith("--- 请求头 (调试模式) ---"):
+            return "调试请求头/请求体已省略，详见结构化 request_body"
+        if message.startswith("--- 完整响应体 (调试模式) ---"):
+            return "调试响应体已省略，详见结构化 response_body"
+
+        header_redacted = cls._TRACE_LOG_HEADER_REDACTION_PATTERN.sub(
+            lambda match: f"{match.group(1)}: <redacted>",
+            message,
+        )
+        return cls._TRACE_LOG_JSON_REDACTION_PATTERN.sub(
+            lambda match: f'{match.group(1)}"<redacted>"',
+            header_redacted,
+        )
+
+    @staticmethod
+    def _yield_downstream_bytes(
+        payload: bytes,
+        *,
+        on_cancelled: Callable[[str], None],
+        log: Callable[[str], None],
+        disconnect_message: str,
+        write_error_prefix: str,
+    ) -> Generator[bytes, None, bool]:
+        try:
+            yield payload
+            return True
+        except GeneratorExit:
+            on_cancelled("downstream disconnected")
+            log(disconnect_message)
+            raise
+        except Exception as downstream_exc:  # noqa: BLE001
+            on_cancelled(str(downstream_exc))
+            log(f"{write_error_prefix}: {downstream_exc}")
+            return False
 
     def _get_mapped_model_id(self) -> str:
         return self.custom_model_id
@@ -433,9 +498,7 @@ class ProxyApp:
         messages_obj = request_data.get("messages")
         if isinstance(messages_obj, list):
             messages = cast(list[Any], messages_obj)
-            indexed_hashes, capture_entries = self._collect_message_system_prompt_entries(
-                messages
-            )
+            indexed_hashes, capture_entries = self._collect_message_system_prompt_entries(messages)
 
             if not capture_entries:
                 return
@@ -459,8 +522,8 @@ class ProxyApp:
                 request_data["messages"] = next_messages
             return
 
-        instructions_hash, indexed_hashes, capture_entries = (
-            self._collect_response_prompt_entries(request_data)
+        instructions_hash, indexed_hashes, capture_entries = self._collect_response_prompt_entries(
+            request_data
         )
 
         if not capture_entries:
@@ -561,9 +624,7 @@ class ProxyApp:
         self._apply_debug_logging(self.debug_mode)
 
         models_route = self._build_route(self.inbound_route, "models")
-        chat_completions_route = self._build_route(
-            self.inbound_route, "chat/completions"
-        )
+        chat_completions_route = self._build_route(self.inbound_route, "chat/completions")
 
         self.app.add_url_rule(models_route, "get_models", self._get_models, methods=["GET"])
         self.app.add_url_rule(
@@ -581,9 +642,7 @@ class ProxyApp:
         self.log_func(f"收到模型列表请求 {self._build_route(inbound_route, 'models')}")
         if not auth:
             self.log_func("代理鉴权未就绪")
-            return jsonify(
-                {"error": {"message": "Proxy not ready", "type": "server_error"}}
-            ), 500
+            return jsonify({"error": {"message": "Proxy not ready", "type": "server_error"}}), 500
 
         auth_header = request.headers.get("Authorization")
         if not auth.verify(auth_header):
@@ -627,22 +686,68 @@ class ProxyApp:
         self,
     ) -> tuple[Response, int] | Response:
         request_id = self._new_request_id()
-
-        def log(message: str) -> None:
-            self._log_request(request_id, message)
-
         snapshot = self._snapshot_chat_runtime_state()
         inbound_route = str(snapshot["inbound_route"])
         target_model_id = str(snapshot["target_model_id"])
         stream_mode = snapshot["stream_mode"]
+        route_mode = str(snapshot["route_mode"] or "")
         debug_mode = bool(snapshot["debug_mode"])
         auth = snapshot["auth"]
         transport = snapshot["transport"]
         proxy_config_obj = snapshot["proxy_config"]
-        proxy_config = (
-            proxy_config_obj if isinstance(proxy_config_obj, ProxyConfig) else None
-        )
+        proxy_config = proxy_config_obj if isinstance(proxy_config_obj, ProxyConfig) else None
         transport_released = False
+        trace_finished = False
+        trace_id = start_proxy_trace(
+            request_id=request_id,
+            method=request.method,
+            request_path=request.path,
+            route_mode=route_mode or None,
+        )
+
+        def trace_event(
+            kind: str,
+            message: str | None = None,
+            data: dict[str, Any] | None = None,
+        ) -> None:
+            add_proxy_trace_event(trace_id, kind=kind, message=message, data=data)
+
+        def finish_trace_once(  # noqa: PLR0913
+            *,
+            status: str,
+            status_code: int | None = None,
+            response_body: Any | None = None,
+            error: str | None = None,
+            chunk_count: int | None = None,
+            finish_reason: str | None = None,
+        ) -> None:
+            nonlocal trace_finished
+            if trace_finished:
+                return
+            trace_finished = True
+            if (
+                isinstance(response_body, dict)
+                and "bytes" in response_body
+                and "truncated" in response_body
+            ):
+                captured_response_body = cast(Any, response_body)
+            elif response_body is not None:
+                captured_response_body = capture_proxy_trace_body(response_body)
+            else:
+                captured_response_body = None
+            finish_proxy_trace(
+                trace_id,
+                status=cast(Any, status),
+                status_code=status_code,
+                response_body=captured_response_body,
+                error=error,
+                chunk_count=chunk_count,
+                finish_reason=finish_reason,
+            )
+
+        def log(message: str) -> None:
+            self._log_request(request_id, message)
+            trace_event("log", self._sanitize_trace_log_message(message))
 
         def release_transport() -> None:
             nonlocal transport_released
@@ -651,13 +756,11 @@ class ProxyApp:
             transport_released = True
             self._release_transport_ref(transport)
 
-        log(
-            "收到 Chat Completions 请求 "
-            f"{self._build_route(inbound_route, 'chat/completions')}"
-        )
+        log(f"收到 Chat Completions 请求 {self._build_route(inbound_route, 'chat/completions')}")
 
         if not (auth and transport and proxy_config):
             log("代理服务未就绪")
+            finish_trace_once(status="failed", status_code=500, error="Proxy not ready")
             release_transport()
             return jsonify({"error": "Proxy not ready"}), 500
 
@@ -684,6 +787,11 @@ class ProxyApp:
         if not isinstance(request_data_obj, dict):
             log("解析 JSON 失败或请求不是 JSON 格式")
             log(f"Content-Type: {request.headers.get('Content-Type')}")
+            finish_trace_once(
+                status="failed",
+                status_code=400,
+                error="Invalid JSON or Content-Type",
+            )
             release_transport()
             return jsonify(
                 {
@@ -697,6 +805,8 @@ class ProxyApp:
         request_data = cast(dict[str, Any], request_data_obj)
         self._try_apply_system_prompt_overrides(request_data=request_data, log=log)
 
+        raw_client_model = request_data.get("model")
+        client_model = raw_client_model if isinstance(raw_client_model, str) else ""
         client_requested_stream = request_data.get("stream", False)
         log(f"客户端请求的流模式: {client_requested_stream}")
 
@@ -718,9 +828,23 @@ class ProxyApp:
                 log(f"请求中没有 stream 参数，设置为 {stream_value}")
                 request_data["stream"] = stream_value
 
+        update_proxy_trace(
+            trace_id,
+            request_model=client_model or target_model_id,
+            client_model=client_model or None,
+            target_model=target_model_id,
+            is_stream=bool(request_data.get("stream", False)),
+            request_body=capture_proxy_trace_body(request_data),
+        )
+
         auth_header = request.headers.get("Authorization")
         if not auth.verify(auth_header):
             log("Chat Completions 请求 MTGA 鉴权失败")
+            finish_trace_once(
+                status="failed",
+                status_code=401,
+                error="Invalid authentication",
+            )
             release_transport()
             return jsonify(
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
@@ -737,6 +861,23 @@ class ProxyApp:
                 proxy_config,
                 fallback_api_key=fallback_api_key,
             )
+            update_proxy_trace(
+                trace_id,
+                provider=route.provider,
+                request_api=route.request_api,
+                upstream_model=route.litellm_model,
+                target_api_base_url=route.base_url,
+                target_model=target_model_id,
+            )
+            trace_event(
+                "route_resolved",
+                data={
+                    "provider": route.provider,
+                    "request_api": route.request_api,
+                    "model": route.litellm_model,
+                    "base_url": route.base_url,
+                },
+            )
             log(
                 f"LiteLLM 路由: provider={route.provider} "
                 f"request_api={route.request_api} model={route.litellm_model} "
@@ -746,8 +887,10 @@ class ProxyApp:
                 log(f"LiteLLM 内部基路径: {route.litellm_base_url}")
 
             is_stream = bool(request_data.get("stream", False))
+            update_proxy_trace(trace_id, is_stream=is_stream)
             log(f"流模式: {is_stream}")
 
+            trace_event("upstream_request", "准备转发到上游")
             response_from_target = transport.adapter.create_chat_completion(
                 route=route,
                 request_data=request_data,
@@ -770,6 +913,7 @@ class ProxyApp:
 
             if should_proxy_stream:
                 log("返回流式响应")
+                trace_event("stream_start", "返回流式响应")
 
                 log_file_stack, log_file, log_path = self._open_sse_debug_log(
                     debug_mode=debug_mode,
@@ -781,6 +925,17 @@ class ProxyApp:
                     nonlocal log_file, log_file_stack
                     event_index = 0
                     done_sent = False
+                    downstream_open = True
+                    stream_status: str = "completed"
+                    stream_error: str | None = None
+                    stream_finish_reason: str | None = None
+                    response_accumulator = ProxyTraceBodyAccumulator()
+
+                    def mark_stream_cancelled(error: str) -> None:
+                        nonlocal stream_status, stream_error
+                        stream_status = "cancelled"
+                        stream_error = error
+
                     client_model_name = transport.normalize_provider_model_name(
                         route.litellm_model,
                         provider=route.provider,
@@ -798,12 +953,20 @@ class ProxyApp:
                             )
                             event_index += 1
 
-                            normalized_bytes, _finish_reason = transport.normalize_openai_event(
+                            normalized_bytes, finish_reason = transport.normalize_openai_event(
                                 event_payload,
                                 event_index,
                                 model_name=client_model_name,
                                 log=log,
                             )
+                            if event_index == 1:
+                                update_proxy_trace(
+                                    trace_id,
+                                    first_chunk_at=self._timestamp_iso(),
+                                )
+                            if finish_reason:
+                                stream_finish_reason = finish_reason
+                            response_accumulator.append(normalized_bytes)
                             log_file = self._write_sse_debug_chunk(
                                 log_file,
                                 normalized_bytes,
@@ -811,24 +974,49 @@ class ProxyApp:
                             )
                             if normalized_bytes == b"data: [DONE]\n\n":
                                 done_sent = True
-                            try:
-                                yield normalized_bytes
-                            except GeneratorExit:
-                                log(f"DOWN 连接提前中断，已读取上游 evt#{event_index}")
-                                raise
-                            except Exception as downstream_exc:  # noqa: BLE001
-                                log(f"DOWN 写入异常，停止向下游发送: {downstream_exc}")
+                            if not (
+                                yield from self._yield_downstream_bytes(
+                                    normalized_bytes,
+                                    on_cancelled=mark_stream_cancelled,
+                                    log=log,
+                                    disconnect_message=(
+                                        f"DOWN 连接提前中断，已读取上游 evt#{event_index}"
+                                    ),
+                                    write_error_prefix="DOWN 写入异常，停止向下游发送",
+                                )
+                            ):
+                                downstream_open = False
                                 break
-                        if not done_sent:
+                        if downstream_open and not done_sent:
                             done_bytes = b"data: [DONE]\n\n"
+                            response_accumulator.append(done_bytes)
                             log_file = self._write_sse_debug_chunk(
                                 log_file,
                                 done_bytes,
                                 log=log,
                             )
-                            yield done_bytes
+                            yield from self._yield_downstream_bytes(
+                                done_bytes,
+                                on_cancelled=mark_stream_cancelled,
+                                log=log,
+                                disconnect_message="DOWN 连接提前中断，未完成 DONE 事件发送",
+                                write_error_prefix="DOWN 写入 DONE 事件异常",
+                            )
+                    except Exception as stream_exc:  # noqa: BLE001
+                        stream_status = "failed"
+                        stream_error = str(stream_exc)
+                        log(f"UP 流式响应处理失败: {stream_exc}")
+                        raise
                     finally:
                         self._close_upstream_stream(response_from_target, log=log)
+                        finish_trace_once(
+                            status=stream_status,
+                            status_code=200,
+                            response_body=response_accumulator.capture(),
+                            error=stream_error,
+                            chunk_count=event_index,
+                            finish_reason=stream_finish_reason,
+                        )
                         release_transport()
                         if log_file_stack:
                             with contextlib.suppress(Exception):
@@ -845,6 +1033,11 @@ class ProxyApp:
 
             if response_json is None:
                 log("上游响应不是 JSON 对象")
+                finish_trace_once(
+                    status="failed",
+                    status_code=502,
+                    error="Invalid response from target API",
+                )
                 release_transport()
                 return jsonify({"error": "Invalid response from target API"}), 502
 
@@ -866,10 +1059,20 @@ class ProxyApp:
                     nonlocal log_file, log_file_stack
                     model_name_obj = response_json.get("model")
                     model_name = (
-                        model_name_obj
-                        if isinstance(model_name_obj, str)
-                        else route.litellm_model
+                        model_name_obj if isinstance(model_name_obj, str) else route.litellm_model
                     )
+                    event_index = 0
+                    downstream_open = True
+                    stream_status: str = "completed"
+                    stream_error: str | None = None
+                    stream_finish_reason: str | None = None
+                    response_accumulator = ProxyTraceBodyAccumulator()
+
+                    def mark_stream_cancelled(error: str) -> None:
+                        nonlocal stream_status, stream_error
+                        stream_status = "cancelled"
+                        stream_error = error
+
                     try:
                         simulated_chunks = transport.build_chat_completion_stream_chunks(
                             response_json
@@ -878,27 +1081,66 @@ class ProxyApp:
                             simulated_chunks,
                             start=1,
                         ):
-                            event_bytes, _finish_reason = transport.normalize_openai_event(
+                            event_bytes, finish_reason = transport.normalize_openai_event(
                                 chunk_payload,
                                 event_index,
                                 model_name=model_name,
                                 log=log,
                             )
+                            if event_index == 1:
+                                update_proxy_trace(
+                                    trace_id,
+                                    first_chunk_at=self._timestamp_iso(),
+                                )
+                            if finish_reason:
+                                stream_finish_reason = finish_reason
+                            response_accumulator.append(event_bytes)
                             log_file = self._write_sse_debug_chunk(
                                 log_file,
                                 event_bytes,
                                 log=log,
                             )
-                            yield event_bytes
+                            if not (
+                                yield from self._yield_downstream_bytes(
+                                    event_bytes,
+                                    on_cancelled=mark_stream_cancelled,
+                                    log=log,
+                                    disconnect_message="DOWN 连接提前中断，停止模拟流式响应",
+                                    write_error_prefix="DOWN 写入异常，停止向下游发送",
+                                )
+                            ):
+                                downstream_open = False
+                                break
                             time.sleep(0.01)
-                        done_bytes = b"data: [DONE]\n\n"
-                        log_file = self._write_sse_debug_chunk(
-                            log_file,
-                            done_bytes,
-                            log=log,
-                        )
-                        yield done_bytes
+                        if downstream_open:
+                            done_bytes = b"data: [DONE]\n\n"
+                            response_accumulator.append(done_bytes)
+                            log_file = self._write_sse_debug_chunk(
+                                log_file,
+                                done_bytes,
+                                log=log,
+                            )
+                            yield from self._yield_downstream_bytes(
+                                done_bytes,
+                                on_cancelled=mark_stream_cancelled,
+                                log=log,
+                                disconnect_message="DOWN 连接提前中断，未完成 DONE 事件发送",
+                                write_error_prefix="DOWN 写入 DONE 事件异常",
+                            )
+                    except Exception as stream_exc:  # noqa: BLE001
+                        stream_status = "failed"
+                        stream_error = str(stream_exc)
+                        log(f"模拟流式响应失败: {stream_exc}")
+                        raise
                     finally:
+                        finish_trace_once(
+                            status=stream_status,
+                            status_code=200,
+                            response_body=response_accumulator.capture(),
+                            error=stream_error,
+                            chunk_count=event_index,
+                            finish_reason=stream_finish_reason,
+                        )
                         if log_file_stack:
                             with contextlib.suppress(Exception):
                                 log_file_stack.close()
@@ -916,12 +1158,23 @@ class ProxyApp:
                 )
             else:
                 log("返回非流式 JSON 响应")
+            finish_trace_once(
+                status="completed",
+                status_code=200,
+                response_body=capture_proxy_trace_body(response_json),
+            )
             release_transport()
             return jsonify(response_json)
 
         except Exception as e:
             error_info = normalize_upstream_error(e)
             log(error_info.log_message)
+            finish_trace_once(
+                status="failed",
+                status_code=error_info.status_code,
+                response_body=capture_proxy_trace_body(error_info.response_body),
+                error=error_info.detail_text,
+            )
             release_transport()
             return jsonify(error_info.response_body), error_info.status_code
 

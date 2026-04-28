@@ -55,6 +55,69 @@ export type LogEventPayload = {
   next_id: number;
 };
 
+export type ProxyTraceStatus = "active" | "completed" | "failed" | "cancelled";
+
+export type ProxyTraceBodyCapture = {
+  value?: unknown;
+  bytes?: number;
+  truncated?: boolean;
+  truncated_reason?: "size_limit" | "stream_limit" | "unsupported_type";
+  redacted?: boolean;
+};
+
+export type ProxyTraceEvent = {
+  at: string;
+  kind: string;
+  message?: string;
+  data?: Record<string, unknown>;
+};
+
+export type ProxyTraceSummary = {
+  trace_id: string;
+  request_id: string;
+  status: ProxyTraceStatus;
+  method: string;
+  request_path: string;
+  request_model?: string;
+  provider?: string;
+  upstream_model?: string;
+  is_stream: boolean;
+  status_code?: number;
+  started_at: string;
+  ended_at?: string;
+  duration_ms?: number;
+  chunk_count?: number;
+  error?: string;
+  events_count?: number;
+  request_body_bytes?: number;
+  response_body_bytes?: number;
+  request_body_truncated?: boolean;
+  response_body_truncated?: boolean;
+};
+
+export type ProxyTrace = ProxyTraceSummary & {
+  route_mode?: ProxyMode;
+  request_api?: "chat_completions" | "responses";
+  client_model?: string;
+  resolved_target_label?: string;
+  target_api_base_url?: string;
+  target_model?: string;
+  first_chunk_at?: string;
+  finish_reason?: string;
+  request_body?: ProxyTraceBodyCapture;
+  response_body?: ProxyTraceBodyCapture;
+  events: ProxyTraceEvent[];
+};
+
+export type ProxyTraceListResult = {
+  items?: ProxyTraceSummary[];
+};
+
+export type ProxyTraceClearResult = {
+  deleted_count?: number;
+  kept_active_count?: number;
+};
+
 export type LazyWarmupEventPayload = {
   phase: "start" | "progress" | "done" | "error";
   stage?: string | null;

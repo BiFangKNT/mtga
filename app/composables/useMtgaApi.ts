@@ -8,6 +8,9 @@ import type {
   LazyWarmupEventPayload,
   LogEventPayload,
   LogPullResult,
+  ProxyTrace,
+  ProxyTraceClearResult,
+  ProxyTraceListResult,
 } from "./mtgaTypes";
 
 type InvokePayload = Record<string, unknown>;
@@ -117,6 +120,15 @@ export const useMtgaApi = () => {
     timeout_ms?: number;
     max_items?: number;
   }) => safeInvoke<LogPullResult>("pull_logs_command", payload);
+  const proxyTracesList = (payload: { limit?: number } = {}) =>
+    safeInvoke<ProxyTraceListResult>("proxy_traces_list", payload);
+  const proxyTraceDetail = (payload: { trace_id: string }) =>
+    safeInvoke<ProxyTrace>("proxy_trace_detail", payload);
+  const proxyTracesClear = () =>
+    safeInvoke<ProxyTraceClearResult>("proxy_traces_clear", undefined, {
+      deleted_count: 0,
+      kept_active_count: 0,
+    });
 
   const startLogChannel = async (
     onMessage: (payload: LogEventPayload) => void,
@@ -239,6 +251,9 @@ export const useMtgaApi = () => {
     systemPromptsUpdate,
     systemPromptsDelete,
     pullLogs,
+    proxyTracesList,
+    proxyTraceDetail,
+    proxyTracesClear,
     startLogChannel,
     startProxyStepChannel,
     startProxyStatusChannel,

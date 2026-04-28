@@ -69,6 +69,9 @@ _EAGER_COMMAND_GROUPS: tuple[CommandGroupSpec, ...] = (
             CommandSpec("log_channel", "body"),
             CommandSpec("pull_logs_command", "body"),
             CommandSpec("frontend_report", "body"),
+            CommandSpec("proxy_traces_list", "body"),
+            CommandSpec("proxy_trace_detail", "body"),
+            CommandSpec("proxy_traces_clear"),
         ),
     ),
     CommandGroupSpec(

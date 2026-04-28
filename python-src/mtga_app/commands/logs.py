@@ -13,6 +13,11 @@ from pytauri.ffi.webview import WebviewWindow
 from pytauri.ipc import JavaScriptChannelId
 
 from modules.runtime.log_bus import pull_logs, push_log
+from modules.runtime.proxy_trace_store import (
+    clear_proxy_traces,
+    get_proxy_trace,
+    list_proxy_traces,
+)
 from modules.runtime.resource_manager import get_log_path
 
 
@@ -41,6 +46,14 @@ class FrontendReportPayload(BaseModel):
     user_agent: str | None = None
     ready_state: str | None = None
     extra: dict[str, Any] | None = None
+
+
+class ProxyTraceListPayload(BaseModel):
+    limit: int = 200
+
+
+class ProxyTraceDetailPayload(BaseModel):
+    trace_id: str
 
 
 def _resolve_frontend_log_path() -> Path | None:
@@ -149,9 +162,30 @@ def register_log_commands(commands: Commands) -> None:
         _append_frontend_log(message)
         return True
 
+    @commands.command()
+    async def proxy_traces_list(body: ProxyTraceListPayload) -> dict[str, Any]:
+        return {
+            "items": list_proxy_traces(limit=body.limit),
+        }
+
+    @commands.command()
+    async def proxy_trace_detail(body: ProxyTraceDetailPayload) -> dict[str, Any] | None:
+        trace_id = body.trace_id.strip()
+        if not trace_id:
+            return None
+        trace = get_proxy_trace(trace_id)
+        return cast(dict[str, Any] | None, trace)
+
+    @commands.command()
+    async def proxy_traces_clear() -> dict[str, int]:
+        return clear_proxy_traces()
+
     _ = pull_logs_command
     _ = log_channel
     _ = frontend_report
+    _ = proxy_traces_list
+    _ = proxy_trace_detail
+    _ = proxy_traces_clear
 
 
 __all__ = ["register_log_commands"]
