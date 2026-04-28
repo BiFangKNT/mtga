@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## v2.5.0 - 2026-04-28
+
+### :sparkles: 新功能
+
+- 添加后台预热功能以优化启动性能 ([22f5cd0](https://github.com/BiFangKNT/mtga/commit/22f5cd0cf65610ddb1e707eb1b900a3998818c4e))
+
+- 支持 prompt cache 功能 ([c3553e7](https://github.com/BiFangKNT/mtga/commit/c3553e7db78d92c819fb6442377428b265a5e361))
+
+- 为 OpenAI 响应提供者添加提示缓存开关 ([5f86315](https://github.com/BiFangKNT/mtga/commit/5f86315fdd99523525af72f4b354ecf17e4a50a6))
+
+- 引入通用异步动作管理和加载按钮组件 ([b8c8d48](https://github.com/BiFangKNT/mtga/commit/b8c8d481fd24dca63a3bd12bec6d77a1ac3fbec9))
+
+- 新增 Trae native 自定义模型路线支持 ([71f7b43](https://github.com/BiFangKNT/mtga/commit/71f7b43eb6fcea20ab5a9dd0256d82b01b42abf7))
+
+- 实现稳定性层与运行时兼容性检查 ([6bd3a42](https://github.com/BiFangKNT/mtga/commit/6bd3a421f10b4366589f10f92fc70c319af17522))
+
+- 新增官方 base_url 代理路线和运行时状态查询 ([f724ae1](https://github.com/BiFangKNT/mtga/commit/f724ae11883b891a9dec322b427f9d4971d5271b))
+
+- 添加代理运行状态实时显示功能 ([6150c88](https://github.com/BiFangKNT/mtga/commit/6150c88ed29d6c25713c58d235e58026087b8da9))
+
+- 实现日志通道以替代事件流 ([f275ec7](https://github.com/BiFangKNT/mtga/commit/f275ec78af8b9e6a2128ae758f0e9d72469f3554))
+
+- 添加端口顺延支持并显示实际 loopback 端口 ([915c68e](https://github.com/BiFangKNT/mtga/commit/915c68e1d16d48f728640a3a0cc797fdbda37cb7))
+
+- 添加前端就绪事件与延迟初始化逻辑 ([7caff27](https://github.com/BiFangKNT/mtga/commit/7caff27b29d633f1c60926ca594c034cb9749af8))
+
+- 添加 macOS native 重写器后端和跨平台支持 ([b682573](https://github.com/BiFangKNT/mtga/commit/b6825733c03633fb3680701a62eb167e682a4e35))
+
+- 添加已结束任务清理机制 ([51bbf0e](https://github.com/BiFangKNT/mtga/commit/51bbf0ed2719a75958a3d5ab72c20e3371a067c8))
+
+- 新增代理日志追踪面板与后端存储 ([b28f6bb](https://github.com/BiFangKNT/mtga/commit/b28f6bb24982a7f2979c0ed3edbe00bb15b48b98))
+
+- 将详情面板改为侧边抽屉式弹窗 ([292e1ea](https://github.com/BiFangKNT/mtga/commit/292e1eaee9c63702d7fd8687de4d9ada6d928181))
+
+### :bug: 修复
+
+- 修正运行时检测逻辑并添加 Tauri 开发脚本 ([0d219f6](https://github.com/BiFangKNT/mtga/commit/0d219f6cb85e50d622d37a6f2519fe427520dee4))
+
+- 清理trae启动环境变量以避免冲突 ([09254c6](https://github.com/BiFangKNT/mtga/commit/09254c628df3232f2c0adf3678215f05fee50632))
+
+- 在 Windows 上修正 pnpm 入口点解析以支持 tauri dev ([1589418](https://github.com/BiFangKNT/mtga/commit/1589418ef57ca5fe589a049775f1bccaa20e4ef1))
+
+### :art: 界面样式
+
+- 为提供商选择器添加全宽度样式 ([01ef57c](https://github.com/BiFangKNT/mtga/commit/01ef57cff23a0e9849a06ddd4bdc2802376bc92f))
+
 ## v2.4.0 - 2026-04-03
 
 ### :sparkles: 新功能
