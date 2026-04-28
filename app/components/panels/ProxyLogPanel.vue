@@ -4,6 +4,7 @@ import type { ProxyTrace, ProxyTraceBodyCapture, ProxyTraceSummary } from "~/com
 const store = useMtgaStore();
 const loading = ref(false);
 const clearing = ref(false);
+const detailOpen = ref(false);
 const autoRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null);
 
 const traces = computed(() => store.proxyTraces.value);
@@ -96,10 +97,7 @@ const refresh = async () => {
   loading.value = true;
   try {
     await store.loadProxyTraces();
-    const firstTrace = traces.value[0];
-    if (!selectedTrace.value && firstTrace) {
-      await store.loadProxyTraceDetail(firstTrace.trace_id);
-    } else if (selectedTrace.value) {
+    if (detailOpen.value && selectedTrace.value) {
       await store.loadProxyTraceDetail(selectedTrace.value.trace_id);
     }
   } finally {
@@ -111,7 +109,14 @@ const selectTrace = async (trace: ProxyTraceSummary) => {
   if (loading.value) {
     return;
   }
-  await store.loadProxyTraceDetail(trace.trace_id);
+  const ok = await store.loadProxyTraceDetail(trace.trace_id);
+  if (ok) {
+    detailOpen.value = true;
+  }
+};
+
+const closeDetail = () => {
+  detailOpen.value = false;
 };
 
 const clearLogs = async () => {
@@ -121,6 +126,9 @@ const clearLogs = async () => {
   clearing.value = true;
   try {
     await store.clearProxyTraces();
+    if (!selectedTrace.value) {
+      detailOpen.value = false;
+    }
   } finally {
     clearing.value = false;
   }
@@ -130,7 +138,7 @@ onMounted(() => {
   void refresh();
   autoRefreshTimer.value = setInterval(() => {
     void store.loadProxyTraces();
-    if (selectedTrace.value?.status === "active") {
+    if (detailOpen.value && selectedTrace.value?.status === "active") {
       void store.loadProxyTraceDetail(selectedTrace.value.trace_id);
     }
   }, 2000);
@@ -171,12 +179,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="mt-4 grid min-h-0 flex-1 grid-cols-[minmax(260px,360px)_1fr] gap-4">
-      <div class="min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+    <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+      <div class="grid gap-3 2xl:grid-cols-2">
         <button
           v-for="trace in traces"
           :key="trace.trace_id"
-          class="mtga-clickable-row mb-2 w-full items-start"
+          class="mtga-clickable-row w-full items-start"
           :class="selectedTraceId === trace.trace_id ? 'border-amber-400/70 bg-amber-50/50' : ''"
           @click="selectTrace(trace)"
         >
@@ -200,121 +208,167 @@ onBeforeUnmount(() => {
             }}</span>
           </span>
         </button>
-
-        <div
-          v-if="!loading && traces.length === 0"
-          class="rounded-xl border border-slate-200/70 bg-white/40 p-6 text-center text-sm text-slate-400"
-        >
-          暂无代理请求记录
-        </div>
       </div>
 
       <div
-        class="min-h-0 overflow-y-auto rounded-xl border border-slate-200/60 bg-white/30 p-4 custom-scrollbar"
+        v-if="!loading && traces.length === 0"
+        class="rounded-xl border border-slate-200/70 bg-white/40 p-6 text-center text-sm text-slate-400"
       >
-        <template v-if="selectedTrace">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span
-                  class="rounded-full border px-2 py-0.5 text-[11px] font-bold"
-                  :class="statusMeta[selectedTrace.status].className"
-                >
-                  {{ statusMeta[selectedTrace.status].label }}
-                </span>
-                <span class="font-mono text-xs text-slate-500">{{ selectedTrace.request_id }}</span>
-              </div>
-              <h3 class="mt-2 truncate text-base font-bold text-slate-800">
-                {{ traceTitle(selectedTrace) }}
-              </h3>
-            </div>
-            <div class="shrink-0 text-right text-xs text-slate-500">
-              <div>{{ selectedTrace.method }} {{ selectedTrace.request_path }}</div>
-              <div>{{ formatDuration(selectedTrace.duration_ms) }}</div>
-            </div>
-          </div>
-
-          <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-            <div class="rounded-lg border border-slate-200/60 bg-white/40 p-3">
-              <div class="font-bold text-slate-500">上游</div>
-              <div class="mt-1 break-all font-mono text-slate-700">
-                {{ selectedTrace.provider || "-" }} / {{ selectedTrace.upstream_model || "-" }}
-              </div>
-            </div>
-            <div class="rounded-lg border border-slate-200/60 bg-white/40 p-3">
-              <div class="font-bold text-slate-500">响应</div>
-              <div class="mt-1 text-slate-700">
-                {{ selectedTrace.status_code || "-" }} ·
-                {{ selectedTrace.is_stream ? "SSE" : "JSON" }}
-              </div>
-            </div>
-            <div class="rounded-lg border border-slate-200/60 bg-white/40 p-3">
-              <div class="font-bold text-slate-500">请求体</div>
-              <div class="mt-1 text-slate-700">
-                {{ formatBytes(selectedTrace.request_body?.bytes) }}
-                <span v-if="selectedTrace.request_body?.truncated"> · 已截断</span>
-                <span v-if="selectedTrace.request_body?.redacted"> · 已脱敏</span>
-              </div>
-            </div>
-            <div class="rounded-lg border border-slate-200/60 bg-white/40 p-3">
-              <div class="font-bold text-slate-500">响应体</div>
-              <div class="mt-1 text-slate-700">
-                {{ formatBytes(selectedTrace.response_body?.bytes) }}
-                <span v-if="selectedTrace.response_body?.truncated"> · 已截断</span>
-              </div>
-            </div>
-          </div>
-
-          <div
-            v-if="selectedTrace.error"
-            class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
-          >
-            {{ selectedTrace.error }}
-          </div>
-
-          <div class="mt-4 space-y-4">
-            <section>
-              <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Request</h4>
-              <pre
-                class="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100 custom-scrollbar"
-                >{{ formatBody(selectedTrace.request_body) || "-" }}</pre
-              >
-            </section>
-            <section>
-              <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Response</h4>
-              <pre
-                class="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100 custom-scrollbar"
-                >{{ formatBody(selectedTrace.response_body) || "-" }}</pre
-              >
-            </section>
-            <section>
-              <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Events</h4>
-              <div class="space-y-2">
-                <div
-                  v-for="event in selectedTrace.events"
-                  :key="`${event.at}-${event.kind}-${event.message || ''}`"
-                  class="rounded-lg border border-slate-200/60 bg-white/40 p-3 text-xs"
-                >
-                  <div class="flex items-center justify-between gap-3">
-                    <span class="font-bold text-slate-700">{{ event.kind }}</span>
-                    <span class="font-mono text-slate-400">{{ formatTime(event.at) }}</span>
-                  </div>
-                  <div v-if="event.message" class="mt-1 text-slate-600">{{ event.message }}</div>
-                  <pre
-                    v-if="event.data"
-                    class="mt-2 overflow-auto rounded bg-slate-100 p-2 text-[11px] text-slate-700 custom-scrollbar"
-                    >{{ stringifyValue(event.data) }}</pre
-                  >
-                </div>
-              </div>
-            </section>
-          </div>
-        </template>
-
-        <div v-else class="flex h-full min-h-80 items-center justify-center text-sm text-slate-400">
-          选择一条代理请求查看详情
-        </div>
+        暂无代理请求记录
       </div>
     </div>
+
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="detailOpen && selectedTrace" class="fixed inset-0 z-50 bg-slate-950/30">
+          <button
+            aria-label="关闭代理日志详情"
+            class="absolute inset-0 cursor-default"
+            tabindex="-1"
+            type="button"
+            @click="closeDetail"
+          />
+
+          <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="translate-x-full"
+            enter-to-class="translate-x-0"
+            leave-active-class="transition duration-150 ease-in"
+            leave-from-class="translate-x-0"
+            leave-to-class="translate-x-full"
+          >
+            <aside
+              v-if="detailOpen && selectedTrace"
+              class="absolute right-0 top-0 flex h-full w-full max-w-[860px] min-w-0 flex-col overflow-hidden border-l border-slate-200 bg-[#fff8e8] shadow-2xl sm:w-[min(860px,calc(100vw-40px))]"
+            >
+              <div class="shrink-0 border-b border-slate-200/70 p-5">
+                <div class="flex min-w-0 items-start justify-between gap-4">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        class="rounded-full border px-2 py-0.5 text-[11px] font-bold"
+                        :class="statusMeta[selectedTrace.status].className"
+                      >
+                        {{ statusMeta[selectedTrace.status].label }}
+                      </span>
+                      <span class="font-mono text-xs text-slate-500">
+                        {{ selectedTrace.request_id }}
+                      </span>
+                    </div>
+                    <h3 class="mt-2 truncate text-lg font-bold text-slate-800">
+                      {{ traceTitle(selectedTrace) }}
+                    </h3>
+                    <div class="mt-1 truncate text-xs text-slate-500">
+                      {{ selectedTrace.method }} {{ selectedTrace.request_path }}
+                    </div>
+                  </div>
+                  <button
+                    class="btn btn-sm btn-ghost shrink-0 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    type="button"
+                    @click="closeDetail"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-5 custom-scrollbar"
+              >
+                <div class="grid min-w-0 grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
+                  <div
+                    class="min-w-0 overflow-hidden rounded-lg border border-slate-200/60 bg-white/50 p-3"
+                  >
+                    <div class="font-bold text-slate-500">上游</div>
+                    <div
+                      class="mt-1 overflow-x-auto whitespace-nowrap font-mono text-slate-700 custom-scrollbar"
+                    >
+                      {{ selectedTrace.provider || "-" }} /
+                      {{ selectedTrace.upstream_model || "-" }}
+                    </div>
+                  </div>
+                  <div class="min-w-0 rounded-lg border border-slate-200/60 bg-white/50 p-3">
+                    <div class="font-bold text-slate-500">响应</div>
+                    <div class="mt-1 text-slate-700">
+                      {{ selectedTrace.status_code || "-" }} ·
+                      {{ selectedTrace.is_stream ? "SSE" : "JSON" }}
+                    </div>
+                  </div>
+                  <div class="min-w-0 rounded-lg border border-slate-200/60 bg-white/50 p-3">
+                    <div class="font-bold text-slate-500">请求体</div>
+                    <div class="mt-1 text-slate-700">
+                      {{ formatBytes(selectedTrace.request_body?.bytes) }}
+                      <span v-if="selectedTrace.request_body?.truncated"> · 已截断</span>
+                      <span v-if="selectedTrace.request_body?.redacted"> · 已脱敏</span>
+                    </div>
+                  </div>
+                  <div class="min-w-0 rounded-lg border border-slate-200/60 bg-white/50 p-3">
+                    <div class="font-bold text-slate-500">响应体</div>
+                    <div class="mt-1 text-slate-700">
+                      {{ formatBytes(selectedTrace.response_body?.bytes) }}
+                      <span v-if="selectedTrace.response_body?.truncated"> · 已截断</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  v-if="selectedTrace.error"
+                  class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
+                >
+                  {{ selectedTrace.error }}
+                </div>
+
+                <div class="mt-4 grid min-w-0 gap-4 xl:grid-cols-2">
+                  <section class="min-w-0">
+                    <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Request</h4>
+                    <pre
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-100 [overflow-wrap:anywhere] custom-scrollbar"
+                      >{{ formatBody(selectedTrace.request_body) || "-" }}</pre
+                    >
+                  </section>
+                  <section class="min-w-0">
+                    <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Response</h4>
+                    <pre
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-100 [overflow-wrap:anywhere] custom-scrollbar"
+                      >{{ formatBody(selectedTrace.response_body) || "-" }}</pre
+                    >
+                  </section>
+                  <section class="min-w-0 xl:col-span-2">
+                    <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Events</h4>
+                    <div class="space-y-2">
+                      <div
+                        v-for="event in selectedTrace.events"
+                        :key="`${event.at}-${event.kind}-${event.message || ''}`"
+                        class="min-w-0 rounded-lg border border-slate-200/60 bg-white/50 p-3 text-xs"
+                      >
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span class="font-bold text-slate-700">{{ event.kind }}</span>
+                          <span class="font-mono text-slate-400">{{ formatTime(event.at) }}</span>
+                        </div>
+                        <div v-if="event.message" class="mt-1 break-words text-slate-600">
+                          {{ event.message }}
+                        </div>
+                        <pre
+                          v-if="event.data"
+                          class="mt-2 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded bg-slate-100 p-2 text-[11px] text-slate-700 [overflow-wrap:anywhere] custom-scrollbar"
+                          >{{ stringifyValue(event.data) }}</pre
+                        >
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </aside>
+          </Transition>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
