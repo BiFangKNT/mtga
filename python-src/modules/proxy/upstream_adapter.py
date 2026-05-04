@@ -9,8 +9,8 @@ from typing import Any, Literal, cast
 
 import httpx
 
-import litellm
-from litellm.exceptions import APIConnectionError
+from modules import mlitellm
+from modules.mlitellm.exceptions import APIConnectionError
 from modules.proxy.param_self_heal_signal import extract_param_self_heal_signal
 from modules.proxy.proxy_config import (
     ANTHROPIC_PROVIDER,
@@ -154,7 +154,7 @@ def _serialize_json_payload(payload: dict[str, Any] | list[Any]) -> str:
 
 def _unwrap_exception_message(message: str) -> str:
     normalized = message.strip()
-    if normalized.startswith("litellm.") and ": " in normalized:
+    if normalized.startswith("mlitellm.") and ": " in normalized:
         normalized = normalized.split(": ", 1)[1].strip()
     if normalized.startswith("OpenAIException - "):
         normalized = normalized.removeprefix("OpenAIException - ").strip()
@@ -745,8 +745,8 @@ class LiteLLMUpstreamAdapter:
         *,
         custom_llm_provider: str | None = None,
     ) -> set[str] | None:
-        litellm_sdk = cast(Any, litellm)
-        supported_params_func = getattr(litellm_sdk, "get_supported_openai_params", None)
+        mlitellm_sdk = cast(Any, mlitellm)
+        supported_params_func = getattr(mlitellm_sdk, "get_supported_openai_params", None)
         if not callable(supported_params_func):
             return None
 
@@ -886,8 +886,8 @@ class LiteLLMUpstreamAdapter:
         # 关闭 LiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
         call_kwargs["max_retries"] = 0
         call_kwargs["num_retries"] = 0
-        litellm_sdk = cast(Any, litellm)
-        completion_func = cast(Callable[..., Any], litellm_sdk.completion)
+        mlitellm_sdk = cast(Any, mlitellm)
+        completion_func = cast(Callable[..., Any], mlitellm_sdk.completion)
         return self._call_completion_with_param_self_heal(
             route=route,
             call_kwargs=call_kwargs,

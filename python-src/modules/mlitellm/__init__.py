@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -5,8 +6,8 @@ from typing import Any
 
 import httpx as httpx
 
-from litellm.anthropic import _anthropic_completion
-from litellm.exceptions import (
+from .anthropic import _anthropic_completion
+from .exceptions import (
     APIConnectionError,
     APIError,
     AuthenticationError,
@@ -14,13 +15,13 @@ from litellm.exceptions import (
     NotFoundError,
     RateLimitError,
 )
-from litellm.gemini import _gemini_completion
-from litellm.openai_chat import _openai_chat_completion
-from litellm.openai_responses import _openai_responses_completion
+from .gemini import _gemini_completion
+from .openai_chat import _openai_chat_completion
+from .openai_responses import _openai_responses_completion
 
 ssl_verify: bool | str = True
 drop_params = False
-__version__ = "mtga-slim"
+__version__ = "mtga-mlitellm-slim"
 
 _OPENAI_CHAT_PARAMS: tuple[str, ...] = (
     "audio",
@@ -111,12 +112,10 @@ def completion(**kwargs: Any) -> dict[str, Any] | Iterator[Any]:
 
 
 def _resolve_provider(kwargs: dict[str, Any]) -> str:
-    model = kwargs.get("model") if isinstance(kwargs.get("model"), str) else ""
-    explicit_provider = (
-        kwargs.get("custom_llm_provider")
-        if isinstance(kwargs.get("custom_llm_provider"), str)
-        else ""
-    ).lower()
+    model_value = kwargs.get("model")
+    model = model_value if isinstance(model_value, str) else ""
+    provider_value = kwargs.get("custom_llm_provider")
+    explicit_provider = provider_value.lower() if isinstance(provider_value, str) else ""
     if model.startswith("responses/"):
         return "responses"
     if model.startswith("anthropic/"):

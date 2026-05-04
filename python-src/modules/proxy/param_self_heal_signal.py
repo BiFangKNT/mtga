@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 INVALID_REQUEST_STATUS_CODE = 400
-LITELLM_UNSUPPORTED_PARAMS_PATTERN = re.compile(
+MLITELLM_UNSUPPORTED_PARAMS_PATTERN = re.compile(
     r"\bdoes\s+not\s+support\s+parameters?\s*:\s*\[([^\]]*)\]",
     re.IGNORECASE,
 )
@@ -22,12 +22,12 @@ def extract_param_self_heal_signal(exc: Exception) -> ParamSelfHealSignal | None
     upstream_signal = _extract_upstream_invalid_request_signal(exc)
     if upstream_signal is not None:
         return upstream_signal
-    return _extract_litellm_validation_signal(exc)
+    return _extract_mlitellm_validation_signal(exc)
 
 
-def extract_litellm_unsupported_params_from_message(message: str) -> tuple[str, ...]:
+def extract_mlitellm_unsupported_params_from_message(message: str) -> tuple[str, ...]:
     listed_params: list[str] = []
-    for raw_list in LITELLM_UNSUPPORTED_PARAMS_PATTERN.findall(message):
+    for raw_list in MLITELLM_UNSUPPORTED_PARAMS_PATTERN.findall(message):
         for raw_item in raw_list.split(","):
             normalized_item = raw_item.strip().strip("\"'`")
             if normalized_item:
@@ -68,14 +68,14 @@ def _extract_upstream_invalid_request_signal(
     return ParamSelfHealSignal(message=message, param=param)
 
 
-def _extract_litellm_validation_signal(
+def _extract_mlitellm_validation_signal(
     exc: Exception,
 ) -> ParamSelfHealSignal | None:
     normalized_message = _unwrap_exception_message(str(exc))
     if not normalized_message:
         return None
 
-    unsupported_params = extract_litellm_unsupported_params_from_message(
+    unsupported_params = extract_mlitellm_unsupported_params_from_message(
         normalized_message
     )
     if not unsupported_params:
@@ -150,7 +150,7 @@ def _coerce_json_payload(payload: Any) -> dict[str, Any] | list[Any] | None:
 
 def _unwrap_exception_message(message: str) -> str:
     normalized = message.strip()
-    if normalized.startswith("litellm.") and ": " in normalized:
+    if normalized.startswith("mlitellm.") and ": " in normalized:
         normalized = normalized.split(": ", 1)[1].strip()
     if normalized.startswith("OpenAIException - "):
         normalized = normalized.removeprefix("OpenAIException - ").strip()
@@ -186,6 +186,6 @@ def _extract_fallback_response_body(exc: Exception) -> dict[str, Any] | list[Any
 
 __all__ = [
     "ParamSelfHealSignal",
-    "extract_litellm_unsupported_params_from_message",
+    "extract_mlitellm_unsupported_params_from_message",
     "extract_param_self_heal_signal",
 ]

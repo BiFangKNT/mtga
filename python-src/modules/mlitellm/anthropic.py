@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
 from __future__ import annotations
 
 import json
@@ -5,7 +6,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, cast
 
-from litellm.common import (
+from .common import (
     _as_str,
     _base_url,
     _chat_chunk,
@@ -146,7 +147,8 @@ def _iter_anthropic_message_events(
         elif event_type == "message_delta":
             delta_obj = event.get("delta")
             if isinstance(delta_obj, dict):
-                finish_reason = _normalize_finish_reason(delta_obj.get("stop_reason"))
+                delta = cast(dict[str, Any], delta_obj)
+                finish_reason = _normalize_finish_reason(delta.get("stop_reason"))
         elif event_type == "message_stop":
             yield _chat_chunk(model=model, delta={}, finish_reason=finish_reason or "stop")
 
@@ -249,8 +251,8 @@ def _anthropic_payload_to_chat_completion(
     fallback_model: str,
 ) -> dict[str, Any]:
     message = _message_from_anthropic_content(payload.get("content"))
-    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
-    usage_dict = cast(dict[str, Any], usage)
+    usage_obj = payload.get("usage")
+    usage_dict = cast(dict[str, Any], usage_obj) if isinstance(usage_obj, dict) else {}
     input_tokens = usage_dict.get("input_tokens")
     output_tokens = usage_dict.get("output_tokens")
     total_tokens = (

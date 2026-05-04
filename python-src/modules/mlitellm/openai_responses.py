@@ -1,10 +1,11 @@
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
 from __future__ import annotations
 
 import time
 from collections.abc import Iterator
 from typing import Any, cast
 
-from litellm.common import (
+from .common import (
     _as_str,
     _base_url,
     _chat_chunk,

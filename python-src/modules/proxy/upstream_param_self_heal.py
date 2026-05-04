@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from modules.proxy.param_self_heal_signal import (
-    extract_litellm_unsupported_params_from_message,
+    extract_mlitellm_unsupported_params_from_message,
 )
 
 TEMPORARY_SELF_HEAL_WARNING_PREFIX = "⚠️ [临时兼容]"
@@ -334,7 +334,7 @@ class UpstreamParamSelfHealController:
                 )
                 next_order += 1
 
-        for listed_hint in extract_litellm_unsupported_params_from_message(message):
+        for listed_hint in extract_mlitellm_unsupported_params_from_message(message):
             hint_candidates.append((listed_hint, 0, True, next_order))
             next_order += 1
         return UpstreamParamSelfHealController._rank_param_hints(hint_candidates)

@@ -28,7 +28,7 @@ class LiteLLMException(Exception):
         self.response = response
 
     def __str__(self) -> str:
-        return f"litellm.{self.__class__.__name__}: {self.message}"
+        return f"mlitellm.{self.__class__.__name__}: {self.message}"
 
 
 class APIConnectionError(LiteLLMException):

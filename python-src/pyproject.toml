@@ -25,7 +25,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mtga_app*", "modules*", "litellm*"]
+include = ["mtga_app*", "modules*"]
 exclude = ["build*", "target*", "pyembed*"]
 namespaces = false
 

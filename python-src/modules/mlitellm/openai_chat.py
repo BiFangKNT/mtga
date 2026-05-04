@@ -1,9 +1,10 @@
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
 
-from litellm.common import (
+from .common import (
     _as_str,
     _base_url,
     _headers,

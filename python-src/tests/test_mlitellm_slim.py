@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import ssl
 import unittest
 from typing import Any
 from unittest.mock import patch
 
 import httpx
 
-import litellm
-from litellm import APIConnectionError
-from litellm.exceptions import BadRequestError
-from litellm.gemini import _sanitize_empty_gemini_prompt_feedback
+from modules import mlitellm
+from modules.mlitellm import APIConnectionError
+from modules.mlitellm.exceptions import BadRequestError
+from modules.mlitellm.gemini import _sanitize_empty_gemini_prompt_feedback
 
 
 class _ConnectErrorStream:
@@ -34,7 +35,7 @@ class _ResponseStream:
         self.response.close()
 
 
-class LiteLLMSlimTests(unittest.TestCase):
+class MLiteLLMSlimTests(unittest.TestCase):
     def test_openai_chat_completion_posts_to_chat_completions(self) -> None:
         response = httpx.Response(
             200,
@@ -42,8 +43,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             json={"id": "chatcmpl_123", "choices": []},
         )
 
-        with patch("litellm.httpx.request", return_value=response) as request_mock:
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            result = mlitellm.completion(
                 model="gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -67,6 +68,24 @@ class LiteLLMSlimTests(unittest.TestCase):
             },
         )
 
+    def test_openai_chat_completion_preserves_ssl_context_verify(self) -> None:
+        ssl_context = ssl.create_default_context()
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+            json={"id": "chatcmpl_123", "choices": []},
+        )
+
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            mlitellm.completion(
+                model="gpt-5",
+                messages=[{"role": "user", "content": "hello"}],
+                base_url="https://example.com/v1",
+                ssl_verify=ssl_context,
+            )
+
+        self.assertIs(request_mock.call_args.kwargs["verify"], ssl_context)
+
     def test_openai_responses_converts_chat_content_part_types(self) -> None:
         response = httpx.Response(
             200,
@@ -85,8 +104,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         user_text_part = {"type": "text", "text": "hello"}
         assistant_text_part = {"type": "text", "text": "history"}
 
-        with patch("litellm.httpx.request", return_value=response) as request_mock:
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            result = mlitellm.completion(
                 model="responses/gpt-5",
                 messages=[
                     {"role": "system", "content": "rules"},
@@ -150,8 +169,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         }
         tool_choice = {"type": "function", "function": {"name": "lookup"}}
 
-        with patch("litellm.httpx.request", return_value=response) as request_mock:
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            result = mlitellm.completion(
                 model="responses/gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -210,8 +229,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             },
         )
 
-        with patch("litellm.httpx.request", return_value=response):
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response):
+            result = mlitellm.completion(
                 model="responses/gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -236,8 +255,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="responses/gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -259,10 +278,10 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
 
         with (
-            patch("litellm.httpx.request", return_value=response),
+            patch("modules.mlitellm.httpx.request", return_value=response),
             self.assertRaises(BadRequestError) as raised,
         ):
-            litellm.completion(
+            mlitellm.completion(
                 model="gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -280,10 +299,10 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
 
         with (
-            patch("litellm.httpx.request", return_value=response),
+            patch("modules.mlitellm.httpx.request", return_value=response),
             self.assertRaises(BadRequestError) as raised,
         ):
-            litellm.completion(
+            mlitellm.completion(
                 model="gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -295,10 +314,10 @@ class LiteLLMSlimTests(unittest.TestCase):
 
     def test_stream_connection_error_is_raised_before_returning_iterator(self) -> None:
         with (
-            patch("litellm.httpx.stream", return_value=_ConnectErrorStream()),
+            patch("modules.mlitellm.httpx.stream", return_value=_ConnectErrorStream()),
             self.assertRaises(APIConnectionError),
         ):
-            litellm.completion(
+            mlitellm.completion(
                 model="gpt-5",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://example.com/v1",
@@ -318,10 +337,10 @@ class LiteLLMSlimTests(unittest.TestCase):
         stream = _ResponseStream(response)
 
         with (
-            patch("litellm.httpx.stream", return_value=stream),
+            patch("modules.mlitellm.httpx.stream", return_value=stream),
             self.assertRaises(BadRequestError) as raised,
         ):
-            litellm.completion(
+            mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",
@@ -354,8 +373,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",
@@ -380,8 +399,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="anthropic/glm-4.7-flash",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://anthropic.example.com",
@@ -406,8 +425,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="anthropic/glm-4.7-flash",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://anthropic.example.com",
@@ -436,8 +455,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="anthropic/claude-3-7-sonnet-latest",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://anthropic.example.com",
@@ -466,8 +485,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             },
         )
 
-        with patch("litellm.httpx.request", return_value=response):
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response):
+            result = mlitellm.completion(
                 model="anthropic/claude-3-7-sonnet-latest",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://anthropic.example.com",
@@ -494,8 +513,8 @@ class LiteLLMSlimTests(unittest.TestCase):
         )
         stream = _ResponseStream(response)
 
-        with patch("litellm.httpx.stream", return_value=stream):
-            iterator = litellm.completion(
+        with patch("modules.mlitellm.httpx.stream", return_value=stream):
+            iterator = mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",
@@ -528,8 +547,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             },
         )
 
-        with patch("litellm.httpx.request", return_value=response):
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response):
+            result = mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",
@@ -614,8 +633,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             }
         ]
 
-        with patch("litellm.httpx.request", return_value=response) as request_mock:
-            result = litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            result = mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",
@@ -661,8 +680,8 @@ class LiteLLMSlimTests(unittest.TestCase):
             for index in range(14)
         ]
 
-        with patch("litellm.httpx.request", return_value=response) as request_mock:
-            litellm.completion(
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            mlitellm.completion(
                 model="gemini/gemini-2.5-pro",
                 messages=[{"role": "user", "content": "hello"}],
                 base_url="https://gemini.example.com/v1beta",

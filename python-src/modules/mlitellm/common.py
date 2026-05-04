@@ -1,7 +1,9 @@
+# pyright: reportUnusedFunction=false
 from __future__ import annotations
 
 import contextlib
 import json
+import ssl
 import sys
 import time
 import uuid
@@ -10,7 +12,7 @@ from typing import Any, cast
 
 import httpx
 
-from litellm.exceptions import (
+from .exceptions import (
     APIConnectionError,
     APIError,
     AuthenticationError,
@@ -48,7 +50,7 @@ ssl_verify: bool | str = True
 
 
 def _global_ssl_verify() -> bool | str:
-    root_module = sys.modules.get("litellm")
+    root_module = sys.modules.get("modules.mlitellm")
     if root_module is None:
         return ssl_verify
     verify = getattr(root_module, "ssl_verify", ssl_verify)
@@ -297,7 +299,7 @@ def _collect_text_values(value: Any, parts: list[str]) -> None:
     if isinstance(value, str):
         parts.append(value)
     elif isinstance(value, list):
-        for item in value:
+        for item in cast(list[Any], value):
             _collect_text_values(item, parts)
     elif isinstance(value, dict):
         value_dict = cast(dict[str, Any], value)
@@ -362,11 +364,11 @@ def _join_url(base_url: str, suffix: str) -> str:
     return f"{base_url.rstrip('/')}/{clean_suffix}"
 
 
-def _verify(kwargs: dict[str, Any]) -> bool | str:
+def _verify(kwargs: dict[str, Any]) -> bool | str | ssl.SSLContext:
     verify = kwargs.get("ssl_verify", _global_ssl_verify())
-    if isinstance(verify, (bool, str)):
+    if isinstance(verify, (bool, str, ssl.SSLContext)):
         return verify
-    return cast(Any, verify)
+    return _global_ssl_verify()
 
 
 def _timeout(kwargs: dict[str, Any]) -> float | httpx.Timeout | None:

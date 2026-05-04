@@ -12,9 +12,9 @@ from unittest.mock import patch
 import httpx
 import yaml
 
-import litellm
-from litellm import APIConnectionError, RateLimitError
-from litellm.exceptions import BadRequestError
+from modules import mlitellm
+from modules.mlitellm import APIConnectionError, RateLimitError
+from modules.mlitellm.exceptions import BadRequestError
 from modules.proxy.proxy_config import (
     GEMINI_NATIVE_X_GOOG_API_KEY_MODEL_DISCOVERY,
     OPENAI_CHAT_COMPLETION_PROVIDER,
@@ -684,10 +684,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity", "web_search_options"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -734,10 +734,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -780,10 +780,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["stream"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -813,7 +813,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -855,7 +855,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             request=request,
         )
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 transient_error,
                 {"id": "chatcmpl_123", "choices": []},
@@ -877,7 +877,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             (
                 "provider=openai_chat_completion request_api=chat_completions "
                 "model=gpt-4o-mini 遇到建连阶段故障，准备重试: attempt=2/3 "
-                "error=litellm.APIConnectionError: connect failed"
+                "error=mlitellm.APIConnectionError: connect failed"
             ),
             logs,
         )
@@ -908,7 +908,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             request=request,
         )
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=timeout_error,
         ) as completion_mock, self.assertRaises(APIConnectionError):
             adapter.create_chat_completion(
@@ -943,7 +943,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             response=response,
         )
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=bad_request_error,
         ) as completion_mock, self.assertRaises(BadRequestError):
             adapter.create_chat_completion(
@@ -982,10 +982,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_retry_1", "choices": []},
@@ -1077,10 +1077,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_retry_1", "choices": []},
@@ -1166,10 +1166,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_verbosity_retry", "choices": []},
@@ -1210,7 +1210,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_temperature_retry", "choices": []},
@@ -1271,10 +1271,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["response_format"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_response_format_retry", "choices": []},
@@ -1369,10 +1369,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error_gpt5,
                 {"id": "chatcmpl_gpt5", "choices": []},
@@ -1434,10 +1434,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error,
                 {"id": "chatcmpl_key_a_retry", "choices": []},
@@ -1498,10 +1498,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=[],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 bad_request_error_foo,
                 bad_request_error_bar,
@@ -1570,10 +1570,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["reasoning_effort", "stream"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1615,7 +1615,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1660,7 +1660,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1699,10 +1699,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["stream", "tools", "tool_choice"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 litellm_validation_error,
                 {"id": "chatcmpl_anthropic_retry", "choices": []},
@@ -1775,10 +1775,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["stream", "tools", "tool_choice"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
                 litellm_validation_error,
                 litellm_validation_error,
@@ -1839,10 +1839,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["stream", "thinking", "tools", "tool_choice"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1879,7 +1879,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1918,7 +1918,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1962,7 +1962,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -1999,7 +1999,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2027,10 +2027,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["stream", "thinking", "tools", "response_format"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2064,10 +2064,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.get_supported_openai_params",
+            "modules.proxy.upstream_adapter.mlitellm.get_supported_openai_params",
             return_value=["verbosity", "web_search_options"],
         ), patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2111,7 +2111,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2140,7 +2140,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2170,7 +2170,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
         with patch(
-            "modules.proxy.upstream_adapter.litellm.completion",
+            "modules.proxy.upstream_adapter.mlitellm.completion",
             return_value={"id": "chatcmpl_123", "choices": []},
         ) as completion_mock:
             adapter.create_chat_completion(
@@ -2194,20 +2194,20 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             )
         )
 
-        original_ssl_verify = litellm.ssl_verify
-        litellm.ssl_verify = "global-sentinel"
+        original_ssl_verify = mlitellm.ssl_verify
+        mlitellm.ssl_verify = "global-sentinel"
         try:
             with patch(
-                "modules.proxy.upstream_adapter.litellm.completion",
+                "modules.proxy.upstream_adapter.mlitellm.completion",
                 return_value={"id": "chatcmpl_123", "choices": []},
             ) as completion_mock:
                 adapter.create_chat_completion(
                     route=route,
                     request_data={"messages": [{"role": "user", "content": "你好"}]},
                 )
-            self.assertEqual(litellm.ssl_verify, "global-sentinel")
+            self.assertEqual(mlitellm.ssl_verify, "global-sentinel")
         finally:
-            litellm.ssl_verify = original_ssl_verify
+            mlitellm.ssl_verify = original_ssl_verify
 
         call_kwargs = completion_mock.call_args.kwargs
         ssl_verify = call_kwargs["ssl_verify"]

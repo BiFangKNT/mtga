@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false
 from __future__ import annotations
 
 import json
@@ -5,7 +6,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, cast
 
-from litellm.common import (
+from .common import (
     _as_str,
     _base_url,
     _chat_chunk,
@@ -317,7 +318,7 @@ def _first_candidate(payload: dict[str, Any]) -> dict[str, Any] | None:
     candidates = payload.get("candidates")
     if not isinstance(candidates, list) or not candidates:
         return None
-    first = candidates[0]
+    first = cast(list[Any], candidates)[0]
     if isinstance(first, dict):
         return cast(dict[str, Any], first)
     return None
@@ -330,7 +331,11 @@ def _candidate_parts(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     parts = cast(dict[str, Any], content).get("parts")
     if not isinstance(parts, list):
         return []
-    return [cast(dict[str, Any], part) for part in parts if isinstance(part, dict)]
+    return [
+        cast(dict[str, Any], part)
+        for part in cast(list[Any], parts)
+        if isinstance(part, dict)
+    ]
 
 
 def _sanitize_empty_gemini_prompt_feedback(payload: Any) -> Any:
