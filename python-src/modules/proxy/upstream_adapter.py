@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import ssl
@@ -9,9 +8,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 import httpx
+
 import litellm
 from litellm.exceptions import APIConnectionError
-
 from modules.proxy.param_self_heal_signal import extract_param_self_heal_signal
 from modules.proxy.proxy_config import (
     ANTHROPIC_PROVIDER,
@@ -81,9 +80,6 @@ NON_OPENAI_REQUIRED_CHAT_PARAMS: frozenset[str] = frozenset({"messages", "model"
 OPENAI_COMPATIBLE_META_PARAMS: frozenset[str] = frozenset(
     {"messages", "model", "extra_body", "allowed_openai_params"}
 )
-_litellm_compat_patch_state = {"applied": False}
-
-
 @dataclass(frozen=True)
 class UpstreamRoute:
     provider: str
@@ -251,90 +247,6 @@ def _extract_fallback_response_body(exc: Exception) -> dict[str, Any] | list[Any
     if coerced_body is not None:
         return _restore_error_root_payload(coerced_body, exc)
     return None
-
-
-def _sanitize_empty_gemini_block_reason(payload: Any) -> Any:
-    payload_dict = _coerce_mapping_payload(payload)
-    if payload_dict is None:
-        return payload
-
-    prompt_feedback_obj = payload_dict.get("promptFeedback")
-    if not isinstance(prompt_feedback_obj, dict):
-        return payload_dict
-
-    prompt_feedback = dict(cast(dict[str, Any], prompt_feedback_obj))
-    block_reason = prompt_feedback.get("blockReason")
-    if block_reason is not None and (
-        not isinstance(block_reason, str) or block_reason.strip()
-    ):
-        return payload_dict
-
-    # MTGA workaround:
-    # 某些 Gemini 兼容反代会在成功响应里返回 `promptFeedback.blockReason=""`。
-    # LiteLLM 1.82.x 只按“键是否存在”判断是否被 prompt-level content filter block，
-    # 会把本来正常的 `STOP + text` 响应错误改写成 `content_filter + content=None`。
-    # 这里在进入 LiteLLM Gemini transformer 之前，去掉空的 blockReason。
-    # 等上游修复后，可删除这段兼容逻辑。
-    prompt_feedback.pop("blockReason", None)
-    block_reason_message = prompt_feedback.get("blockReasonMessage")
-    if isinstance(block_reason_message, str) and not block_reason_message.strip():
-        prompt_feedback.pop("blockReasonMessage", None)
-
-    if prompt_feedback:
-        payload_dict["promptFeedback"] = prompt_feedback
-    else:
-        payload_dict.pop("promptFeedback", None)
-    return payload_dict
-
-
-def apply_litellm_compat_patches(*, log_func: LogFunc = print) -> None:
-    if _litellm_compat_patch_state["applied"]:
-        return
-
-    vertex_gemini_module: Any = importlib.import_module(
-        "litellm.llms.vertex_ai.gemini.vertex_and_google_ai_studio_gemini"
-    )
-    VertexGeminiConfig: Any = vertex_gemini_module.VertexGeminiConfig
-
-    if getattr(VertexGeminiConfig, "_mtga_gemini_prompt_feedback_patch", False):
-        _litellm_compat_patch_state["applied"] = True
-        return
-
-    original_transform: Any = (
-        VertexGeminiConfig._transform_google_generate_content_to_openai_model_response
-    )
-    original_prompt_filter: Any = (
-        VertexGeminiConfig._check_prompt_level_content_filter
-    )
-
-    def patched_transform(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if args:
-            args = (
-                _sanitize_empty_gemini_block_reason(args[0]),
-                *args[1:],
-            )
-        elif "completion_response" in kwargs:
-            kwargs = dict(kwargs)
-            kwargs["completion_response"] = _sanitize_empty_gemini_block_reason(
-                kwargs["completion_response"]
-            )
-        return original_transform(self, *args, **kwargs)
-
-    def patched_prompt_filter(processed_chunk: Any, response_id: Any) -> Any:
-        return original_prompt_filter(
-            _sanitize_empty_gemini_block_reason(processed_chunk),
-            response_id,
-        )
-
-    VertexGeminiConfig._transform_google_generate_content_to_openai_model_response = (
-        patched_transform
-    )
-    VertexGeminiConfig._check_prompt_level_content_filter = staticmethod(
-        patched_prompt_filter
-    )
-    VertexGeminiConfig._mtga_gemini_prompt_feedback_patch = True
-    _litellm_compat_patch_state["applied"] = True
-    log_func("已应用 LiteLLM Gemini promptFeedback 兼容补丁")
 
 
 def build_upstream_route(
@@ -557,13 +469,6 @@ class LiteLLMUpstreamAdapter:
 
     def close(self) -> None:
         return
-
-    def _apply_route_compat_patches(self, route: UpstreamRoute) -> None:
-        if route.provider != GEMINI_PROVIDER:
-            return
-        if _litellm_compat_patch_state["applied"]:
-            return
-        apply_litellm_compat_patches(log_func=self._log)
 
     @staticmethod
     def _coerce_payload_dict(payload: Any) -> dict[str, Any] | None:
@@ -962,7 +867,6 @@ class LiteLLMUpstreamAdapter:
         route: UpstreamRoute,
         request_data: dict[str, Any],
     ) -> Any:
-        self._apply_route_compat_patches(route)
         call_kwargs = self._normalize_provider_chat_request(
             route=route,
             request_data=request_data,

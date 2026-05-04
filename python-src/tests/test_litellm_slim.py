@@ -9,6 +9,7 @@ import httpx
 import litellm
 from litellm import APIConnectionError
 from litellm.exceptions import BadRequestError
+from litellm.gemini import _sanitize_empty_gemini_prompt_feedback
 
 
 class _ConnectErrorStream:
@@ -537,6 +538,50 @@ class LiteLLMSlimTests(unittest.TestCase):
         message = result["choices"][0]["message"]
         self.assertEqual(message["reasoning_content"], "先想")
         self.assertEqual(message["content"], "答案")
+
+    def test_gemini_empty_prompt_feedback_block_reason_is_sanitized(self) -> None:
+        payload = {
+            "promptFeedback": {
+                "blockReason": "",
+                "blockReasonMessage": "",
+            },
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [{"text": "OK"}],
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+        }
+
+        sanitized = _sanitize_empty_gemini_prompt_feedback(payload)
+
+        self.assertNotIn("promptFeedback", sanitized)
+        self.assertEqual(
+            sanitized["candidates"][0]["content"]["parts"][0]["text"],
+            "OK",
+        )
+        self.assertIn("promptFeedback", payload)
+
+    def test_gemini_real_prompt_feedback_block_reason_is_preserved(self) -> None:
+        payload = {
+            "promptFeedback": {
+                "blockReason": "SAFETY",
+                "blockReasonMessage": "blocked",
+            }
+        }
+
+        sanitized = _sanitize_empty_gemini_prompt_feedback(payload)
+
+        self.assertEqual(
+            sanitized["promptFeedback"],
+            {
+                "blockReason": "SAFETY",
+                "blockReasonMessage": "blocked",
+            },
+        )
 
     def test_gemini_tools_drop_unsupported_json_schema_fields(self) -> None:
         response = httpx.Response(

@@ -57,6 +57,7 @@ def _gemini_completion(kwargs: dict[str, Any]) -> dict[str, Any] | Iterator[Any]
         model=model,
         provider="gemini",
     )
+    response_json = _sanitize_empty_gemini_prompt_feedback(response_json)
     return _gemini_payload_to_chat_completion(response_json, fallback_model=model)
 
 def _build_gemini_body(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -128,7 +129,8 @@ def _iter_gemini_content_events(
         if isinstance(event, str):
             yield event
             continue
-        candidate = _first_candidate(event)
+        sanitized_event = _sanitize_empty_gemini_prompt_feedback(event)
+        candidate = _first_candidate(sanitized_event)
         if candidate is None:
             continue
         for part in _candidate_parts(candidate):
@@ -329,6 +331,35 @@ def _candidate_parts(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(parts, list):
         return []
     return [cast(dict[str, Any], part) for part in parts if isinstance(part, dict)]
+
+
+def _sanitize_empty_gemini_prompt_feedback(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    payload_dict = dict(cast(dict[str, Any], payload))
+    prompt_feedback_obj = payload_dict.get("promptFeedback")
+    if not isinstance(prompt_feedback_obj, dict):
+        return payload_dict
+
+    prompt_feedback = dict(cast(dict[str, Any], prompt_feedback_obj))
+    block_reason = prompt_feedback.get("blockReason")
+    if block_reason is not None and (
+        not isinstance(block_reason, str) or block_reason.strip()
+    ):
+        return payload_dict
+
+    prompt_feedback.pop("blockReason", None)
+    block_reason_message = prompt_feedback.get("blockReasonMessage")
+    if isinstance(block_reason_message, str) and not block_reason_message.strip():
+        prompt_feedback.pop("blockReasonMessage", None)
+
+    if prompt_feedback:
+        payload_dict["promptFeedback"] = prompt_feedback
+    else:
+        payload_dict.pop("promptFeedback", None)
+    return payload_dict
+
 
 def _gemini_response_mime_type(response_format: Any) -> str:
     if not isinstance(response_format, dict):
