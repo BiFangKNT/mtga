@@ -19,7 +19,7 @@
 
 | 版本     | 核心主题             | 主要产出                                                              | 状态        |
 | -------- | -------------------- | --------------------------------------------------------------------- | ----------- |
-| `v2.4.0` | 多供应商上游适配     | LiteLLM 接入、上游适配层、非 OpenAI 上游转发能力                      | `Done`      |
+| `v2.4.0` | 多供应商上游适配     | MLiteLLM 执行层、上游适配层、非 OpenAI 上游转发能力                    | `Done`      |
 | `v2.5.0` | 结构化代理日志与并发 | `trace` 体系、代理日志页、单模型并发处理                              | `Done`      |
 | `v2.6.0` | 模型路由重构         | `published_model / target / failover_pool` 配置模型、动态路由、热切换 | `In Design` |
 
@@ -30,13 +30,13 @@
 - 新能力优先服务后续版本演进，避免一次性做完整大重构。
 - 路由、日志、并发等基础能力应按版本顺序渐进落地。
 
-## LiteLLM 使用边界
+## MLiteLLM 使用边界
 
-- LiteLLM 在本项目中的优先定位是“执行层能力提供者”，负责多 provider 调用、路由执行、fallback、retry、cooldown 等通用能力。
-- MTGA 自己维护“产品层配置模型”，前端仍以用户可理解的对象暴露配置，不直接把 LiteLLM 的 `model_list`、`fallbacks`、virtual key 等原生对象作为主要心智模型。
-- `trace`、代理日志页、查询接口、清理策略和热应用语义属于 MTGA 自有产品能力，不以 LiteLLM 的 callback、第三方 observability 页面或 Proxy 管理面直接替代。
-- 当 LiteLLM 能覆盖底层执行逻辑时，应优先复用 LiteLLM 能力，而不是重复实现另一套 provider 路由内核。
-- 当 MTGA 的产品语义强于 LiteLLM 原生语义时，应由 MTGA 配置 schema 编译为 LiteLLM 的执行配置，而不是反过来用 LiteLLM 配置倒逼前端设计。
+- MLiteLLM 是项目内置维护的精简执行层模块，负责多 provider 调用、请求归一化、响应归一化和 provider 兼容补丁。
+- MTGA 自己维护“产品层配置模型”，前端仍以用户可理解的对象暴露配置，不直接把 MLiteLLM 内部调用参数作为主要心智模型。
+- `trace`、代理日志页、查询接口、清理策略、热应用、路由、fallback、retry、cooldown 等产品语义属于 MTGA 自有能力，不由 MLiteLLM 反向决定配置模型。
+- 当 MLiteLLM 能覆盖 provider 适配细节时，应优先复用 MLiteLLM 能力，而不是在代理主流程里重复实现 provider 调用细节。
+- 当 MTGA 的产品语义强于执行层调用语义时，应由 MTGA 配置 schema 编译为 MLiteLLM 调用参数，而不是反过来用执行层参数倒逼前端设计。
 
 ## 当前主要代码落点
 
@@ -56,10 +56,10 @@
 
 **目标**
 
-- 在 `proxy_app` 中引入 LiteLLM，使 OpenAI Chat Completions 请求可以转发到 Anthropic、Google 等上游。
+- 在 `proxy_app` 中引入 MLiteLLM 执行层，使 OpenAI Chat Completions 请求可以转发到 Anthropic、Google 等上游。
 - 保持当前 UI、配置格式和 `/models` 语义基本不变。
 - 为后续 `trace` 与动态路由改造预留清晰的上游适配接口。
-- 将 LiteLLM 接入定位为“后端执行层改造”，而不是前端配置模型改造。
+- 将 MLiteLLM 接入定位为“后端执行层改造”，而不是前端配置模型改造。
 
 **范围**
 
@@ -67,7 +67,7 @@
 - 保持现有“单当前映射”模式。
 - 兼容流式与非流式请求。
 - 保留现有系统提示词处理链路。
-- 保留当前“用户配置 -> 运行时配置”转换关系，不把 LiteLLM 原生配置对象直接暴露到 UI。
+- 保留当前“用户配置 -> 运行时配置”转换关系，不把 MLiteLLM 内部调用参数直接暴露到 UI。
 
 **本版本不做**
 
@@ -76,21 +76,21 @@
 - 不做通用请求体改写规则，不新增配置组级请求变换 schema。
 - 不做故障转移。
 - 不做日志页重构。
-- 不接入 LiteLLM Proxy 的用户、预算、virtual key 等管理能力。
-- 不把 LiteLLM 原生配置文件或管理 API 直接变成用户配置面。
+- 不接入执行层的用户、预算、virtual key 等代理管理能力。
+- 不把 MLiteLLM 内部配置或管理 API 直接变成用户配置面。
 
 **预期交付物**
 
-- LiteLLM 依赖接入。
+- MLiteLLM 内置执行层接入。
 - 统一的上游请求构造与响应归一化入口。
 - 至少 2 个非 OpenAI provider 的最小可用适配。
-- MTGA 运行时配置到 LiteLLM 调用参数的映射约束说明。
+- MTGA 运行时配置到 MLiteLLM 调用参数的映射约束说明。
 - 对流式、非流式和异常响应的回归测试。
 - provider 支持范围与限制说明文档。
 
 **建议任务拆分**
 
-1. 后端基础设施：引入 LiteLLM，建立上游适配入口，并补齐 MTGA 运行时配置到 LiteLLM 调用参数的映射层。
+1. 后端基础设施：引入 MLiteLLM，建立上游适配入口，并补齐 MTGA 运行时配置到 MLiteLLM 调用参数的映射层。
 2. 后端 provider 打通：接入至少 2 个非 OpenAI provider，并统一流式、非流式响应归一化行为。
 3. 测试补强：覆盖流式、非流式、异常响应回归，确保现有请求链路不回退。
 4. 文档收口：补充 provider 支持范围、已知限制和配置映射约束。
@@ -109,7 +109,7 @@
 - 新增“代理日志”页，用于查看请求列表与详情。
 - 验证并加固当前单模型映射架构下的并发请求处理。
 - 将右侧日志区收敛为摘要日志，而不是完整代理详情。
-- 明确 `trace` 是 MTGA 自有的数据模型与产品能力，不随 LiteLLM 选型外包出去。
+- 明确 `trace` 是 MTGA 自有的数据模型与产品能力，不随执行层选型外包出去。
 
 **范围**
 
@@ -118,7 +118,7 @@
 - 右侧运行日志区只记录一行摘要，例如“收到代理请求”或“已转发到上游”。
 - 对现有代理运行时做并发安全审计和必要加固，重点保证并发请求下的 trace 完整性。
 - 并发范围仅限“当前单映射模型下的并发处理”，不提前引入多发布模型路由。
-- 如 LiteLLM 提供回调、raw request/response 或 observability 集成，只作为 trace 打点的数据来源之一，不作为日志页主存储模型。
+- 如 MLiteLLM 提供 raw request/response 或 provider 事件，只作为 trace 打点的数据来源之一，不作为日志页主存储模型。
 - trace 存储必须独立于纯字符串 `log_bus`，`log_bus` 只保留面向右侧运行日志的摘要文本。
 - 请求体、响应体和错误详情必须有脱敏、截断与保留策略，不保存可泄露的鉴权信息。
 - 流式请求以生成器结束、上游异常或客户端断开作为 trace 结束点，不以 Flask handler 返回 `Response` 作为结束点。
@@ -131,7 +131,7 @@
 - 不做 `published_model`、`target`、`failover_pool`。
 - 不让 `/models` 返回多个模型。
 - 不把 PR #79 当前的“配置组轮询”语义直接合入主线。
-- 不用 LiteLLM callback 或第三方 observability 页面直接替代“代理日志”页。
+- 不用执行层 callback 或第三方 observability 页面直接替代“代理日志”页。
 
 **预期交付物**
 
@@ -140,7 +140,7 @@
 - `proxy_app` 请求处理全链路 trace 打点。
 - 并发代理运行时。
 - “代理日志”页列表与详情视图。
-- LiteLLM 打点与 `ProxyTrace` 的字段映射策略说明。
+- MLiteLLM provider 事件与 `ProxyTrace` 的字段映射策略说明。
 - 请求体、响应体、鉴权信息脱敏、截断与保留策略。
 - 并发请求、trace 完整性、清理逻辑测试。
 - trace 字段、并发边界、清空语义与内存保留策略说明文档。
@@ -148,7 +148,7 @@
 **建议任务拆分**
 
 1. 后端 trace 基础：定义 `ProxyTrace` 数据结构、生命周期和存储保留策略，并提供列表、详情、清空接口。
-2. 后端 trace 打点：把 `proxy_app` 全链路请求处理接入 trace，并明确 LiteLLM 打点到 `ProxyTrace` 的字段映射边界。
+2. 后端 trace 打点：把 `proxy_app` 全链路请求处理接入 trace，并明确 MLiteLLM provider 事件到 `ProxyTrace` 的字段映射边界。
 3. 后端并发安全：审计并加固现有代理运行时，确保并发场景下 trace 完整性不丢失。
 4. 前端日志页：新增“代理日志”页的列表与详情视图，支持查看请求体、响应体、状态码、耗时和错误。
 5. 前端日志收敛：调整右侧日志区，仅保留代理摘要日志，避免与 trace 详情重复。
@@ -172,7 +172,7 @@
 - 请求按 `request.model` 动态路由，不再依赖线程内固定单一映射。
 - 将“代理配置组”页和“全局配置”页统一为“模型路由”。
 - 配置保存后可热切换到运行中代理，无需重启线程。
-- 在不牺牲 MTGA 配置语义的前提下，尽量复用 LiteLLM Router / fallback / cooldown 等执行能力。
+- 在不牺牲 MTGA 配置语义的前提下，尽量复用 MLiteLLM provider 调用与兼容能力；路由、fallback、cooldown 由 MTGA 路由层定义。
 
 **范围**
 
@@ -191,7 +191,7 @@
 - `/models` 只返回启用的 `published_model.name`。
 - 允许同一 `target` 被多个模型、多个故障转移池复用。
 - 路由配置保存后应直接热应用到运行中代理，仅影响后续新请求；已在处理中的请求继续沿用请求开始时解析出的路由。
-- 后端可以把 `target / failover_pool / published_model` 编译为 LiteLLM Router 或 Proxy 的执行配置，但不把 LiteLLM 原生对象直接上浮为前端配置对象。
+- 后端可以把 `target / failover_pool / published_model` 编译为 MTGA 路由层的执行计划，再下发为 MLiteLLM provider 调用参数，但不把执行层对象直接上浮为前端配置对象。
 
 **本版本不做**
 
@@ -200,14 +200,14 @@
 - 不做复杂流量调度策略。
 - 不做“主目标多成员”的另一套语义。
 - 不接受继续扩展旧 `config_group` 语义来模拟新模型路由。
-- 不直接把 LiteLLM 的 `model_list`、`fallbacks`、virtual key、access group 作为前端配置模型。
+- 不直接把执行层的 `model_list`、`fallbacks`、virtual key、access group 等对象作为前端配置模型。
 
 **预期交付物**
 
 - 新配置 schema 与类型定义。
 - 旧 schema 到新 schema 的迁移逻辑。
 - `request.model -> published_model -> primary_target/failover_pool` 解析器。
-- `published_model / target / failover_pool -> LiteLLM 执行配置` 编译层或适配层。
+- `published_model / target / failover_pool -> MTGA 路由执行计划 -> MLiteLLM 调用参数` 编译层或适配层。
 - `published_model` / `target` 级请求体变换规则设计与落地。
 - 路由配置热切换能力。
 - `/models` 返回全部启用发布模型。
@@ -221,7 +221,7 @@
 
 1. 配置模型重构：定义新 schema 与类型，并实现旧 schema 到新 schema 的迁移逻辑。
 2. 路由解析主链路：实现 `request.model -> published_model -> primary_target/failover_pool` 解析器，并让 `/models` 返回全部启用发布模型。
-3. 执行层接线：实现 MTGA 路由对象到 LiteLLM 执行配置的编译层，并支持运行中配置热应用。
+3. 执行层接线：实现 MTGA 路由对象到路由执行计划和 MLiteLLM 调用参数的编译层，并支持运行中配置热应用。
 4. 故障转移内核：实现基于 `target_id` 的 `429` 冷却状态管理和故障转移池顺序执行器。
 5. 前端路由页：完成“模型路由”页信息架构与 `targets`、`failover_pools`、`published_models` 三类对象管理。
 6. 旧入口迁移：移除旧“代理配置组”页与“全局配置”页入口，并完成新旧交互路径切换。
@@ -242,7 +242,7 @@
 - `v2.5.0` 提供结构化 trace 和并发基础设施，为 `v2.6.0` 的动态路由调试提供可观测性。
 - `v2.6.0` 才是新的稳定路由模型，不建议在 `v2.4.0` 或 `v2.5.0` 提前做部分 schema 重构。
 - 通用请求体改写规则应依附 `v2.6.0` 的新对象模型设计，不应继续叠加到旧 `config_group`。
-- LiteLLM 的引入顺序应是先适配 provider，再补 trace，可复用其路由内核时最后由 `v2.6.0` 统一接管执行层。
+- MLiteLLM 的引入顺序应是先适配 provider，再补 trace，最终由 `v2.6.0` 的 MTGA 路由层统一接管动态路由与故障转移语义。
 
 ## `v2.6.0` 目标状态
 
@@ -278,12 +278,12 @@ published_models:
 - “多对一”的真实需求收敛为“主目标 + 故障转移池”，不单独设计主池多成员语义。
 - 不做模型能力自动识别与兼容性校验，风险由用户自行承担。
 
-### 与 LiteLLM 的概念映射
+### 与 MLiteLLM 的概念映射
 
-- `target` 对应一个可复用的上游目标定义，可编译为一个 LiteLLM deployment 或等价的 `litellm_params`。
-- `published_model` 是 MTGA 对用户暴露的稳定模型名，不要求与 LiteLLM 原生 `model_name` 一一同名，但可在执行层映射到同一模型组。
-- `failover_pool` 是 MTGA 的产品语义对象，可在执行层映射到 LiteLLM 的 fallback、retry、cooldown 配置。
-- `target_id` 仍是 MTGA 内部稳定标识；即使底层复用 LiteLLM cooldown，也不放弃以 `target_id` 为键的产品语义与调试语义。
+- `target` 对应一个可复用的上游目标定义，可编译为 MLiteLLM provider 调用参数。
+- `published_model` 是 MTGA 对用户暴露的稳定模型名，不要求与 MLiteLLM 请求中的 `model` 一一同名，但可在执行层映射到同一上游模型。
+- `failover_pool` 是 MTGA 的产品语义对象，由 MTGA 路由层映射为 fallback、retry、cooldown 执行计划。
+- `target_id` 仍是 MTGA 内部稳定标识；即使底层调用经过 MLiteLLM，也不放弃以 `target_id` 为键的产品语义与调试语义。
 
 ## 附录 A：`v2.5.0` trace 草案
 
@@ -354,7 +354,7 @@ type ProxyTrace = {
   - `429` 冷却内核
   - 目标切换执行逻辑
   - 每目标独立 `middle_route` 支持
-- 若复用 LiteLLM 路由能力，应优先拆成“执行层能力”而不是直接引入 LiteLLM 原生配置对象到 UI。
+- 若扩展 MLiteLLM 路由相关能力，应优先拆成“执行层能力”而不是直接引入执行层对象到 UI。
 - 上述能力应服务 `v2.6.0` 的 `target + failover_pool` 模型，而不是继续强化旧 `config_group`。
 
 ## 暂不接受的贡献方向
@@ -364,7 +364,7 @@ type ProxyTrace = {
 - 在 `v2.5.0` 之后仍把代理详情日志做成纯字符串拼接。
 - 未完成并发 trace 设计就先做复杂日志 UI。
 - 在安全边界未明确前，仅做“允许空鉴权 key”的放宽而不讨论监听策略。
-- 未经设计确认就把 LiteLLM 原生配置术语直接暴露为最终用户配置面。
+- 未经设计确认就把 MLiteLLM 内部调用术语直接暴露为最终用户配置面。
 
 ## 对外发布建议
 
