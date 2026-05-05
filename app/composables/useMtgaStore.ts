@@ -7,7 +7,6 @@ import type {
   ConfigGroupModelsResult,
   ConfigPayload,
   InvokeResult,
-  LazyWarmupEventPayload,
   LogEventPayload,
   LogPullResult,
   MainTabKey,
@@ -33,7 +32,6 @@ type PanelTarget =
   | "proxy-logs"
   | "system-prompts"
   | "settings";
-type LazyWarmupStatus = "idle" | "running" | "done" | "error";
 
 const DEFAULT_APP_INFO: AppInfo = {
   display_name: "MTGA",
@@ -71,15 +69,6 @@ const PROXY_REQUEST_SUMMARY_MARKERS = [
   "连接目标 API 时出错",
   "发生意外错误",
 ];
-const LAZY_WARMUP_SHOW_DELAY_MS = 120;
-const LAZY_WARMUP_DONE_PEEK_MS = 960;
-const LAZY_WARMUP_HIDE_MS = 850;
-const LAZY_WARMUP_ERROR_HIDE_MS = 2200;
-const LAZY_WARMUP_MIN_VISIBLE_MS = 640;
-const LAZY_WARMUP_POLL_INTERVAL_MS = 220;
-const LAZY_WARMUP_POLL_TIMEOUT_MS = 15000;
-const DEFERRED_LAZY_WARMUP_DELAY_MS = 2500;
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -223,26 +212,6 @@ const getDefaultTraeDialogPath = () => {
     return MACOS_TRAE_DIALOG_PATH;
   }
   return WINDOWS_TRAE_DIALOG_PATH;
-};
-
-const isLazyWarmupPhase = (value: unknown): value is LazyWarmupEventPayload["phase"] =>
-  value === "start" || value === "progress" || value === "done" || value === "error";
-
-const normalizeLazyWarmupPayload = (payload: unknown): LazyWarmupEventPayload | null => {
-  if (!isRecord(payload) || !isLazyWarmupPhase(payload.phase)) {
-    return null;
-  }
-  const completed = Number(payload.completed);
-  const total = Number(payload.total);
-  return {
-    phase: payload.phase,
-    stage: coerceText(payload.stage) || null,
-    label: coerceText(payload.label) || null,
-    detail: coerceText(payload.detail) || null,
-    completed: Number.isFinite(completed) ? Math.max(0, completed) : 0,
-    total: Number.isFinite(total) ? Math.max(0, total) : 0,
-    error_message: coerceText(payload.error_message) || null,
-  };
 };
 
 const normalizeModelList = (value: unknown) => {
@@ -465,31 +434,8 @@ export const useMtgaStore = () => {
     "mtga-proxy-runtime-loopback-port",
     () => null,
   );
-  const lazyWarmupStatus = useState<LazyWarmupStatus>("mtga-lazy-warmup-status", () => "idle");
-  const lazyWarmupVisible = useState<boolean>("mtga-lazy-warmup-visible", () => false);
-  const lazyWarmupLabel = useState<string>("mtga-lazy-warmup-label", () => "");
-  const lazyWarmupDetail = useState<string>("mtga-lazy-warmup-detail", () => "");
-  const lazyWarmupCompleted = useState<number>("mtga-lazy-warmup-completed", () => 0);
-  const lazyWarmupTotal = useState<number>("mtga-lazy-warmup-total", () => 0);
-  const lazyWarmupRequested = useState<boolean>("mtga-lazy-warmup-requested", () => false);
-  const lazyWarmupListenerActive = useState<boolean>(
-    "mtga-lazy-warmup-listener-active",
-    () => false,
-  );
-  const deferredRuntimeWorkScheduled = useState<boolean>(
-    "mtga-deferred-runtime-work-scheduled",
-    () => false,
-  );
-
   let logPollTimer: ReturnType<typeof setTimeout> | null = null;
   let proxyStepUnlisten: (() => void) | null = null;
-  let lazyWarmupShowTimer: ReturnType<typeof setTimeout> | null = null;
-  let lazyWarmupHideTimer: ReturnType<typeof setTimeout> | null = null;
-  let lazyWarmupPollTimer: ReturnType<typeof setTimeout> | null = null;
-  let lazyWarmupUnlisten: (() => void) | null = null;
-  let lazyWarmupVisibilityCleanup: (() => void) | null = null;
-  let lazyWarmupShownAt = 0;
-  let lazyWarmupPollSession = 0;
 
   const drainProxyStepQueue = async () => {
     if (proxyStepProcessing.value) {
@@ -740,269 +686,6 @@ export const useMtgaStore = () => {
     return ok;
   };
 
-  const clearLazyWarmupShowTimer = () => {
-    if (lazyWarmupShowTimer !== null) {
-      clearTimeout(lazyWarmupShowTimer);
-      lazyWarmupShowTimer = null;
-    }
-  };
-
-  const clearLazyWarmupHideTimer = () => {
-    if (lazyWarmupHideTimer !== null) {
-      clearTimeout(lazyWarmupHideTimer);
-      lazyWarmupHideTimer = null;
-    }
-  };
-
-  const clearLazyWarmupPollTimer = () => {
-    if (lazyWarmupPollTimer !== null) {
-      clearTimeout(lazyWarmupPollTimer);
-      lazyWarmupPollTimer = null;
-    }
-  };
-
-  const clearLazyWarmupVisibilityCleanup = () => {
-    if (lazyWarmupVisibilityCleanup) {
-      lazyWarmupVisibilityCleanup();
-      lazyWarmupVisibilityCleanup = null;
-    }
-  };
-
-  const stopLazyWarmupPolling = () => {
-    lazyWarmupPollSession += 1;
-    clearLazyWarmupPollTimer();
-  };
-
-  const scheduleLazyWarmupHudShow = () => {
-    clearLazyWarmupHideTimer();
-    if (lazyWarmupVisible.value || lazyWarmupShowTimer !== null) {
-      return;
-    }
-    lazyWarmupShowTimer = setTimeout(() => {
-      lazyWarmupShowTimer = null;
-      if (lazyWarmupStatus.value === "running" || lazyWarmupStatus.value === "done") {
-        lazyWarmupShownAt = Date.now();
-        lazyWarmupVisible.value = true;
-      }
-    }, LAZY_WARMUP_SHOW_DELAY_MS);
-  };
-
-  const scheduleLazyWarmupHudHide = (delay = LAZY_WARMUP_HIDE_MS) => {
-    clearLazyWarmupShowTimer();
-    clearLazyWarmupHideTimer();
-    const elapsed = lazyWarmupShownAt > 0 ? Date.now() - lazyWarmupShownAt : 0;
-    const nextDelay =
-      lazyWarmupVisible.value && elapsed < LAZY_WARMUP_MIN_VISIBLE_MS
-        ? Math.max(delay, LAZY_WARMUP_MIN_VISIBLE_MS - elapsed)
-        : delay;
-    lazyWarmupHideTimer = setTimeout(() => {
-      lazyWarmupHideTimer = null;
-      lazyWarmupVisible.value = false;
-      lazyWarmupShownAt = 0;
-    }, nextDelay);
-  };
-
-  const showLazyWarmupHudNow = () => {
-    clearLazyWarmupShowTimer();
-    clearLazyWarmupHideTimer();
-    lazyWarmupShownAt = Date.now();
-    lazyWarmupVisible.value = true;
-  };
-
-  const handleLazyWarmupEvent = (payload: unknown) => {
-    const normalized = normalizeLazyWarmupPayload(payload);
-    if (!normalized) {
-      return;
-    }
-
-    lazyWarmupCompleted.value = normalized.completed;
-    lazyWarmupTotal.value = normalized.total;
-
-    if (normalized.phase === "start" || normalized.phase === "progress") {
-      lazyWarmupStatus.value = "running";
-      lazyWarmupLabel.value = normalized.label || "正在准备后台能力";
-      lazyWarmupDetail.value = normalized.detail || "常用功能将在后台完成预热";
-      if (normalized.phase === "progress" && normalized.completed > 0 && !lazyWarmupVisible.value) {
-        showLazyWarmupHudNow();
-      } else {
-        scheduleLazyWarmupHudShow();
-      }
-      return;
-    }
-
-    if (normalized.phase === "done") {
-      lazyWarmupStatus.value = "done";
-      lazyWarmupCompleted.value = normalized.total;
-      lazyWarmupLabel.value = normalized.label || "后台能力已就绪";
-      lazyWarmupDetail.value = normalized.detail || "常用功能预热完成";
-      stopLazyWarmupPolling();
-      if (lazyWarmupVisible.value) {
-        scheduleLazyWarmupHudHide();
-      } else {
-        showLazyWarmupHudNow();
-        scheduleLazyWarmupHudHide(LAZY_WARMUP_DONE_PEEK_MS);
-      }
-      return;
-    }
-
-    lazyWarmupStatus.value = "error";
-    lazyWarmupLabel.value = normalized.label || "后台预热失败";
-    lazyWarmupDetail.value =
-      normalized.error_message || normalized.detail || "部分能力仍会在首次使用时按需加载";
-    stopLazyWarmupPolling();
-    showLazyWarmupHudNow();
-    scheduleLazyWarmupHudHide(LAZY_WARMUP_ERROR_HIDE_MS);
-  };
-
-  const startLazyWarmupPolling = () => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    stopLazyWarmupPolling();
-    const session = lazyWarmupPollSession;
-    const deadline = Date.now() + LAZY_WARMUP_POLL_TIMEOUT_MS;
-
-    const loop = async () => {
-      if (session !== lazyWarmupPollSession || !lazyWarmupRequested.value) {
-        return;
-      }
-
-      const payload = await api.getLazyWarmupStatus();
-      if (session !== lazyWarmupPollSession) {
-        return;
-      }
-
-      if (payload) {
-        handleLazyWarmupEvent(payload);
-      }
-
-      if (
-        lazyWarmupStatus.value === "done" ||
-        lazyWarmupStatus.value === "error" ||
-        Date.now() >= deadline
-      ) {
-        clearLazyWarmupPollTimer();
-        return;
-      }
-
-      lazyWarmupPollTimer = setTimeout(loop, LAZY_WARMUP_POLL_INTERVAL_MS);
-    };
-
-    void loop();
-  };
-
-  const startLazyWarmupListener = () => {
-    if (lazyWarmupListenerActive.value) {
-      return;
-    }
-    lazyWarmupListenerActive.value = true;
-    if (lazyWarmupUnlisten) {
-      try {
-        lazyWarmupUnlisten();
-      } catch {
-        // ignore cleanup errors
-      }
-      lazyWarmupUnlisten = null;
-    }
-
-    if (!isTauriRuntime()) {
-      return;
-    }
-
-    const listenLazyWarmup = async () => {
-      try {
-        const unlisten = await listen<LazyWarmupEventPayload>("mtga:lazy-warmup", (event) => {
-          handleLazyWarmupEvent(event.payload);
-        });
-        if (!lazyWarmupListenerActive.value) {
-          try {
-            unlisten();
-          } catch {
-            // ignore cleanup errors
-          }
-          return;
-        }
-        lazyWarmupUnlisten = () => {
-          void unlisten();
-        };
-      } catch (error) {
-        console.warn("[mtga] lazy warmup listen failed", error);
-      }
-    };
-
-    void listenLazyWarmup();
-  };
-
-  const stopLazyWarmupListener = () => {
-    lazyWarmupListenerActive.value = false;
-    clearLazyWarmupShowTimer();
-    clearLazyWarmupHideTimer();
-    stopLazyWarmupPolling();
-    clearLazyWarmupVisibilityCleanup();
-    lazyWarmupShownAt = 0;
-    if (lazyWarmupUnlisten) {
-      try {
-        lazyWarmupUnlisten();
-      } catch {
-        // ignore cleanup errors
-      }
-      lazyWarmupUnlisten = null;
-    }
-  };
-
-  const scheduleLazyWarmup = () => {
-    if (!isTauriRuntime() || typeof window === "undefined") {
-      return;
-    }
-
-    if (lazyWarmupRequested.value) {
-      void api.startLazyWarmup();
-      startLazyWarmupPolling();
-      return;
-    }
-
-    const launchWarmup = () => {
-      if (lazyWarmupRequested.value) {
-        return;
-      }
-      clearLazyWarmupVisibilityCleanup();
-      window.requestAnimationFrame(() => {
-        window.setTimeout(() => {
-          if (lazyWarmupRequested.value) {
-            return;
-          }
-          lazyWarmupRequested.value = true;
-          void api.startLazyWarmup().then((ok) => {
-            if (!ok) {
-              lazyWarmupRequested.value = false;
-              stopLazyWarmupPolling();
-              return;
-            }
-            startLazyWarmupPolling();
-          });
-        }, 120);
-      });
-    };
-
-    if (document.visibilityState === "visible") {
-      launchWarmup();
-      return;
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      launchWarmup();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    lazyWarmupVisibilityCleanup = () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  };
-
   const loadConfig = async () => {
     const result = await api.loadConfig();
     if (!result) {
@@ -1082,36 +765,6 @@ export const useMtgaStore = () => {
     };
     applyProxyRuntimeStatus(normalized);
     return normalized;
-  };
-
-  const startDeferredRuntimeWork = () => {
-    if (!isTauriRuntime() || typeof window === "undefined") {
-      return;
-    }
-    if (deferredRuntimeWorkScheduled.value) {
-      return;
-    }
-    deferredRuntimeWorkScheduled.value = true;
-
-    const launchWarmup = () => {
-      scheduleLazyWarmup();
-    };
-
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-    };
-    window.setTimeout(() => {
-      if (typeof idleWindow.requestIdleCallback === "function") {
-        idleWindow.requestIdleCallback(
-          () => {
-            launchWarmup();
-          },
-          { timeout: 2000 },
-        );
-        return;
-      }
-      launchWarmup();
-    }, DEFERRED_LAZY_WARMUP_DELAY_MS);
   };
 
   const loadAppInfo = async () => {
@@ -1196,13 +849,11 @@ export const useMtgaStore = () => {
     if (initialized.value) {
       startLogStream();
       startProxyStepListener();
-      startLazyWarmupListener();
       return;
     }
     initialized.value = true;
     startLogStream();
     startProxyStepListener();
-    startLazyWarmupListener();
     await Promise.all([loadAppInfo(), loadConfig(), loadStartupStatus()]);
   };
 
@@ -1615,12 +1266,6 @@ export const useMtgaStore = () => {
     updateVersionLabel,
     updateNotesHtml,
     updateReleaseUrl,
-    lazyWarmupStatus,
-    lazyWarmupVisible,
-    lazyWarmupLabel,
-    lazyWarmupDetail,
-    lazyWarmupCompleted,
-    lazyWarmupTotal,
     panelNavTarget,
     panelNavSignal,
     mainTabTarget,
@@ -1631,10 +1276,6 @@ export const useMtgaStore = () => {
     startProxyStepListener,
     stopProxyStepListener,
     startProxyStatusListener,
-    startLazyWarmupListener,
-    stopLazyWarmupListener,
-    startDeferredRuntimeWork,
-    scheduleLazyWarmup,
     loadConfig,
     saveConfig,
     fetchProxyRuntimeStatus,

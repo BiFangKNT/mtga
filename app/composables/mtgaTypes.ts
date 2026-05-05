@@ -118,16 +118,6 @@ export type ProxyTraceClearResult = {
   kept_active_count?: number;
 };
 
-export type LazyWarmupEventPayload = {
-  phase: "start" | "progress" | "done" | "error";
-  stage?: string | null;
-  label?: string | null;
-  detail?: string | null;
-  completed: number;
-  total: number;
-  error_message?: string | null;
-};
-
 export type MainTabKey = "cert" | "hosts" | "proxy";
 
 export type ProxyStartStepEvent = {

@@ -12,3 +12,4 @@ python-src/artifacts/
 pnpm-lock.yaml
 CHANGELOG.md
 .codex/
+.uv_cache/

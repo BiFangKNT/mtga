@@ -5,7 +5,6 @@ import type {
   AppInfo,
   ConfigPayload,
   InvokeResult,
-  LazyWarmupEventPayload,
   LogEventPayload,
   LogPullResult,
   ProxyTrace,
@@ -53,8 +52,6 @@ export const useMtgaApi = () => {
   const saveConfig = (payload: ConfigPayload) => safeInvoke<boolean>("save_config", payload, false);
   const getAppInfo = () => safeInvoke<AppInfo>("get_app_info");
   const getStartupStatus = () => safeInvoke<InvokeResult>("startup_status");
-  const startLazyWarmup = () => safeInvoke<boolean>("start_lazy_warmup", undefined, false);
-  const getLazyWarmupStatus = () => safeInvoke<LazyWarmupEventPayload>("get_lazy_warmup_status");
   const hostsModify = (payload: {
     mode: "add" | "backup" | "restore" | "remove";
     domain?: string;
@@ -225,8 +222,6 @@ export const useMtgaApi = () => {
     saveConfig,
     getAppInfo,
     getStartupStatus,
-    startLazyWarmup,
-    getLazyWarmupStatus,
     hostsModify,
     hostsOpen,
     generateCertificates,
