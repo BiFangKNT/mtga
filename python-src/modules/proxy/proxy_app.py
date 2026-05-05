@@ -865,7 +865,7 @@ class ProxyApp:
                 trace_id,
                 provider=route.provider,
                 request_api=route.request_api,
-                upstream_model=route.litellm_model,
+                upstream_model=route.mlitellm_model,
                 target_api_base_url=route.base_url,
                 target_model=target_model_id,
             )
@@ -874,17 +874,17 @@ class ProxyApp:
                 data={
                     "provider": route.provider,
                     "request_api": route.request_api,
-                    "model": route.litellm_model,
+                    "model": route.mlitellm_model,
                     "base_url": route.base_url,
                 },
             )
             log(
-                f"LiteLLM 路由: provider={route.provider} "
-                f"request_api={route.request_api} model={route.litellm_model} "
+                f"MLiteLLM 路由: provider={route.provider} "
+                f"request_api={route.request_api} model={route.mlitellm_model} "
                 f"base_url={route.base_url}"
             )
-            if route.litellm_base_url and route.litellm_base_url != route.base_url:
-                log(f"LiteLLM 内部基路径: {route.litellm_base_url}")
+            if route.mlitellm_base_url and route.mlitellm_base_url != route.base_url:
+                log(f"MLiteLLM 内部基路径: {route.mlitellm_base_url}")
 
             is_stream = bool(request_data.get("stream", False))
             update_proxy_trace(trace_id, is_stream=is_stream)
@@ -901,7 +901,7 @@ class ProxyApp:
                 normalized_response_json = transport.normalize_chat_completion_payload(
                     response_json,
                     provider=route.provider,
-                    fallback_model=route.litellm_model,
+                    fallback_model=route.mlitellm_model,
                 )
                 if normalized_response_json is not None:
                     response_json = normalized_response_json
@@ -937,7 +937,7 @@ class ProxyApp:
                         stream_error = error
 
                     client_model_name = transport.normalize_provider_model_name(
-                        route.litellm_model,
+                        route.mlitellm_model,
                         provider=route.provider,
                     )
 
@@ -946,7 +946,7 @@ class ProxyApp:
                             normalized_chunk = transport.normalize_chat_completion_payload(
                                 chunk,
                                 provider=route.provider,
-                                fallback_model=route.litellm_model,
+                                fallback_model=route.mlitellm_model,
                             )
                             event_payload = (
                                 normalized_chunk if normalized_chunk is not None else chunk
@@ -1059,7 +1059,7 @@ class ProxyApp:
                     nonlocal log_file, log_file_stack
                     model_name_obj = response_json.get("model")
                     model_name = (
-                        model_name_obj if isinstance(model_name_obj, str) else route.litellm_model
+                        model_name_obj if isinstance(model_name_obj, str) else route.mlitellm_model
                     )
                     event_index = 0
                     downstream_open = True

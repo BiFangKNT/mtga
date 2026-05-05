@@ -9,14 +9,14 @@ import uuid
 from collections.abc import Callable
 from typing import Any, cast
 
-from modules.proxy.upstream_adapter import LiteLLMUpstreamAdapter
+from modules.proxy.upstream_adapter import MLiteLLMUpstreamAdapter
 from modules.runtime.resource_manager import ResourceManager
 
 type LogFunc = Callable[[str], None]
 
 
 class ProxyTransport:
-    """代理传输层：LiteLLM 上游调用与响应归一化。"""
+    """代理传输层：MLiteLLM 上游调用与响应归一化。"""
 
     def __init__(
         self,
@@ -27,13 +27,13 @@ class ProxyTransport:
     ) -> None:
         self._resource_manager = resource_manager
         self._log = log_func
-        self._adapter = LiteLLMUpstreamAdapter(
+        self._adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=disable_ssl_strict_mode,
             log_func=log_func,
         )
 
     @property
-    def adapter(self) -> LiteLLMUpstreamAdapter:
+    def adapter(self) -> MLiteLLMUpstreamAdapter:
         return self._adapter
 
     def close(self) -> None:

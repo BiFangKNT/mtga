@@ -98,7 +98,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
         route = UpstreamRoute(
             provider=GEMINI_PROVIDER,
             request_api=CHAT_COMPLETIONS_REQUEST_API,
-            litellm_model="gemini/gemini-2.5-pro",
+            mlitellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="",
             prompt_cache_enabled=True,
@@ -236,7 +236,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
         route = UpstreamRoute(
             provider=GEMINI_PROVIDER,
             request_api=CHAT_COMPLETIONS_REQUEST_API,
-            litellm_model="gemini/gemini-2.5-pro",
+            mlitellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="upstream-key",
             prompt_cache_enabled=True,
@@ -328,7 +328,7 @@ class ProxyAppGeminiTests(unittest.TestCase):
         route = UpstreamRoute(
             provider=GEMINI_PROVIDER,
             request_api=CHAT_COMPLETIONS_REQUEST_API,
-            litellm_model="gemini/gemini-2.5-pro",
+            mlitellm_model="gemini/gemini-2.5-pro",
             base_url="https://gemini.example.com/v1",
             api_key="upstream-key",
             prompt_cache_enabled=True,
@@ -451,7 +451,7 @@ class ProxyAppOpenAIResponseTests(unittest.TestCase):
         route = UpstreamRoute(
             provider=OPENAI_RESPONSE_PROVIDER,
             request_api=RESPONSES_REQUEST_API,
-            litellm_model="gpt-5.2-codex",
+            mlitellm_model="gpt-5.2-codex",
             base_url="https://responses.example.com/v1",
             api_key="upstream-key",
             prompt_cache_enabled=True,

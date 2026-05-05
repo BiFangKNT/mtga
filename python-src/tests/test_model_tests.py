@@ -36,8 +36,8 @@ def _build_config_group(
     return config_group
 
 
-class GenerationTestViaLiteLLMTests(unittest.TestCase):
-    def test_non_openai_generation_tests_use_litellm_adapter(self) -> None:
+class GenerationTestViaMLiteLLMTests(unittest.TestCase):
+    def test_non_openai_generation_tests_use_mlitellm_adapter(self) -> None:
         cases = (
             (ANTHROPIC_PROVIDER, "claude-3-5-haiku-20241022"),
             (GEMINI_PROVIDER, "gemini-2.5-pro"),
@@ -50,7 +50,7 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
                 adapter.build_route.return_value = UpstreamRoute(
                     provider=provider,
                     request_api=CHAT_COMPLETIONS_REQUEST_API,
-                    litellm_model=f"{provider}/{model_id}",
+                    mlitellm_model=f"{provider}/{model_id}",
                     base_url="https://provider.example.com",
                     api_key="test-key",
                     prompt_cache_enabled=True,
@@ -73,10 +73,10 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
                 }
 
                 with patch(
-                    "modules.actions.model_tests.LiteLLMUpstreamAdapter",
+                    "modules.actions.model_tests.MLiteLLMUpstreamAdapter",
                     return_value=adapter,
                 ):
-                    model_tests._run_generation_test_with_litellm(
+                    model_tests._run_generation_test_with_mlitellm(
                         _build_config_group(provider=provider, model_id=model_id),
                         logs.append,
                     )
@@ -103,7 +103,7 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
         adapter.build_route.return_value = UpstreamRoute(
             provider=GEMINI_PROVIDER,
             request_api=CHAT_COMPLETIONS_REQUEST_API,
-            litellm_model="gemini/gemini-2.5-pro",
+            mlitellm_model="gemini/gemini-2.5-pro",
             base_url="https://provider.example.com",
             api_key="test-key",
             prompt_cache_enabled=True,
@@ -127,10 +127,10 @@ class GenerationTestViaLiteLLMTests(unittest.TestCase):
         }
 
         with patch(
-            "modules.actions.model_tests.LiteLLMUpstreamAdapter",
+            "modules.actions.model_tests.MLiteLLMUpstreamAdapter",
             return_value=adapter,
         ):
-            model_tests._run_generation_test_with_litellm(
+            model_tests._run_generation_test_with_mlitellm(
                 _build_config_group(
                     provider=GEMINI_PROVIDER,
                     model_id="gemini-2.5-pro",

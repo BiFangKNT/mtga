@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 
 
-class LiteLLMException(Exception):
+class MLiteLLMException(Exception):
     def __init__(  # noqa: PLR0913
         self,
         message: str,
@@ -31,27 +31,27 @@ class LiteLLMException(Exception):
         return f"mlitellm.{self.__class__.__name__}: {self.message}"
 
 
-class APIConnectionError(LiteLLMException):
+class APIConnectionError(MLiteLLMException):
     pass
 
 
-class APIError(LiteLLMException):
+class APIError(MLiteLLMException):
     pass
 
 
-class AuthenticationError(LiteLLMException):
+class AuthenticationError(MLiteLLMException):
     pass
 
 
-class BadRequestError(LiteLLMException):
+class BadRequestError(MLiteLLMException):
     pass
 
 
-class NotFoundError(LiteLLMException):
+class NotFoundError(MLiteLLMException):
     pass
 
 
-class RateLimitError(LiteLLMException):
+class RateLimitError(MLiteLLMException):
     pass
 
 
@@ -76,7 +76,7 @@ __all__ = [
     "APIError",
     "AuthenticationError",
     "BadRequestError",
-    "LiteLLMException",
+    "MLiteLLMException",
     "NotFoundError",
     "RateLimitError",
 ]

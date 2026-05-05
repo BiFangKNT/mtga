@@ -24,7 +24,7 @@ from modules.proxy.proxy_config import (
     normalize_provider,
     provider_supports_model_discovery,
 )
-from modules.proxy.upstream_adapter import LiteLLMUpstreamAdapter, normalize_upstream_error
+from modules.proxy.upstream_adapter import MLiteLLMUpstreamAdapter, normalize_upstream_error
 
 HTTP_OK = 200
 CONTENT_PREVIEW_LEN = 50
@@ -423,7 +423,7 @@ def _build_generation_test_proxy_config(config_group: dict[str, Any]) -> ProxyCo
     )
 
 
-def _run_generation_test_with_litellm(
+def _run_generation_test_with_mlitellm(
     config_group: dict[str, Any],
     log_func: Callable[[str], None],
 ) -> None:
@@ -435,7 +435,7 @@ def _run_generation_test_with_litellm(
         return
 
     proxy_config = _build_generation_test_proxy_config(config_group)
-    adapter = LiteLLMUpstreamAdapter(
+    adapter = MLiteLLMUpstreamAdapter(
         disable_ssl_strict_mode=proxy_config.disable_ssl_strict_mode,
         log_func=log_func,
     )
@@ -639,7 +639,7 @@ def test_chat_completion(
 
     def run_test():
         try:
-            _run_generation_test_with_litellm(config_group, log_func)
+            _run_generation_test_with_mlitellm(config_group, log_func)
         except Exception as exc:
             log_func(f"❌ 模型测活意外错误: {str(exc)}")
 

@@ -38,7 +38,7 @@ type RequestApi = Literal["chat_completions", "responses"]
 
 CHAT_COMPLETIONS_REQUEST_API: RequestApi = "chat_completions"
 RESPONSES_REQUEST_API: RequestApi = "responses"
-LITELLM_CONNECT_RETRY_COUNT = 2
+MLITELLM_CONNECT_RETRY_COUNT = 2
 UPSTREAM_PARAM_SELF_HEAL_MAX_ATTEMPTS = 3
 OPENAI_CHAT_COMPLETION_STANDARD_PARAMS: frozenset[str] = frozenset(
     {
@@ -84,13 +84,13 @@ OPENAI_COMPATIBLE_META_PARAMS: frozenset[str] = frozenset(
 class UpstreamRoute:
     provider: str
     request_api: RequestApi
-    litellm_model: str
+    mlitellm_model: str
     base_url: str
     api_key: str
     prompt_cache_enabled: bool
     middle_route_applied: bool
     middle_route_ignored: bool
-    litellm_base_url: str = ""
+    mlitellm_base_url: str = ""
     model_discovery_strategy: str | None = None
     prompt_cache_key: str = ""
 
@@ -277,18 +277,18 @@ def build_upstream_route(
 
     if effective_provider == OPENAI_CHAT_COMPLETION_PROVIDER:
         request_api = CHAT_COMPLETIONS_REQUEST_API
-        litellm_model = target_model_id
+        mlitellm_model = target_model_id
     elif effective_provider == OPENAI_RESPONSE_PROVIDER:
         request_api = RESPONSES_REQUEST_API
-        litellm_model = target_model_id
+        mlitellm_model = target_model_id
     else:
         request_api = CHAT_COMPLETIONS_REQUEST_API
-        litellm_model = f"{effective_provider}/{target_model_id}"
+        mlitellm_model = f"{effective_provider}/{target_model_id}"
     base_url = _build_chat_base_url(
         target_api_base_url=proxy_config.target_api_base_url,
         middle_route=middle_route,
     )
-    litellm_base_url = _build_litellm_base_url(
+    mlitellm_base_url = _build_mlitellm_base_url(
         provider=effective_provider,
         chat_base_url=base_url,
         target_api_base_url=proxy_config.target_api_base_url,
@@ -298,13 +298,13 @@ def build_upstream_route(
     return UpstreamRoute(
         provider=effective_provider,
         request_api=request_api,
-        litellm_model=litellm_model,
+        mlitellm_model=mlitellm_model,
         base_url=base_url,
         api_key=(proxy_config.api_key or fallback_api_key).strip(),
         prompt_cache_enabled=proxy_config.prompt_cache_enabled,
         middle_route_applied=True,
         middle_route_ignored=False,
-        litellm_base_url=litellm_base_url,
+        mlitellm_base_url=mlitellm_base_url,
         model_discovery_strategy=proxy_config.model_discovery_strategy,
         prompt_cache_key=_build_prompt_cache_key(proxy_config.prompt_cache_bucket_id),
     )
@@ -356,7 +356,7 @@ def _build_prompt_cache_key(prompt_cache_bucket_id: str) -> str:
     return f"mtga:pc:v1:b:{normalized_bucket_id}"
 
 
-def _build_litellm_base_url(
+def _build_mlitellm_base_url(
     *,
     provider: str,
     chat_base_url: str,
@@ -367,7 +367,7 @@ def _build_litellm_base_url(
         return chat_base_url
 
     # 外部语义里，middle_route 表示聊天基路径前缀，`/messages` 由 provider 路由补。
-    # 但 LiteLLM 的 Anthropic adapter 会自行补 `/v1/messages`，因此内部基路径不能
+    # 但 MLiteLLM 的 Anthropic adapter 会自行补 `/v1/messages`，因此内部基路径不能
     # 直接带尾部 `/v1`，否则会变成 `/v1/v1/messages`。
     if middle_route == DEFAULT_MIDDLE_ROUTE:
         return target_api_base_url.rstrip("/")
@@ -454,8 +454,8 @@ def normalize_upstream_error(exc: Exception) -> UpstreamErrorInfo:
     )
 
 
-class LiteLLMUpstreamAdapter:
-    """把 MTGA 运行时配置编译成 LiteLLM 调用。"""
+class MLiteLLMUpstreamAdapter:
+    """把 MTGA 运行时配置编译成 MLiteLLM 调用。"""
 
     def __init__(
         self,
@@ -581,7 +581,7 @@ class LiteLLMUpstreamAdapter:
         return (
             f"provider={provider or route.provider} "
             f"request_api={route.request_api} "
-            f"model={model or route.litellm_model}"
+            f"model={model or route.mlitellm_model}"
         )
 
     @staticmethod
@@ -624,7 +624,7 @@ class LiteLLMUpstreamAdapter:
         completion_func: Callable[..., Any],
     ) -> Any:
         route_log_context = self._format_route_log_context(route)
-        total_attempts = LITELLM_CONNECT_RETRY_COUNT + 1
+        total_attempts = MLITELLM_CONNECT_RETRY_COUNT + 1
         for attempt in range(1, total_attempts + 1):
             try:
                 # 这里只覆盖拿到上游响应对象前、且异常链明确表明卡在建连阶段的失败，
@@ -655,8 +655,8 @@ class LiteLLMUpstreamAdapter:
         cache_key = self._param_self_heal.build_cache_key(
             provider=route.provider,
             request_api=route.request_api,
-            base_url=route.litellm_base_url or route.base_url,
-            model=route.litellm_model,
+            base_url=route.mlitellm_base_url or route.base_url,
+            model=route.mlitellm_model,
             api_key=route.api_key,
         )
         effective_call_kwargs, cached_rules = self._param_self_heal.apply_cached_rules(
@@ -751,7 +751,7 @@ class LiteLLMUpstreamAdapter:
             return None
 
         provider_model = self._strip_provider_prefix(
-            route.litellm_model,
+            route.mlitellm_model,
             provider=route.provider,
         )
         effective_provider = custom_llm_provider or route.provider
@@ -791,9 +791,9 @@ class LiteLLMUpstreamAdapter:
         *,
         url_kwarg: Literal["api_base", "base_url"],
     ) -> dict[str, Any]:
-        """按 LiteLLM 目标接口构造共享鉴权与地址参数。"""
+        """按 MLiteLLM 目标接口构造共享鉴权与地址参数。"""
         shared_kwargs: dict[str, Any] = {
-            url_kwarg: route.litellm_base_url or route.base_url
+            url_kwarg: route.mlitellm_base_url or route.base_url
         }
         if route.api_key:
             shared_kwargs["api_key"] = route.api_key
@@ -818,7 +818,7 @@ class LiteLLMUpstreamAdapter:
         call_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """为兼容代理补充 provider 级别的额外请求头。"""
-        auth_header = LiteLLMUpstreamAdapter._resolve_gemini_auth_header(route)
+        auth_header = MLiteLLMUpstreamAdapter._resolve_gemini_auth_header(route)
         if auth_header is None:
             return call_kwargs
 
@@ -856,10 +856,10 @@ class LiteLLMUpstreamAdapter:
     @staticmethod
     def _resolve_chat_completion_model(route: UpstreamRoute) -> str:
         if route.request_api != RESPONSES_REQUEST_API:
-            return route.litellm_model
-        if route.litellm_model.startswith("responses/"):
-            return route.litellm_model
-        return f"responses/{route.litellm_model}"
+            return route.mlitellm_model
+        if route.mlitellm_model.startswith("responses/"):
+            return route.mlitellm_model
+        return f"responses/{route.mlitellm_model}"
 
     def create_chat_completion(
         self,
@@ -883,7 +883,7 @@ class LiteLLMUpstreamAdapter:
             and route.prompt_cache_key
         ):
             call_kwargs.setdefault("prompt_cache_key", route.prompt_cache_key)
-        # 关闭 LiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
+        # 关闭 MLiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
         call_kwargs["max_retries"] = 0
         call_kwargs["num_retries"] = 0
         mlitellm_sdk = cast(Any, mlitellm)
@@ -903,7 +903,7 @@ __all__ = [
     "OPENAI_RESPONSE_PROVIDER",
     "RESPONSES_REQUEST_API",
     "SUPPORTED_PROVIDER_IDS",
-    "LiteLLMUpstreamAdapter",
+    "MLiteLLMUpstreamAdapter",
     "UpstreamErrorInfo",
     "UpstreamRoute",
     "build_upstream_route",

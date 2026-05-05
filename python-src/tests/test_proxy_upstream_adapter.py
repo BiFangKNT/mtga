@@ -32,7 +32,7 @@ from modules.proxy.upstream_adapter import (
     CHAT_COMPLETIONS_REQUEST_API,
     GEMINI_PROVIDER,
     RESPONSES_REQUEST_API,
-    LiteLLMUpstreamAdapter,
+    MLiteLLMUpstreamAdapter,
     build_upstream_route,
     normalize_upstream_error,
 )
@@ -146,9 +146,9 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
         self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
-        self.assertEqual(route.litellm_model, "gpt-4o-mini")
+        self.assertEqual(route.mlitellm_model, "gpt-4o-mini")
         self.assertEqual(route.base_url, "https://api.openai.com/v1")
-        self.assertEqual(route.litellm_base_url, "https://api.openai.com/v1")
+        self.assertEqual(route.mlitellm_base_url, "https://api.openai.com/v1")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
@@ -164,9 +164,9 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, OPENAI_RESPONSE_PROVIDER)
         self.assertEqual(route.request_api, RESPONSES_REQUEST_API)
-        self.assertEqual(route.litellm_model, "gpt-5")
+        self.assertEqual(route.mlitellm_model, "gpt-5")
         self.assertEqual(route.base_url, "https://api.openai.com/v1")
-        self.assertEqual(route.litellm_base_url, "https://api.openai.com/v1")
+        self.assertEqual(route.mlitellm_base_url, "https://api.openai.com/v1")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
@@ -182,9 +182,9 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, ANTHROPIC_PROVIDER)
         self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
-        self.assertEqual(route.litellm_model, "anthropic/claude-3-7-sonnet-latest")
+        self.assertEqual(route.mlitellm_model, "anthropic/claude-3-7-sonnet-latest")
         self.assertEqual(route.base_url, "https://api.anthropic.com/custom")
-        self.assertEqual(route.litellm_base_url, "https://api.anthropic.com/custom")
+        self.assertEqual(route.mlitellm_base_url, "https://api.anthropic.com/custom")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
@@ -201,9 +201,9 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
         self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
-        self.assertEqual(route.litellm_model, "claude-3-7-sonnet-latest")
+        self.assertEqual(route.mlitellm_model, "claude-3-7-sonnet-latest")
         self.assertEqual(route.base_url, "https://provider.example.com/proxy/v1")
-        self.assertEqual(route.litellm_base_url, "https://provider.example.com/proxy/v1")
+        self.assertEqual(route.mlitellm_base_url, "https://provider.example.com/proxy/v1")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
@@ -218,10 +218,10 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, GEMINI_PROVIDER)
         self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
-        self.assertEqual(route.litellm_model, "gemini/gemini-2.5-pro")
+        self.assertEqual(route.mlitellm_model, "gemini/gemini-2.5-pro")
         self.assertEqual(route.base_url, "https://generativelanguage.googleapis.com/v1beta")
         self.assertEqual(
-            route.litellm_base_url,
+            route.mlitellm_base_url,
             "https://generativelanguage.googleapis.com/v1beta",
         )
         self.assertTrue(route.middle_route_applied)
@@ -240,9 +240,9 @@ class UpstreamRouteTests(unittest.TestCase):
 
         self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
         self.assertEqual(route.request_api, CHAT_COMPLETIONS_REQUEST_API)
-        self.assertEqual(route.litellm_model, "gemini-2.5-pro")
+        self.assertEqual(route.mlitellm_model, "gemini-2.5-pro")
         self.assertEqual(route.base_url, "https://provider.example.com/proxy/google/v1")
-        self.assertEqual(route.litellm_base_url, "https://provider.example.com/proxy/google/v1")
+        self.assertEqual(route.mlitellm_base_url, "https://provider.example.com/proxy/google/v1")
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
@@ -402,9 +402,9 @@ class UpstreamRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(route.provider, OPENAI_CHAT_COMPLETION_PROVIDER)
-        self.assertEqual(route.litellm_model, "gpt-4o-mini")
+        self.assertEqual(route.mlitellm_model, "gpt-4o-mini")
         self.assertEqual(route.base_url, "https://api.openai.com/v1")
-        self.assertEqual(route.litellm_base_url, "https://api.openai.com/v1")
+        self.assertEqual(route.mlitellm_base_url, "https://api.openai.com/v1")
 
     def test_legacy_openai_alias_maps_to_chat_completion_provider(self) -> None:
         self.assertEqual(normalize_provider("openai"), OPENAI_CHAT_COMPLETION_PROVIDER)
@@ -669,9 +669,9 @@ class ProxyTransportTests(unittest.TestCase):
         self.assertEqual(normalized["model"], "gemini-2.5-pro")
 
 
-class LiteLLMUpstreamAdapterTests(unittest.TestCase):
+class MLiteLLMUpstreamAdapterTests(unittest.TestCase):
     def test_openai_chat_completion_moves_compat_params_to_extra_body(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -721,7 +721,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(call_kwargs["custom_llm_provider"], "openai")
 
     def test_openai_chat_completion_keeps_allowed_openai_params_top_level(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -767,7 +767,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_openai_chat_completion_keeps_allowed_unsupported_standard_param(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -800,7 +800,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(call_kwargs["temperature"], 0)
 
     def test_openai_response_uses_completion_bridge_with_base_url(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -831,7 +831,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_retries_connection_error_before_success(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -884,7 +884,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_does_not_retry_read_timeout_error(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -922,7 +922,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(logs, [])
 
     def test_openai_chat_completion_does_not_retry_bad_request_error(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -957,7 +957,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_retries_by_dropping_only_nested_extra_body_field(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1060,7 +1060,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_retries_inferred_nested_field_without_caching(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1150,7 +1150,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_openai_chat_completion_retries_by_dropping_explicit_unsupported_param(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1194,7 +1194,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self,
     ) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1255,7 +1255,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self,
     ) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1341,7 +1341,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_cache_is_scoped_by_model(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1408,7 +1408,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
     def test_openai_chat_completion_cache_is_scoped_by_api_key(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1473,7 +1473,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self,
     ) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1555,9 +1555,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             logs,
         )
 
-    def test_openai_response_drops_unsupported_standard_params_before_litellm(self) -> None:
+    def test_openai_response_drops_unsupported_standard_params_before_mlitellm(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1602,7 +1602,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_anthropic_uses_custom_base_url_without_openai_provider_override(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1640,14 +1640,14 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
         self.assertEqual(route.base_url, "https://anthropic-proxy.example.com/proxy/anthropic/v1")
         self.assertEqual(
-            route.litellm_base_url,
+            route.mlitellm_base_url,
             "https://anthropic-proxy.example.com/proxy/anthropic",
         )
         self.assertTrue(route.middle_route_applied)
         self.assertFalse(route.middle_route_ignored)
 
     def test_anthropic_preserves_thinking_param(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1677,9 +1677,9 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             {"type": "enabled", "budget_tokens": 1024},
         )
 
-    def test_anthropic_retries_litellm_local_unsupported_param_and_caches(self) -> None:
+    def test_anthropic_retries_mlitellm_local_unsupported_param_and_caches(self) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1690,10 +1690,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
                 target_model_id="glm-4.7-flash",
             )
         )
-        litellm_validation_error = Exception(
+        mlitellm_validation_error = Exception(
             "anthropic does not support parameters: ['thinking'], for model=glm-4.7-flash. "
-            "To drop these, set `litellm.drop_params=True` or for proxy:\n\n"
-            "`litellm_settings:\n drop_params: true`\n.\n"
+            "To drop these, set `mlitellm.drop_params=True` or for proxy:\n\n"
+            "`mlitellm_settings:\n drop_params: true`\n.\n"
             "If you want to use these params dynamically send "
             "allowed_openai_params=['thinking'] in your request."
         )
@@ -1704,7 +1704,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         ), patch(
             "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
-                litellm_validation_error,
+                mlitellm_validation_error,
                 {"id": "chatcmpl_anthropic_retry", "choices": []},
                 {"id": "chatcmpl_anthropic_cached", "choices": []},
             ],
@@ -1751,11 +1751,11 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
             logs,
         )
 
-    def test_anthropic_retries_multiple_litellm_local_unsupported_params_and_caches(
+    def test_anthropic_retries_multiple_mlitellm_local_unsupported_params_and_caches(
         self,
     ) -> None:
         logs: list[str] = []
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=logs.append,
         )
@@ -1766,10 +1766,10 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
                 target_model_id="glm-4.7-flash",
             )
         )
-        litellm_validation_error = Exception(
+        mlitellm_validation_error = Exception(
             "anthropic does not support parameters: ['foo', 'bar'], for model=glm-4.7-flash. "
-            "To drop these, set `litellm.drop_params=True` or for proxy:\n\n"
-            "`litellm_settings:\n drop_params: true`\n.\n"
+            "To drop these, set `mlitellm.drop_params=True` or for proxy:\n\n"
+            "`mlitellm_settings:\n drop_params: true`\n.\n"
             "If you want to use these params dynamically send "
             "allowed_openai_params=['foo', 'bar'] in your request."
         )
@@ -1780,8 +1780,8 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         ), patch(
             "modules.proxy.upstream_adapter.mlitellm.completion",
             side_effect=[
-                litellm_validation_error,
-                litellm_validation_error,
+                mlitellm_validation_error,
+                mlitellm_validation_error,
                 {"id": "chatcmpl_anthropic_multi_retry", "choices": []},
                 {"id": "chatcmpl_anthropic_multi_cached", "choices": []},
             ],
@@ -1826,7 +1826,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_anthropic_drops_unsupported_openai_params(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1866,7 +1866,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertNotIn("store", call_kwargs)
 
     def test_gemini_uses_custom_base_url_without_openai_provider_override(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1897,7 +1897,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_gemini_x_goog_strategy_uses_x_goog_api_key_header(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1944,12 +1944,12 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
 
         self.assertEqual(route.base_url, "https://generativelanguage.googleapis.com/v1")
         self.assertEqual(
-            route.litellm_base_url,
+            route.mlitellm_base_url,
             "https://generativelanguage.googleapis.com/v1",
         )
 
     def test_gemini_preserves_existing_auth_headers_when_adding_bearer(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -1986,7 +1986,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_gemini_preserves_thinking_param(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2014,7 +2014,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(call_kwargs["thinking"], {"type": "enabled"})
 
     def test_gemini_drops_unsupported_openai_params(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2051,7 +2051,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertNotIn("store", call_kwargs)
 
     def test_openai_response_treats_unknown_params_as_openai_compatible_extra_body(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2097,7 +2097,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_openai_response_injects_prompt_cache_key(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2126,7 +2126,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         )
 
     def test_openai_response_preserves_explicit_prompt_cache_key(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2155,7 +2155,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertEqual(call_kwargs["prompt_cache_key"], "explicit-cache-key")
 
     def test_openai_response_does_not_inject_prompt_cache_key_when_disabled(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=False,
             log_func=lambda _message: None,
         )
@@ -2182,7 +2182,7 @@ class LiteLLMUpstreamAdapterTests(unittest.TestCase):
         self.assertNotIn("prompt_cache_key", call_kwargs)
 
     def test_ssl_verify_is_passed_per_request_without_mutating_global_state(self) -> None:
-        adapter = LiteLLMUpstreamAdapter(
+        adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=True,
             log_func=lambda _message: None,
         )
