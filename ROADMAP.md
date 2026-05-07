@@ -32,11 +32,13 @@
 
 ## MLiteLLM 使用边界
 
-- MLiteLLM 是项目内置维护的精简执行层模块，负责多 provider 调用、请求归一化、响应归一化和 provider 兼容补丁。
+- MLiteLLM 中的 `M` 指 MTGA；它是项目内置并由 MTGA 维护的精简执行层模块，不是外部产品或不可控第三方服务边界。
+- MLiteLLM 负责多 provider 调用、请求归一化、响应归一化和 provider 兼容补丁。
 - MTGA 自己维护“产品层配置模型”，前端仍以用户可理解的对象暴露配置，不直接把 MLiteLLM 内部调用参数作为主要心智模型。
 - `trace`、代理日志页、查询接口、清理策略、热应用、路由、fallback、retry、cooldown 等产品语义属于 MTGA 自有能力，不由 MLiteLLM 反向决定配置模型。
 - 当 MLiteLLM 能覆盖 provider 适配细节时，应优先复用 MLiteLLM 能力，而不是在代理主流程里重复实现 provider 调用细节。
 - 当 MTGA 的产品语义强于执行层调用语义时，应由 MTGA 配置 schema 编译为 MLiteLLM 调用参数，而不是反过来用执行层参数倒逼前端设计。
+- 文档中区分“MTGA 路由层”和“MLiteLLM 执行层”只是为了明确仓库内部职责边界：前者维护产品语义和路由状态，后者维护 provider 调用兼容性。
 
 ## 当前主要代码落点
 
@@ -181,12 +183,11 @@
   - `targets`
   - `failover_pools`
   - `published_models`
-- 请求体变换规则应在新模型路由下重新设计，不继续挂在旧 `config_group` 上：
-  - `published_model` 级：用于定义对外暴露模型的稳定请求改写行为。
-  - `target` 级：用于定义特定上游目标的兼容性请求改写行为。
+- MTGA 路由层只负责把 `published_model / target / failover_pool` 编译为 route plan 与 MLiteLLM 调用参数；provider 级请求体兼容、字段删除/补齐、响应归一化继续由 MLiteLLM 或现有 upstream adapter 负责。
+- 不新增挂在 `config_group`、`published_model` 或 `target` 上的用户可配置通用请求体变换 schema。
 - 每个 `published_model` 只能绑定一个 `primary_target_id`。
 - 每个 `published_model` 可选一个 `failover_pool_id`。
-- 故障转移第一阶段只要求支持 `429` 冷却切换。
+- 故障转移第一阶段只要求支持 `429` 冷却切换，以及 retry 机会耗尽后的可重试网络运输错误切换；只有 `429` 写入 target-level cooldown。
 - 冷却状态应以 `target_id` 为键，而不是 pool member 局部状态。
 - `/models` 只返回启用的 `published_model.name`。
 - 允许同一 `target` 被多个模型、多个故障转移池复用。
@@ -200,6 +201,7 @@
 - 不做复杂流量调度策略。
 - 不做“主目标多成员”的另一套语义。
 - 不接受继续扩展旧 `config_group` 语义来模拟新模型路由。
+- 不在 MTGA 路由层重复实现 provider 级请求体兼容逻辑。
 - 不直接把执行层的 `model_list`、`fallbacks`、virtual key、access group 等对象作为前端配置模型。
 
 **预期交付物**
@@ -208,32 +210,36 @@
 - 旧 schema 到新 schema 的迁移逻辑。
 - `request.model -> published_model -> primary_target/failover_pool` 解析器。
 - `published_model / target / failover_pool -> MTGA 路由执行计划 -> MLiteLLM 调用参数` 编译层或适配层。
-- `published_model` / `target` 级请求体变换规则设计与落地。
+- MTGA 路由层与 MLiteLLM/upstream adapter 的请求编译边界说明。
 - 路由配置热切换能力。
 - `/models` 返回全部启用发布模型。
 - 基于 `target_id` 的 `429` 冷却状态管理。
+- retry 机会耗尽后的可重试网络运输错误故障转移判断。
 - 故障转移池按顺序尝试执行器。
 - 前端“模型路由”页及旧入口迁移。
-- 迁移、动态路由、热切换、`429` 故障转移和 target 复用测试。
+- 迁移、动态路由、热切换、`429` 故障转移、网络错误故障转移和 target 复用测试。
 - 术语、迁移说明和故障转移风险说明文档。
 
 **建议任务拆分**
 
+> 可按以下任务分步设计、合并和验证；但 `v2.6.0` 对用户应作为一次完整模型路由切换发布，未达到完成标准前不标记 `Done`，不发布半迁移状态。
+
 1. 配置模型重构：定义新 schema 与类型，并实现旧 schema 到新 schema 的迁移逻辑。
 2. 路由解析主链路：实现 `request.model -> published_model -> primary_target/failover_pool` 解析器，并让 `/models` 返回全部启用发布模型。
 3. 执行层接线：实现 MTGA 路由对象到路由执行计划和 MLiteLLM 调用参数的编译层，并支持运行中配置热应用。
-4. 故障转移内核：实现基于 `target_id` 的 `429` 冷却状态管理和故障转移池顺序执行器。
+4. 故障转移内核：实现基于 `target_id` 的 `429` 冷却状态管理、retry 耗尽后的网络错误故障转移入口和故障转移池顺序执行器。
 5. 前端路由页：完成“模型路由”页信息架构与 `targets`、`failover_pools`、`published_models` 三类对象管理。
 6. 旧入口迁移：移除旧“代理配置组”页与“全局配置”页入口，并完成新旧交互路径切换。
-7. 测试与文档：覆盖迁移、动态路由、热切换、`429` 故障转移、target 复用等行为，并补充术语、迁移说明和风险说明。
+7. 测试与文档：覆盖迁移、动态路由、热切换、`429` 故障转移、网络错误故障转移、target 复用等行为，并补充术语、迁移说明和风险说明。
 
 **完成标准**
 
 - 用户无需重启代理，即可通过不同发布模型命中不同上游目标。
 - 编辑并保存运行中的“模型路由”配置后，无需重启代理线程即可对后续请求生效。
 - `/models` 可列出全部启用发布模型。
-- 主目标返回 `429` 时，可按配置切换到故障转移池中的下一个可用目标。
+- 主目标返回 `429` 或 retry 耗尽后的可重试网络运输错误时，可按配置切换到故障转移池中的下一个可用目标。
 - 同一 `target` 复用于多个模型和多个池时行为一致。
+- 对外发布版本不暴露半迁移状态：用户不需要在旧“代理配置组 / 全局配置”和新“模型路由”之间来回切换才能完成配置。
 - `pnpm py:check` 与 `pnpm app:check` 通过。
 
 ## 跨版本依赖关系
@@ -241,7 +247,7 @@
 - `v2.4.0` 提供统一的上游适配接口，为 `v2.5.0` 和 `v2.6.0` 提供稳定调用边界。
 - `v2.5.0` 提供结构化 trace 和并发基础设施，为 `v2.6.0` 的动态路由调试提供可观测性。
 - `v2.6.0` 才是新的稳定路由模型，不建议在 `v2.4.0` 或 `v2.5.0` 提前做部分 schema 重构。
-- 通用请求体改写规则应依附 `v2.6.0` 的新对象模型设计，不应继续叠加到旧 `config_group`。
+- 通用请求体改写不作为旧 `config_group` 的长期产品语义，也不作为 `v2.6.0` 路由层的用户配置 schema；provider 兼容继续交给 MLiteLLM 或 upstream adapter。
 - MLiteLLM 的引入顺序应是先适配 provider，再补 trace，最终由 `v2.6.0` 的 MTGA 路由层统一接管动态路由与故障转移语义。
 
 ## `v2.6.0` 目标状态
@@ -249,8 +255,12 @@
 ### 目标对象模型
 
 ```yaml
+schema_version: 2
+mtga_auth_key: ""
+
 targets:
   - id: claude-main
+    display_name: Claude Main
     provider: anthropic
     api_base: https://example.com
     api_key: xxx
@@ -272,11 +282,90 @@ published_models:
     failover_pool_id: claude-failover
 ```
 
+### 配置 schema 约束
+
+- 新 schema 必须有显式版本字段，例如 `schema_version: 2`，用于区分旧 `config_groups` 配置和新模型路由配置。
+- `target.id`、`failover_pool.id` 和 `published_model.name` 在各自集合内必须唯一。
+- `mtga_auth_key` 是全局入站鉴权 key；为空字符串或缺失时表示 MTGA 入站代理不鉴权。
+- `target.api_key` 只表示上游鉴权 key，不参与 MTGA 入站鉴权。
+- `target.id` 是内部稳定引用键，用于 `published_model.primary_target_id`、`failover_pool.members[*].target_id`、trace、日志和热切换生命周期；不应作为可随意修改的前端显示名称。
+- `target.display_name` 是前端显示名称，可由用户修改，不作为引用键；为空时前端可按 `target.id` 或序号生成展示文案。
+- `published_model.name` 是对外暴露的模型名，也是 `request.model` 的精确匹配键；匹配规则第一阶段只做大小写敏感的全量匹配，不做别名、通配符或模糊匹配。
+- `target.provider` 只能使用 MTGA 支持的 provider id；provider 归一化规则继续由 MTGA 控制，不能直接透传 MLiteLLM 内部 provider 名作为前端 schema。
+- `target.api_base` 只保存上游 base URL，不包含 `middle_route`；实际请求 base URL 由 `api_base + middle_route` 归一化得到。
+- `failover_pool.members[*].target_id` 可以引用任意已存在 `target`；同一 pool 内不允许重复 `target_id`。
+- `published_model.primary_target_id` 必须引用已存在 `target`。
+- `published_model.failover_pool_id` 为空时只执行主目标；非空时必须引用已存在 `failover_pool`。
+
+### 旧配置迁移规则
+
+- 读取旧 schema 时，迁移层必须把每个有效 `config_groups[*]` 转成一个 `target`，并生成稳定 `target.id`。
+- 迁移生成的 `target.id` 应使用不含敏感信息的稳定内部值，例如 `target-1`、`target-2`；冲突时追加后缀，不从 `api_url`、`api_key` 或上游模型名派生。
+- 旧 `config_groups[*].name` 迁移为 `target.display_name`；为空时只自动生成展示文案，不影响 `target.id`。
+- 旧全局 `mtga_auth_key` 迁移到新 schema 顶层 `mtga_auth_key`；缺失或空字符串表示入站不鉴权。
+- 旧全局 `mapped_model_id` 迁移为一个默认 `published_model.name`。
+- 旧 `current_config_index` 指向的配置组迁移为默认发布模型的 `primary_target_id`。
+- 旧配置组的 `provider / api_url / model_id / api_key / middle_route / prompt_cache_enabled / model_discovery_strategy` 映射到 `target` 对应字段。
+- 旧未选中的配置组只迁移为 `target`，默认不自动发布为额外 `published_model`。
+- 旧 schema 中已经不支持的 `config_groups[*].mapped_model_id` 不再恢复；迁移层只保留当前版本仍支持的旧字段。
+- 迁移应在 load 阶段返回新结构；是否立即写回磁盘由保存动作触发，避免只打开应用就改写用户配置文件。
+
+### 路由解析规则
+
+1. 请求进入 Chat Completions handler 后，先从当前运行时路由快照读取不可变配置视图。
+2. 解析 `request.model`：
+   - 缺失、空字符串或非字符串时返回 `400 model_required`。
+   - 找不到同名 `published_model` 时返回 `404 model_not_found`。
+   - 找到但 `enabled=false` 时返回 `404 model_not_found`，不向调用方暴露禁用模型存在。
+3. 根据 `published_model.primary_target_id` 解析主目标；引用缺失视为配置错误，返回 `500 route_config_invalid` 并写入 trace。
+4. 若主目标未冷却，先尝试主目标。
+5. 若主目标因匹配 `trigger_statuses` 的上游状态进入冷却，记录冷却截止时间后继续尝试 failover pool。
+6. 若主目标在请求开始前已经处于冷却状态，直接跳过主目标并尝试 failover pool。
+7. failover pool 按 `members` 顺序尝试目标；跳过当前仍处于冷却状态的 `target_id`。
+8. 所有可尝试目标都失败后，返回最后一个上游错误；如果没有任何目标可尝试，返回 `503 route_unavailable`。
+9. 每次请求的 route plan 在请求开始时固定；运行中热切换只影响后续新请求。
+10. 代理自身错误响应应保持 OpenAI-compatible error body，不返回 MTGA 内部专用格式给下游客户端。
+
+### 请求编译与 adapter 边界
+
+- MTGA 路由层的职责是把 `request.model` 解析为 `published_model`，再解析为本次请求使用的 `target`，并生成 route plan。
+- route plan 应包含 provider、上游 base URL、middle route、上游模型名、API key 引用、prompt cache 开关等执行参数。
+- MTGA 路由层可以把请求中的对外模型名替换为选中 `target.upstream_model`，这是路由解析结果的一部分，不是通用请求体变换 schema。
+- provider 级字段兼容、字段删除/补齐、Chat Completions 到 Responses 或其他 provider API 的语义映射，继续由 MLiteLLM 或现有 upstream adapter 负责。
+- MTGA 不在 v2.6.0 引入用户可配置的请求体变换 DSL，也不允许把鉴权字段通过请求体注入。
+- 如果后续确实需要 MTGA 产品级请求改写，应另开设计，不应混入 v2.6.0 路由层主链路。
+
+### 故障转移规则
+
+- 第一阶段只对上游返回或执行层归一化后的 HTTP `429`，以及 retry 机会耗尽后的可重试网络运输错误触发 failover。
+- 可重试网络运输错误包括连接超时、读取超时、连接重置、DNS 解析失败、TLS 握手失败等未收到有效上游业务响应的 transport-level 错误。
+- 网络运输错误应先走现有 retry 机制；只有 retry 机会耗尽后，才进入 failover pool。
+- 普通 4xx/5xx、上游鉴权失败、模型不存在、参数错误、MTGA 配置错误不触发 failover。
+- `429` 会触发 target-level cooldown；网络运输错误第一阶段只触发本次请求 failover，不自动写入 cooldown，除非后续设计明确需要 network cooldown。
+- cooldown 键必须是全局 `target_id`，不是 `published_model`、pool member index 或请求局部状态。
+- 同一 `target_id` 被多个 `published_model` 或多个 pool 复用时，共享同一 cooldown 状态。
+- cooldown 到期后不需要显式恢复动作；后续新请求会重新尝试该 target。
+- 非流式请求在收到上游 `429` 或 retry 耗尽后的可重试网络运输错误，且响应尚未返回下游前，可以切换到 failover target。
+- 流式请求一旦已经向下游发送首个 chunk，不再切换 target；后续错误按当前流的失败处理并结束 trace。
+- failover 只在同一次请求内顺序尝试当前 published model 绑定的 pool；不跨 published model 查找其他目标。
+- 每个触发 cooldown、跳过冷却目标、尝试 failover target、最终失败或成功的节点都必须写入 trace event。
+
+### 热切换与并发边界
+
+- 路由配置保存成功后，运行中代理应通过 `apply_runtime_config` 或等价入口热应用新 route plan。
+- 热应用必须原子替换运行时 route plan，不允许请求线程看到半更新结构。
+- 请求开始时必须持有 route plan 快照；请求执行期间不得再次读取可变全局配置。
+- 旧 route plan 如果持有 transport/client 资源，应沿用 v2.5.0 的引用计数或等价生命周期管理，确保进行中请求结束后再释放。
+- 热切换失败时必须保留旧 route plan，不能让运行中代理进入无路由状态。
+- 配置保存成功但运行中热应用失败时，不回滚磁盘配置；磁盘保留用户刚保存的新配置，运行中代理继续使用旧 route plan，并返回明确 warning/log。
+- 用户修正配置后可再次保存并热应用；重启代理时应尝试加载磁盘上的最新 route plan。
+
 ### 稳定约束
 
 - 同一个 `target` 可被多个 `published_model`、多个 `failover_pool` 复用。
 - “多对一”的真实需求收敛为“主目标 + 故障转移池”，不单独设计主池多成员语义。
-- 不做模型能力自动识别与兼容性校验，风险由用户自行承担。
+- 不做模型能力自动识别与兼容性校验；provider 或模型能力不匹配时按上游调用失败处理，并通过 trace 暴露诊断信息。
+- 第一阶段不做路由优先级、权重、健康检查后台探测或自动摘除。
 
 ### 与 MLiteLLM 的概念映射
 
@@ -284,6 +373,24 @@ published_models:
 - `published_model` 是 MTGA 对用户暴露的稳定模型名，不要求与 MLiteLLM 请求中的 `model` 一一同名，但可在执行层映射到同一上游模型。
 - `failover_pool` 是 MTGA 的产品语义对象，由 MTGA 路由层映射为 fallback、retry、cooldown 执行计划。
 - `target_id` 仍是 MTGA 内部稳定标识；即使底层调用经过 MLiteLLM，也不放弃以 `target_id` 为键的产品语义与调试语义。
+
+### trace 字段要求
+
+- v2.6.0 应在 `ProxyTrace` 中补充路由相关字段：`published_model`、`target_id`、`target_display_name`、`failover_pool_id`、`attempt_index`、`attempts`。
+- 每个 attempt 至少记录：`target_id`、`provider`、`upstream_model`、`base_url`、`status_code`、`started_at`、`ended_at`、`duration_ms`、`error`。
+- route 解析失败、配置引用缺失、cooldown 命中、failover 切换、最终选中目标都必须写入 trace event。
+- trace 中不得保存明文 `api_key`、Authorization header 或 provider token。
+
+### 测试矩阵
+
+- 旧 schema 迁移：单配置组、多配置组、缺失全局 `mapped_model_id`、越界 `current_config_index`、legacy group-level `mapped_model_id`。
+- 动态路由：多个 enabled `published_model` 命中不同 `target`，disabled 模型不可访问，未知模型返回 `model_not_found`。
+- `/models`：按 `published_models` 配置顺序返回 enabled `published_model.name`，不返回 disabled 模型或内部 `target.upstream_model`。
+- 热切换：代理运行中保存新 route plan 后，新请求命中新配置，旧请求继续使用旧快照。
+- 429 failover：主目标 429 后进入 target-level cooldown，后续请求跳过冷却目标，cooldown 到期后重新尝试主目标。
+- 网络错误 failover：retry 耗尽后的可重试网络运输错误可以进入 failover，但普通 4xx/5xx、上游鉴权失败和配置错误不触发。
+- target 复用：同一 target 被多个 published model 和 pool 复用时，共享 cooldown 和一致的 trace 语义。
+- 流式边界：首 chunk 前 429 可 failover；首 chunk 后异常不切换目标，只结束当前 trace。
 
 ## 附录 A：`v2.5.0` trace 草案
 
