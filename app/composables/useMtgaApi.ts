@@ -89,8 +89,11 @@ export const useMtgaApi = () => {
     proxy_mode?: string | null;
     trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_start_all", payload);
-  const configGroupTest = (payload: { index: number; mode?: "chat" | "models" }) =>
-    safeInvoke<InvokeResult>("config_group_test", payload);
+  const configGroupTest = (payload: {
+    index: number;
+    target_id?: string;
+    mode?: "chat" | "models";
+  }) => safeInvoke<InvokeResult>("config_group_test", payload);
   const configGroupModels = (payload: {
     provider?: string;
     api_url: string;

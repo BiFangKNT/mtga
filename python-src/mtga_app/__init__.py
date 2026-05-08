@@ -193,10 +193,15 @@ class LogEventPayload(BaseModel):
 
 
 class SaveConfigPayload(BaseModel):
-    config_groups: list[dict[str, Any]]
-    current_config_index: int
-    mapped_model_id: str | None = None
+    schema_version: int | None = None
     mtga_auth_key: str | None = None
+    targets: list[dict[str, Any]] | None = None
+    failover_pools: list[dict[str, Any]] | None = None
+    published_models: list[dict[str, Any]] | None = None
+    prompt_cache_bucket_id: str | None = None
+    config_groups: list[dict[str, Any]] | None = None
+    current_config_index: int | None = None
+    mapped_model_id: str | None = None
     proxy_mode: str | None = None
     trae_path: str | None = None
 
@@ -226,15 +231,11 @@ async def greet(body: GreetPayload) -> str:
 @command_registry.command()
 async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
-    config_groups, current_index = config_store.load_config_groups()
-    mapped_model_id, mtga_auth_key = config_store.load_global_config()
+    routing_config = config_store.load_model_routing_config()
     proxy_mode, trae_path = config_store.load_proxy_settings()
     warnings = config_store.load_config_warnings()
     return {
-        "config_groups": config_groups,
-        "current_config_index": current_index,
-        "mapped_model_id": mapped_model_id,
-        "mtga_auth_key": mtga_auth_key,
+        **routing_config,
         "proxy_mode": proxy_mode,
         "trae_path": trae_path,
         "warnings": warnings,
@@ -244,13 +245,13 @@ async def load_config() -> dict[str, Any]:
 @command_registry.command()
 async def save_config(body: SaveConfigPayload) -> bool:
     config_store = _get_config_store()
-    return config_store.save_config_groups(
-        body.config_groups,
-        body.current_config_index,
-        body.mapped_model_id,
-        body.mtga_auth_key,
-        body.proxy_mode,
-        body.trae_path,
+    payload = body.model_dump(exclude_none=True)
+    proxy_mode = payload.pop("proxy_mode", None)
+    trae_path = payload.pop("trae_path", None)
+    return config_store.save_model_routing_config(
+        payload,
+        proxy_mode=proxy_mode if isinstance(proxy_mode, str) else None,
+        trae_path=trae_path if isinstance(trae_path, str) else None,
     )
 
 

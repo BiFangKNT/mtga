@@ -15,8 +15,25 @@ from typing import Any, cast
 
 from flask import Flask, Response, jsonify, request
 
+from modules.proxy.model_routing import (
+    ModelRoutingConfig,
+    ModelRoutingTarget,
+    ResolvedRoute,
+    RouteResolutionError,
+    TargetAttempt,
+    TargetCooldowns,
+    build_openai_error_body,
+    build_target_attempts,
+    is_retryable_transport_error,
+    resolve_published_model,
+)
 from modules.proxy.proxy_auth import ProxyAuth
-from modules.proxy.proxy_config import DEFAULT_MIDDLE_ROUTE, ProxyConfig, build_proxy_config
+from modules.proxy.proxy_config import (
+    DEFAULT_MIDDLE_ROUTE,
+    ProxyConfig,
+    build_proxy_config,
+    build_proxy_config_from_target,
+)
 from modules.proxy.proxy_transport import ProxyTransport
 from modules.proxy.upstream_adapter import (
     RESPONSES_REQUEST_API,
@@ -35,6 +52,8 @@ from modules.runtime.proxy_trace_store import (
 from modules.runtime.resource_manager import ResourceManager
 from modules.services.system_prompt_service import SystemPromptStore
 
+SERVER_ERROR_STATUS_MIN = 500
+
 
 class ProxyApp:
     """代理服务的领域逻辑：配置解析 + Flask 路由 + 上游转发。"""
@@ -46,7 +65,7 @@ class ProxyApp:
         r'(?i)("?(?:api_key|authorization|access_token|refresh_token|password|secret)"?\s*[:=]\s*)("[^"]*"|\S+)'
     )
 
-    def __init__(
+    def __init__(  # noqa: PLR0915
         self,
         config: dict[str, Any] | None = None,
         log_func: Callable[[str], None] = print,
@@ -66,6 +85,8 @@ class ProxyApp:
         self.proxy_config: ProxyConfig | None = None
         self.auth: ProxyAuth | None = None
         self.transport: ProxyTransport | None = None
+        self.model_routing_config: ModelRoutingConfig | None = None
+        self._target_cooldowns = TargetCooldowns()
         self.target_api_base_url = ""
         self.middle_route = ""
         self.inbound_route = DEFAULT_MIDDLE_ROUTE
@@ -77,24 +98,42 @@ class ProxyApp:
         self.disable_ssl_strict_mode = False
         self.system_prompt_store = SystemPromptStore(resource_manager)
 
-        proxy_config = build_proxy_config(
-            self.config,
-            resource_manager=self.resource_manager,
-            log_func=self.log_func,
+        model_routing_obj = self.config.get("model_routing")
+        model_routing_config = (
+            model_routing_obj if isinstance(model_routing_obj, ModelRoutingConfig) else None
         )
-        if not proxy_config:
+        proxy_config: ProxyConfig | None = None
+        if model_routing_config is None:
+            proxy_config = build_proxy_config(
+                self.config,
+                resource_manager=self.resource_manager,
+                log_func=self.log_func,
+            )
+        if model_routing_config is None and not proxy_config:
             self.valid = False
             return
 
+        self.model_routing_config = model_routing_config
         self.proxy_config = proxy_config
-        self.target_api_base_url = proxy_config.target_api_base_url
-        self.middle_route = proxy_config.middle_route
-        self.custom_model_id = proxy_config.custom_model_id
-        self.target_model_id = proxy_config.target_model_id
-        self.stream_mode = proxy_config.stream_mode  # None, 'true', 'false'
-        self.debug_mode = proxy_config.debug_mode
-        self.disable_ssl_strict_mode = proxy_config.disable_ssl_strict_mode
-        self.auth = ProxyAuth(proxy_config.mtga_auth_key)
+        if proxy_config is not None:
+            self.target_api_base_url = proxy_config.target_api_base_url
+            self.middle_route = proxy_config.middle_route
+            self.custom_model_id = proxy_config.custom_model_id
+            self.target_model_id = proxy_config.target_model_id
+            self.stream_mode = proxy_config.stream_mode  # None, 'true', 'false'
+            self.debug_mode = proxy_config.debug_mode
+            self.disable_ssl_strict_mode = proxy_config.disable_ssl_strict_mode
+            self.auth = ProxyAuth(proxy_config.mtga_auth_key)
+        else:
+            self.stream_mode = self.config.get("stream_mode")
+            self.debug_mode = bool(self.config.get("debug_mode", False))
+            self.disable_ssl_strict_mode = bool(
+                self.config.get("disable_ssl_strict_mode", False)
+            )
+            if model_routing_config is None:
+                self.valid = False
+                return
+            self.auth = ProxyAuth(model_routing_config.mtga_auth_key)
         self.transport = ProxyTransport(
             resource_manager=self.resource_manager,
             disable_ssl_strict_mode=self.disable_ssl_strict_mode,
@@ -128,9 +167,11 @@ class ProxyApp:
                 "stream_mode": self.stream_mode,
                 "route_mode": self.route_mode,
                 "debug_mode": self.debug_mode,
+                "disable_ssl_strict_mode": self.disable_ssl_strict_mode,
                 "auth": self.auth,
                 "transport": self.transport,
                 "proxy_config": self.proxy_config,
+                "model_routing_config": self.model_routing_config,
             }
 
     def _snapshot_chat_runtime_state(self) -> dict[str, Any]:
@@ -148,9 +189,11 @@ class ProxyApp:
                 "stream_mode": self.stream_mode,
                 "route_mode": self.route_mode,
                 "debug_mode": self.debug_mode,
+                "disable_ssl_strict_mode": self.disable_ssl_strict_mode,
                 "auth": self.auth,
                 "transport": transport,
                 "proxy_config": self.proxy_config,
+                "model_routing_config": self.model_routing_config,
             }
 
     def _release_transport_ref(self, transport: ProxyTransport | None) -> None:
@@ -197,18 +240,37 @@ class ProxyApp:
         app.logger.setLevel(self._app_logger_default_level)
 
     def apply_runtime_config(self, raw_config: dict[str, Any] | None) -> OperationResult:
-        new_proxy_config = build_proxy_config(
-            raw_config,
-            resource_manager=self.resource_manager,
-            log_func=lambda _message: None,
+        raw_config_dict = raw_config if isinstance(raw_config, dict) else {}
+        model_routing_obj = raw_config_dict.get("model_routing")
+        new_model_routing_config = (
+            model_routing_obj if isinstance(model_routing_obj, ModelRoutingConfig) else None
         )
-        if not new_proxy_config:
+        new_proxy_config: ProxyConfig | None = None
+        if new_model_routing_config is None:
+            new_proxy_config = build_proxy_config(
+                raw_config,
+                resource_manager=self.resource_manager,
+                log_func=lambda _message: None,
+            )
+        if new_model_routing_config is None and not new_proxy_config:
             return OperationResult.failure(
                 "config_invalid",
                 code=ErrorCode.CONFIG_INVALID,
             )
 
-        new_auth = ProxyAuth(new_proxy_config.mtga_auth_key)
+        if new_model_routing_config is not None:
+            new_auth = ProxyAuth(new_model_routing_config.mtga_auth_key)
+            new_disable_ssl_strict_mode = bool(
+                raw_config_dict.get("disable_ssl_strict_mode", False)
+            )
+        elif new_proxy_config is not None:
+            new_auth = ProxyAuth(new_proxy_config.mtga_auth_key)
+            new_disable_ssl_strict_mode = new_proxy_config.disable_ssl_strict_mode
+        else:
+            return OperationResult.failure(
+                "config_invalid",
+                code=ErrorCode.CONFIG_INVALID,
+            )
         next_route_mode = self.route_mode
         if isinstance(raw_config, dict):
             route_mode_obj = raw_config.get("route_mode")
@@ -216,21 +278,33 @@ class ProxyApp:
                 next_route_mode = route_mode_obj.strip()
         new_transport = ProxyTransport(
             resource_manager=self.resource_manager,
-            disable_ssl_strict_mode=new_proxy_config.disable_ssl_strict_mode,
+            disable_ssl_strict_mode=new_disable_ssl_strict_mode,
             log_func=self.log_func,
         )
         old_transport: ProxyTransport | None = None
         with self._config_lock:
             old_transport = self.transport
             self.proxy_config = new_proxy_config
-            self.target_api_base_url = new_proxy_config.target_api_base_url
-            self.middle_route = new_proxy_config.middle_route
-            self.custom_model_id = new_proxy_config.custom_model_id
-            self.target_model_id = new_proxy_config.target_model_id
-            self.stream_mode = new_proxy_config.stream_mode
+            self.model_routing_config = new_model_routing_config
+            if new_proxy_config is not None:
+                self.target_api_base_url = new_proxy_config.target_api_base_url
+                self.middle_route = new_proxy_config.middle_route
+                self.custom_model_id = new_proxy_config.custom_model_id
+                self.target_model_id = new_proxy_config.target_model_id
+                self.stream_mode = new_proxy_config.stream_mode
+                self.debug_mode = new_proxy_config.debug_mode
+                self.disable_ssl_strict_mode = new_proxy_config.disable_ssl_strict_mode
+            else:
+                self.target_api_base_url = ""
+                self.middle_route = DEFAULT_MIDDLE_ROUTE
+                self.custom_model_id = ""
+                self.target_model_id = ""
+                self.stream_mode = raw_config_dict.get("stream_mode")
+                self.debug_mode = bool(raw_config_dict.get("debug_mode", False))
+                self.disable_ssl_strict_mode = bool(
+                    raw_config_dict.get("disable_ssl_strict_mode", False)
+                )
             self.route_mode = next_route_mode
-            self.debug_mode = new_proxy_config.debug_mode
-            self.disable_ssl_strict_mode = new_proxy_config.disable_ssl_strict_mode
             self.auth = new_auth
             self.transport = new_transport
 
@@ -335,6 +409,42 @@ class ProxyApp:
 
     def _get_mapped_model_id(self) -> str:
         return self.custom_model_id
+
+    def _build_target_proxy_config(
+        self,
+        *,
+        target: ModelRoutingTarget,
+        routing_config: ModelRoutingConfig,
+        stream_mode: str | None,
+        debug_mode: bool,
+        disable_ssl_strict_mode: bool,
+    ) -> ProxyConfig:
+        return build_proxy_config_from_target(
+            target,
+            mtga_auth_key=routing_config.mtga_auth_key,
+            prompt_cache_bucket_id=routing_config.prompt_cache_bucket_id,
+            stream_mode=stream_mode,
+            debug_mode=debug_mode,
+            disable_ssl_strict_mode=disable_ssl_strict_mode,
+        )
+
+    @staticmethod
+    def _route_error_response(error: RouteResolutionError) -> tuple[Response, int]:
+        error_type = (
+            "invalid_request_error"
+            if error.status_code < SERVER_ERROR_STATUS_MIN
+            else "server_error"
+        )
+        return (
+            jsonify(
+                build_openai_error_body(
+                    message=error.message,
+                    code=error.code,
+                    error_type=error_type,
+                )
+            ),
+            error.status_code,
+        )
 
     def _extract_system_prompt_text(self, content: Any) -> str:
         if isinstance(content, str):
@@ -638,6 +748,10 @@ class ProxyApp:
         snapshot = self._snapshot_runtime_state()
         inbound_route = str(snapshot["inbound_route"])
         auth = snapshot["auth"]
+        routing_config_obj = snapshot.get("model_routing_config")
+        routing_config = (
+            routing_config_obj if isinstance(routing_config_obj, ModelRoutingConfig) else None
+        )
         mapped_model_id = str(snapshot["custom_model_id"])
         self.log_func(f"收到模型列表请求 {self._build_route(inbound_route, 'models')}")
         if not auth:
@@ -651,17 +765,22 @@ class ProxyApp:
                 {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
             ), 401
 
+        model_ids = (
+            [model.name for model in routing_config.enabled_published_models()]
+            if routing_config is not None
+            else [mapped_model_id]
+        )
         model_data = {
             "object": "list",
             "data": [
                 {
-                    "id": mapped_model_id,
+                    "id": model_id,
                     "object": "model",
                     "owned_by": "openai",
                     "created": int(time.time()),
                     "permission": [
                         {
-                            "id": f"modelperm-{mapped_model_id}",
+                            "id": f"modelperm-{model_id}",
                             "object": "model_permission",
                             "created": int(time.time()),
                             "allow_create_engine": False,
@@ -676,10 +795,11 @@ class ProxyApp:
                         }
                     ],
                 }
+                for model_id in model_ids
             ],
         }
 
-        self.log_func(f"返回映射模型: {mapped_model_id}")
+        self.log_func(f"返回发布模型: {', '.join(model_ids)}")
         return jsonify(model_data)
 
     def _chat_completions(  # noqa: PLR0911, PLR0912, PLR0915
@@ -688,14 +808,18 @@ class ProxyApp:
         request_id = self._new_request_id()
         snapshot = self._snapshot_chat_runtime_state()
         inbound_route = str(snapshot["inbound_route"])
-        target_model_id = str(snapshot["target_model_id"])
         stream_mode = snapshot["stream_mode"]
         route_mode = str(snapshot["route_mode"] or "")
         debug_mode = bool(snapshot["debug_mode"])
+        disable_ssl_strict_mode = bool(snapshot["disable_ssl_strict_mode"])
         auth = snapshot["auth"]
         transport = snapshot["transport"]
         proxy_config_obj = snapshot["proxy_config"]
         proxy_config = proxy_config_obj if isinstance(proxy_config_obj, ProxyConfig) else None
+        routing_config_obj = snapshot.get("model_routing_config")
+        routing_config = (
+            routing_config_obj if isinstance(routing_config_obj, ModelRoutingConfig) else None
+        )
         transport_released = False
         trace_finished = False
         trace_id = start_proxy_trace(
@@ -758,11 +882,33 @@ class ProxyApp:
 
         log(f"收到 Chat Completions 请求 {self._build_route(inbound_route, 'chat/completions')}")
 
-        if not (auth and transport and proxy_config):
+        if not (auth and transport and (proxy_config or routing_config)):
             log("代理服务未就绪")
             finish_trace_once(status="failed", status_code=500, error="Proxy not ready")
             release_transport()
-            return jsonify({"error": "Proxy not ready"}), 500
+            return (
+                jsonify(
+                    build_openai_error_body(
+                        message="Proxy not ready",
+                        code="proxy_not_ready",
+                        error_type="server_error",
+                    )
+                ),
+                500,
+            )
+
+        auth_header = request.headers.get("Authorization")
+        if not auth.verify(auth_header):
+            log("Chat Completions 请求 MTGA 鉴权失败")
+            finish_trace_once(
+                status="failed",
+                status_code=401,
+                error="Invalid authentication",
+            )
+            release_transport()
+            return jsonify(
+                {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
+            ), 401
 
         if debug_mode:
             headers_str = "\\n".join(f"{k}: {v}" for k, v in request.headers.items())
@@ -810,7 +956,28 @@ class ProxyApp:
         client_requested_stream = request_data.get("stream", False)
         log(f"客户端请求的流模式: {client_requested_stream}")
 
-        if "model" in request_data:
+        resolved_route: ResolvedRoute | None = None
+        target_model_id = str(snapshot["target_model_id"])
+        if routing_config is not None:
+            route_resolution = resolve_published_model(routing_config, raw_client_model)
+            if isinstance(route_resolution, RouteResolutionError):
+                log(f"模型路由解析失败: {route_resolution.code}")
+                finish_trace_once(
+                    status="failed",
+                    status_code=route_resolution.status_code,
+                    error=route_resolution.message,
+                )
+                release_transport()
+                return self._route_error_response(route_resolution)
+            resolved_route = route_resolution
+            target_model_id = resolved_route.primary_target.upstream_model
+            log(
+                "模型路由命中: "
+                f"published_model={resolved_route.published_model.name} "
+                f"target_id={resolved_route.primary_target.id}"
+            )
+            request_data["model"] = target_model_id
+        elif "model" in request_data:
             original_model = request_data["model"]
             log(f"替换模型名: {original_model} -> {target_model_id}")
             request_data["model"] = target_model_id
@@ -833,68 +1000,206 @@ class ProxyApp:
             request_model=client_model or target_model_id,
             client_model=client_model or None,
             target_model=target_model_id,
+            published_model=(
+                resolved_route.published_model.name if resolved_route is not None else None
+            ),
+            target_id=(resolved_route.primary_target.id if resolved_route is not None else None),
+            target_display_name=(
+                resolved_route.primary_target.display_name
+                if resolved_route is not None
+                else None
+            ),
+            failover_pool_id=(
+                resolved_route.failover_pool.id
+                if resolved_route is not None and resolved_route.failover_pool is not None
+                else None
+            ),
             is_stream=bool(request_data.get("stream", False)),
             request_body=capture_proxy_trace_body(request_data),
         )
 
-        auth_header = request.headers.get("Authorization")
-        if not auth.verify(auth_header):
-            log("Chat Completions 请求 MTGA 鉴权失败")
-            finish_trace_once(
-                status="failed",
-                status_code=401,
-                error="Invalid authentication",
-            )
-            release_transport()
-            return jsonify(
-                {"error": {"message": "Invalid authentication", "type": "authentication_error"}}
-            ), 401
-
         try:
-            fallback_api_key = (proxy_config.api_key or "").strip()
-            if fallback_api_key:
-                log("使用配置组中的 API key")
-            else:
-                log("配置组未设置 API key；下游 Authorization 仅用于 MTGA 鉴权，不会透传到上游")
+            attempts: tuple[TargetAttempt, ...] = ()
+            if resolved_route is not None and routing_config is not None:
+                attempts = build_target_attempts(
+                    resolved_route,
+                    routing_config=routing_config,
+                    cooldowns=self._target_cooldowns,
+                )
+                if not attempts:
+                    log("模型路由无可用目标")
+                    finish_trace_once(
+                        status="failed",
+                        status_code=503,
+                        error="No available route target",
+                    )
+                    release_transport()
+                    return (
+                        jsonify(
+                            build_openai_error_body(
+                                message="No available route target",
+                                code="route_unavailable",
+                                error_type="server_error",
+                            )
+                        ),
+                        503,
+                    )
 
-            route = transport.adapter.build_route(
-                proxy_config,
-                fallback_api_key=fallback_api_key,
-            )
+            response_from_target: Any
+            route: Any
+            selected_target_id: str | None = None
+            selected_target_display_name: str | None = None
+            last_attempt_error: Exception | None = None
+
+            def execute_attempt(
+                attempt: TargetAttempt | None,
+            ) -> tuple[Any, Any, str | None, str | None]:
+                effective_proxy_config = proxy_config
+                target_id: str | None = None
+                target_display_name: str | None = None
+                if (
+                    attempt is not None
+                    and resolved_route is not None
+                    and routing_config is not None
+                ):
+                    effective_proxy_config = self._build_target_proxy_config(
+                        target=attempt.target,
+                        routing_config=routing_config,
+                        stream_mode=stream_mode if isinstance(stream_mode, str) else None,
+                        debug_mode=debug_mode,
+                        disable_ssl_strict_mode=disable_ssl_strict_mode,
+                    )
+                    request_data["model"] = attempt.target.upstream_model
+                    target_id = attempt.target.id
+                    target_display_name = attempt.target.display_name
+                    trace_event(
+                        "route_attempt",
+                        data={
+                            "attempt_index": attempt.index,
+                            "source": attempt.source,
+                            "target_id": attempt.target.id,
+                            "target_display_name": attempt.target.display_name,
+                            "upstream_model": attempt.target.upstream_model,
+                        },
+                    )
+                if effective_proxy_config is None:
+                    raise RuntimeError("Proxy route config invalid")
+
+                fallback_api_key = (effective_proxy_config.api_key or "").strip()
+                if fallback_api_key:
+                    log("使用目标中的 API key")
+                else:
+                    log("目标未设置 API key；下游 Authorization 仅用于 MTGA 鉴权，不会透传到上游")
+
+                upstream_route = transport.adapter.build_route(
+                    effective_proxy_config,
+                    fallback_api_key=fallback_api_key,
+                )
+                trace_event(
+                    "route_resolved",
+                    data={
+                        "provider": upstream_route.provider,
+                        "request_api": upstream_route.request_api,
+                        "model": upstream_route.mlitellm_model,
+                        "base_url": upstream_route.base_url,
+                        "target_id": target_id,
+                    },
+                )
+                log(
+                    f"MLiteLLM 路由: provider={upstream_route.provider} "
+                    f"request_api={upstream_route.request_api} "
+                    f"model={upstream_route.mlitellm_model} "
+                    f"base_url={upstream_route.base_url}"
+                )
+                if (
+                    upstream_route.mlitellm_base_url
+                    and upstream_route.mlitellm_base_url != upstream_route.base_url
+                ):
+                    log(f"MLiteLLM 内部基路径: {upstream_route.mlitellm_base_url}")
+
+                trace_event("upstream_request", "准备转发到上游")
+                upstream_response = transport.adapter.create_chat_completion(
+                    route=upstream_route,
+                    request_data=request_data,
+                )
+                return upstream_route, upstream_response, target_id, target_display_name
+
+            if attempts:
+                for attempt in attempts:
+                    try:
+                        (
+                            route,
+                            response_from_target,
+                            selected_target_id,
+                            selected_target_display_name,
+                        ) = execute_attempt(attempt)
+                        break
+                    except Exception as attempt_exc:  # noqa: BLE001
+                        last_attempt_error = attempt_exc
+                        error_info = normalize_upstream_error(attempt_exc)
+                        should_failover = False
+                        if (
+                            resolved_route is not None
+                            and resolved_route.failover_pool is not None
+                            and error_info.status_code
+                            in resolved_route.failover_pool.trigger_statuses
+                        ):
+                            cooldown_seconds = resolved_route.failover_pool.cooldown_seconds
+                            self._target_cooldowns.mark_cooling(
+                                attempt.target.id,
+                                cooldown_seconds,
+                            )
+                            trace_event(
+                                "target_cooldown",
+                                data={
+                                    "target_id": attempt.target.id,
+                                    "status_code": error_info.status_code,
+                                    "cooldown_seconds": cooldown_seconds,
+                                },
+                            )
+                            should_failover = True
+                        elif is_retryable_transport_error(attempt_exc):
+                            trace_event(
+                                "transport_failover",
+                                data={
+                                    "target_id": attempt.target.id,
+                                    "error": str(attempt_exc),
+                                },
+                            )
+                            should_failover = True
+                        has_next_attempt = attempt.index < len(attempts)
+                        if should_failover and has_next_attempt:
+                            log(
+                                f"目标 {attempt.target.id} 失败，尝试故障转移到下一个目标"
+                            )
+                            continue
+                        raise
+                else:
+                    if last_attempt_error is not None:
+                        raise last_attempt_error
+                    raise RuntimeError("No route target attempted")
+            else:
+                (
+                    route,
+                    response_from_target,
+                    selected_target_id,
+                    selected_target_display_name,
+                ) = execute_attempt(None)
+
             update_proxy_trace(
                 trace_id,
                 provider=route.provider,
                 request_api=route.request_api,
                 upstream_model=route.mlitellm_model,
                 target_api_base_url=route.base_url,
-                target_model=target_model_id,
+                target_model=str(request_data.get("model") or target_model_id),
+                target_id=selected_target_id,
+                target_display_name=selected_target_display_name,
             )
-            trace_event(
-                "route_resolved",
-                data={
-                    "provider": route.provider,
-                    "request_api": route.request_api,
-                    "model": route.mlitellm_model,
-                    "base_url": route.base_url,
-                },
-            )
-            log(
-                f"MLiteLLM 路由: provider={route.provider} "
-                f"request_api={route.request_api} model={route.mlitellm_model} "
-                f"base_url={route.base_url}"
-            )
-            if route.mlitellm_base_url and route.mlitellm_base_url != route.base_url:
-                log(f"MLiteLLM 内部基路径: {route.mlitellm_base_url}")
 
             is_stream = bool(request_data.get("stream", False))
             update_proxy_trace(trace_id, is_stream=is_stream)
             log(f"流模式: {is_stream}")
-
-            trace_event("upstream_request", "准备转发到上游")
-            response_from_target = transport.adapter.create_chat_completion(
-                route=route,
-                request_data=request_data,
-            )
 
             response_json = transport.coerce_payload_dict(response_from_target)
             if response_json is not None:

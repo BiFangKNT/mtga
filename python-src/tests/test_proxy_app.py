@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from modules.proxy.model_routing import build_model_routing_config
 from modules.proxy.proxy_app import ProxyApp
 from modules.proxy.proxy_config import (
     GEMINI_PROVIDER,
@@ -75,6 +76,198 @@ class DummyAsyncClosableStream:
 
 
 class ProxyAppGeminiTests(unittest.TestCase):
+    def test_model_routing_models_lists_enabled_published_models_without_auth(self) -> None:
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-models-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "main",
+                        "provider": GEMINI_PROVIDER,
+                        "api_base": "https://gemini.example.com",
+                        "upstream_model": "gemini-2.5-pro",
+                        "api_key": "upstream-key",
+                    }
+                ],
+                "published_models": [
+                    {"name": "model-a", "enabled": True, "primary_target_id": "main"},
+                    {"name": "model-b", "enabled": True, "primary_target_id": "main"},
+                    {"name": "model-c", "enabled": False, "primary_target_id": "main"},
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        response = app_layer.app.test_client().get("/v1/models")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual([item["id"] for item in payload["data"]], ["model-a", "model-b"])
+
+    def test_model_routing_chat_routes_by_request_model(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-chat-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "gemini-main",
+                        "display_name": "Gemini Main",
+                        "provider": GEMINI_PROVIDER,
+                        "api_base": "https://gemini.example.com",
+                        "upstream_model": "gemini-2.5-pro",
+                        "api_key": "upstream-key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "gemini-public",
+                        "enabled": True,
+                        "primary_target_id": "gemini-main",
+                    }
+                ],
+            }
+        )
+        logs: list[str] = []
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=logs.append,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        captured_request_data: dict[str, Any] = {}
+
+        def fake_create_chat_completion(
+            *, route: UpstreamRoute, request_data: dict[str, Any]
+        ) -> dict[str, Any]:
+            _ = route
+            captured_request_data.update(request_data)
+            return {
+                "id": "chatcmpl_123",
+                "object": "chat.completion",
+                "created": 123,
+                "model": "gemini/gemini-2.5-pro",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+
+        transport = app_layer.transport
+        with patch.object(
+            transport.adapter,
+            "create_chat_completion",
+            side_effect=fake_create_chat_completion,
+        ):
+            response = app_layer.app.test_client().post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gemini-public",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured_request_data["model"], "gemini-2.5-pro")
+        traces = list_proxy_traces()
+        self.assertEqual(len(traces), 1)
+        trace = get_proxy_trace(traces[0]["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["published_model"], "gemini-public")
+        self.assertEqual(trace["target_id"], "gemini-main")
+        self.assertEqual(trace["target_display_name"], "Gemini Main")
+
+    def test_model_routing_chat_auth_runs_before_route_resolution(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-auth-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "mtga-auth",
+                "targets": [
+                    {
+                        "id": "gemini-main",
+                        "provider": GEMINI_PROVIDER,
+                        "api_base": "https://gemini.example.com",
+                        "upstream_model": "gemini-2.5-pro",
+                        "api_key": "upstream-key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "gemini-public",
+                        "enabled": True,
+                        "primary_target_id": "gemini-main",
+                    }
+                ],
+            }
+        )
+        logs: list[str] = []
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=logs.append,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        client = app_layer.app.test_client()
+        responses = [
+            client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+            for model_name in ("gemini-public", "not-published")
+        ]
+
+        self.assertEqual([response.status_code for response in responses], [401, 401])
+        traces = list_proxy_traces()
+        self.assertEqual(len(traces), 2)
+        for trace_summary in traces:
+            trace = get_proxy_trace(trace_summary["trace_id"])
+            self.assertIsNotNone(trace)
+            assert trace is not None
+            self.assertEqual(trace["status"], "failed")
+            self.assertEqual(trace["status_code"], 401)
+            self.assertEqual(trace["error"], "Invalid authentication")
+            self.assertNotIn("request_body", trace)
+            self.assertNotIn("published_model", trace)
+        self.assertFalse(any("模型路由命中" in item for item in logs))
+        self.assertFalse(any("模型路由解析失败" in item for item in logs))
+
     def test_mtga_auth_header_is_not_reused_as_upstream_api_key(self) -> None:
         clear_proxy_traces(include_active=True)
         temp_dir = _make_test_temp_dir("mtga-proxy-app-auth-boundary-")

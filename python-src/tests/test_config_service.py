@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import unittest
 
+import httpx
+
+from modules.proxy.model_routing import (
+    build_model_routing_config,
+    is_retryable_transport_error,
+    normalize_model_routing_config,
+    resolve_published_model,
+)
 from modules.services.config_service import (
     LEGACY_GROUP_MAPPED_MODEL_ID_WARNING,
     _collect_config_warnings,
     _normalize_config_group,
 )
+from modules.services.proxy_orchestration import build_model_routing_runtime_config
 
 
 class ConfigGroupNormalizationTests(unittest.TestCase):
@@ -107,6 +116,133 @@ class ConfigGroupNormalizationTests(unittest.TestCase):
         )
 
         self.assertEqual(warnings, [])
+
+
+class ModelRoutingConfigTests(unittest.TestCase):
+    def test_migrate_legacy_config_to_model_routing(self) -> None:
+        normalized = normalize_model_routing_config(
+            {
+                "config_groups": [
+                    {
+                        "name": "Main",
+                        "provider": "anthropic",
+                        "api_url": "https://anthropic.example.com/",
+                        "model_id": "claude-3-7-sonnet",
+                        "api_key": "upstream-key",
+                        "middle_route": "/v1",
+                        "prompt_cache_enabled": True,
+                    },
+                    {
+                        "name": "Backup",
+                        "provider": "gemini",
+                        "api_url": "https://gemini.example.com",
+                        "model_id": "gemini-2.5-pro",
+                        "api_key": "backup-key",
+                    },
+                ],
+                "current_config_index": 0,
+                "mapped_model_id": "sonnet-proxy",
+                "mtga_auth_key": "",
+            }
+        )
+
+        self.assertEqual(normalized["schema_version"], 2)
+        self.assertEqual(normalized["mtga_auth_key"], "")
+        self.assertEqual(len(normalized["targets"]), 2)
+        self.assertEqual(normalized["targets"][0]["id"], "target-1")
+        self.assertEqual(normalized["targets"][0]["display_name"], "Main")
+        self.assertEqual(normalized["targets"][0]["api_base"], "https://anthropic.example.com")
+        self.assertEqual(normalized["published_models"][0]["name"], "sonnet-proxy")
+        self.assertEqual(normalized["published_models"][0]["primary_target_id"], "target-1")
+
+    def test_legacy_config_without_mapped_model_does_not_publish_model(self) -> None:
+        normalized = normalize_model_routing_config(
+            {
+                "config_groups": [
+                    {
+                        "provider": "openai_chat_completion",
+                        "api_url": "https://api.example.com",
+                        "model_id": "gpt-5",
+                        "api_key": "key",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(len(normalized["targets"]), 1)
+        self.assertEqual(normalized["published_models"], [])
+
+    def test_resolve_published_model_uses_exact_enabled_model(self) -> None:
+        config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "targets": [
+                    {
+                        "id": "main",
+                        "provider": "openai_chat_completion",
+                        "api_base": "https://api.example.com",
+                        "upstream_model": "gpt-5",
+                        "api_key": "key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "main",
+                    },
+                    {
+                        "name": "disabled-gpt",
+                        "enabled": False,
+                        "primary_target_id": "main",
+                    },
+                ],
+            }
+        )
+
+        resolved = resolve_published_model(config, "public-gpt")
+        self.assertFalse(hasattr(resolved, "status_code"))
+        self.assertEqual(resolved.primary_target.id, "main")  # type: ignore[union-attr]
+
+        missing = resolve_published_model(config, "disabled-gpt")
+        self.assertEqual(missing.status_code, 404)  # type: ignore[union-attr]
+
+    def test_runtime_config_requires_enabled_published_model(self) -> None:
+        runtime_config = build_model_routing_runtime_config(
+            load_model_routing_config=lambda: {
+                "schema_version": 2,
+                "targets": [
+                    {
+                        "id": "main",
+                        "provider": "openai_chat_completion",
+                        "api_base": "https://api.example.com",
+                        "upstream_model": "gpt-5",
+                        "api_key": "key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "disabled-gpt",
+                        "enabled": False,
+                        "primary_target_id": "main",
+                    }
+                ],
+            },
+            debug_mode=False,
+            disable_ssl_strict_mode=False,
+            stream_mode=None,
+        )
+
+        self.assertIsNone(runtime_config)
+
+    def test_failover_transport_retry_only_covers_connect_stage(self) -> None:
+        self.assertTrue(is_retryable_transport_error(httpx.ConnectError("connect failed")))
+        self.assertTrue(is_retryable_transport_error(httpx.ConnectTimeout("connect timeout")))
+        self.assertTrue(is_retryable_transport_error(httpx.ProxyError("proxy failed")))
+
+        self.assertFalse(is_retryable_transport_error(httpx.ReadTimeout("read timeout")))
+        self.assertFalse(is_retryable_transport_error(httpx.RemoteProtocolError("broken stream")))
+        self.assertFalse(is_retryable_transport_error(httpx.TransportError("generic transport")))
 
 
 if __name__ == "__main__":

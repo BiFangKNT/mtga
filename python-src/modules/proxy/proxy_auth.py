@@ -11,10 +11,10 @@ class ProxyAuth:
     mtga_auth_key: str = ""
 
     def verify(self, auth_header: str | None) -> bool:
-        if not auth_header:
-            return False
         if not self.mtga_auth_key:
             return True
+        if not auth_header:
+            return False
         provided_key = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
         return provided_key == self.mtga_auth_key
 

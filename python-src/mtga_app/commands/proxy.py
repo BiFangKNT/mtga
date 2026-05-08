@@ -70,7 +70,7 @@ class ProxyStartStepEvent(BaseModel):
     step: Literal["cert", "hosts", "proxy"]
     status: Literal["ok", "skipped", "failed", "started"]
     message: str | None = None
-    panel_target: Literal["config-group", "global-config", "settings"] | None = None
+    panel_target: Literal["model-routing", "settings"] | None = None
 
 
 class ProxyRuntimeStatusEvent(BaseModel):
@@ -330,31 +330,19 @@ def _restart_proxy_result(
     )
 
 
-def _ensure_global_config_ready(*, log_func: LogFunc) -> OperationResult:
-    config_store = _get_config_store()
-    result = proxy_orchestration.ensure_global_config_ready(
-        load_global_config=config_store.load_global_config,
-    )
-    if result.ok:
-        return OperationResult.success()
-    missing_display = "、".join(result.missing_fields)
-    log_func(f"⚠️ 全局配置缺失: {missing_display} 不能为空，请在左侧“全局配置”中填写后再试。")
-    return OperationResult.failure("全局配置缺失")
-
-
 def _build_proxy_config(
     payload: ProxyStartPayload, *, log_func: LogFunc
 ) -> dict[str, Any] | None:
     config_store = _get_config_store()
     stream_mode = payload.stream_mode if payload.force_stream else None
-    config = proxy_orchestration.build_proxy_config(
-        get_current_config=config_store.get_current_config,
+    config = proxy_orchestration.build_model_routing_runtime_config(
+        load_model_routing_config=config_store.load_model_routing_config,
         debug_mode=payload.debug_mode,
         disable_ssl_strict_mode=payload.disable_ssl_strict_mode,
         stream_mode=stream_mode,
     )
     if not config:
-        log_func("❌ 错误: 没有可用的配置组")
+        log_func("❌ 错误: 模型路由缺少可用的发布模型或目标")
         return None
     return config
 
@@ -389,24 +377,11 @@ def _attach_route_mode(config: dict[str, Any], proxy_mode: str) -> dict[str, Any
     return next_config
 
 
-def _ensure_global_config_ready_silent() -> OperationResult:
-    config_store = _get_config_store()
-    result = proxy_orchestration.ensure_global_config_ready(
-        load_global_config=config_store.load_global_config,
-    )
-    if result.ok:
-        return OperationResult.success()
-    return OperationResult.failure(
-        "global_config_missing",
-        missing_fields=result.missing_fields,
-    )
-
-
 def _build_proxy_config_silent(payload: ProxyStartPayload) -> dict[str, Any] | None:
     config_store = _get_config_store()
     stream_mode = payload.stream_mode if payload.force_stream else None
-    return proxy_orchestration.build_proxy_config(
-        get_current_config=config_store.get_current_config,
+    return proxy_orchestration.build_model_routing_runtime_config(
+        load_model_routing_config=config_store.load_model_routing_config,
         debug_mode=payload.debug_mode,
         disable_ssl_strict_mode=payload.disable_ssl_strict_mode,
         stream_mode=stream_mode,
@@ -424,15 +399,17 @@ def _push_proxy_step(
     status: Literal["ok", "skipped", "failed", "started"],
     message: str | None = None,
 ) -> None:
-    panel_target: Literal["config-group", "global-config", "settings"] | None = None
+    panel_target: Literal["model-routing", "settings"] | None = None
     if status == "failed":
         normalized = (message or "").strip()
-        if "全局配置缺失" in normalized:
-            panel_target = "global-config"
-        elif "Trae 路径" in normalized or normalized.startswith("trae_path_"):
+        if "Trae 路径" in normalized or normalized.startswith("trae_path_"):
             panel_target = "settings"
-        elif "没有可用的配置组" in normalized:
-            panel_target = "config-group"
+        elif (
+            "模型路由" in normalized
+            or "发布模型" in normalized
+            or "目标" in normalized
+        ):
+            panel_target = "model-routing"
 
     if message:
         log_func(f"[proxy-step] step={step} status={status} message={message}")
@@ -514,25 +491,15 @@ def _proxy_start_all_precheck(
     body: ProxyStartPayload,
     log_func: LogFunc,
 ) -> tuple[OperationResult | None, dict[str, Any] | None]:
-    ready = _ensure_global_config_ready(log_func=log_func)
-    if not ready.ok:
-        _push_proxy_step(
-            log_func,
-            step="proxy",
-            status="failed",
-            message=ready.message or "全局配置缺失",
-        )
-        return ready, None
-
     config = _build_proxy_config(body, log_func=log_func)
     if not config:
         _push_proxy_step(
             log_func,
             step="proxy",
             status="failed",
-            message="没有可用的配置组",
+            message="模型路由缺少可用的发布模型或目标",
         )
-        return OperationResult.failure("没有可用的配置组"), None
+        return OperationResult.failure("model_routing_missing"), None
 
     return None, config
 
@@ -753,26 +720,16 @@ async def proxy_start(body: ProxyStartPayload) -> dict[str, Any]:
     ensure_proxy_status_watcher_started()
     logs, log_func = collect_logs()
     try:
-        ready = _ensure_global_config_ready(log_func=log_func)
-        if not ready.ok:
-            _push_proxy_step(
-                log_func,
-                step="proxy",
-                status="failed",
-                message=ready.message or "全局配置缺失",
-            )
-            return build_result_payload(ready, logs, "代理服务器启动失败")
-
         config = _build_proxy_config(body, log_func=log_func)
         if not config:
             _push_proxy_step(
                 log_func,
                 step="proxy",
                 status="failed",
-                message="没有可用的配置组",
+                message="模型路由缺少可用的发布模型或目标",
             )
             return build_result_payload(
-                OperationResult.failure("没有可用的配置组"),
+                OperationResult.failure("model_routing_missing"),
                 logs,
                 "代理服务器启动失败",
             )
@@ -816,14 +773,10 @@ async def proxy_runtime_status() -> dict[str, Any]:
 async def proxy_apply_current_config(body: ProxyStartPayload) -> dict[str, Any]:
     ensure_proxy_status_watcher_started()
     logs: list[str] = []
-    ready = _ensure_global_config_ready_silent()
-    if not ready.ok:
-        return build_result_payload(ready, logs, "代理配置应用失败")
-
     config = _build_proxy_config_silent(body)
     if not config:
         return build_result_payload(
-            OperationResult.failure("config_group_missing"),
+            OperationResult.failure("model_routing_missing"),
             logs,
             "代理配置应用失败",
         )

@@ -11,6 +11,7 @@ from modules.actions.model_tests import ModelDiscoveryResult
 from modules.proxy.proxy_config import GEMINI_PROVIDER
 from mtga_app.commands.model_tests import (
     ConfigGroupModelListPayload,
+    ConfigGroupTestPayload,
     _persist_model_discovery_strategy_at_index,
     _persist_model_discovery_strategy_for_matching_group,
     register_model_test_commands,
@@ -22,9 +23,22 @@ class DummyConfigStore:
     config_groups: list[dict[str, Any]]
     current_index: int = 0
     save_calls: int = 0
+    routing_config: dict[str, Any] | None = None
 
     def load_config_groups(self) -> tuple[list[dict[str, Any]], int]:
         return copy.deepcopy(self.config_groups), self.current_index
+
+    def load_model_routing_config(self) -> dict[str, Any]:
+        if self.routing_config is not None:
+            return copy.deepcopy(self.routing_config)
+        return {
+            "schema_version": 2,
+            "mtga_auth_key": "",
+            "targets": [],
+            "failover_pools": [],
+            "published_models": [],
+            "prompt_cache_bucket_id": "",
+        }
 
     def save_config_groups(
         self,
@@ -53,6 +67,9 @@ class DummyCommands:
             return func
 
         return _decorator
+
+    def set_command(self, name: str, func: Any) -> None:
+        self.handlers[name] = func
 
 
 class ModelTestCommandPersistenceTests(unittest.TestCase):
@@ -124,6 +141,43 @@ class ModelTestCommandPersistenceTests(unittest.TestCase):
             "gemini_native_bearer",
         )
         self.assertTrue(any("已缓存模型发现策略" in item for item in logs))
+
+    def test_config_group_test_can_use_model_routing_target_id(self) -> None:
+        store = DummyConfigStore(
+            config_groups=[],
+            routing_config={
+                "schema_version": 2,
+                "targets": [
+                    {
+                        "id": "target-main",
+                        "provider": GEMINI_PROVIDER,
+                        "api_base": "https://provider.example.com",
+                        "upstream_model": "gemini-2.5-pro",
+                        "api_key": "test-key",
+                        "middle_route": "/v1beta",
+                    }
+                ],
+                "failover_pools": [],
+                "published_models": [],
+            },
+        )
+        commands = DummyCommands()
+
+        with patch(
+            "mtga_app.commands.model_tests._get_config_store",
+            return_value=store,
+        ), patch(
+            "mtga_app.commands.model_tests.model_tests.test_chat_completion",
+        ) as test_chat_completion:
+            register_model_test_commands(commands)  # type: ignore[arg-type]
+            payload = ConfigGroupTestPayload(index=-1, target_id="target-main")
+            result = asyncio.run(commands.handlers["config_group_test"](payload))
+
+        self.assertTrue(result["ok"])
+        test_chat_completion.assert_called_once()
+        called_group = test_chat_completion.call_args.args[0]
+        self.assertEqual(called_group["api_url"], "https://provider.example.com")
+        self.assertEqual(called_group["model_id"], "gemini-2.5-pro")
 
     def test_matching_group_treats_api_url_with_and_without_trailing_slash_as_same(self) -> None:
         logs: list[str] = []

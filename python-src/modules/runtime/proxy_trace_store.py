@@ -59,7 +59,11 @@ class ProxyTrace(TypedDict):
     request_api: NotRequired[str]
     request_model: NotRequired[str]
     client_model: NotRequired[str]
+    published_model: NotRequired[str]
     resolved_target_label: NotRequired[str]
+    target_id: NotRequired[str]
+    target_display_name: NotRequired[str]
+    failover_pool_id: NotRequired[str]
     target_api_base_url: NotRequired[str]
     upstream_model: NotRequired[str]
     target_model: NotRequired[str]
@@ -81,8 +85,11 @@ class ProxyTraceSummary(TypedDict, total=False):
     method: str
     request_path: str
     request_model: str
+    published_model: str
     provider: str
     upstream_model: str
+    target_id: str
+    target_display_name: str
     is_stream: bool
     status_code: int
     started_at: str
@@ -393,8 +400,11 @@ class ProxyTraceStore:
         }
         optional_keys = (
             "request_model",
+            "published_model",
             "provider",
             "upstream_model",
+            "target_id",
+            "target_display_name",
             "status_code",
             "ended_at",
             "duration_ms",

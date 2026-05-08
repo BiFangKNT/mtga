@@ -6,6 +6,11 @@ from typing import Any, cast
 
 import yaml
 
+from modules.proxy.model_routing import (
+    build_model_routing_config,
+    normalize_model_routing_config,
+    serialize_model_routing_config,
+)
 from modules.proxy.proxy_config import (
     OPENAI_CHAT_COMPLETION_PROVIDER,
     normalize_model_discovery_strategy,
@@ -164,6 +169,64 @@ class ConfigStore:
         except Exception:
             pass
         return DEFAULT_PROXY_MODE, ""
+
+    def load_model_routing_config(self) -> dict[str, Any]:
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config_obj: Any = yaml.safe_load(f) or {}
+                    config = (
+                        cast(dict[str, Any], config_obj)
+                        if isinstance(config_obj, dict)
+                        else {}
+                    )
+                    return serialize_model_routing_config(
+                        build_model_routing_config(config)
+                    )
+        except Exception:
+            pass
+        return serialize_model_routing_config(build_model_routing_config({}))
+
+    def save_model_routing_config(
+        self,
+        routing_config: dict[str, Any],
+        *,
+        proxy_mode: str | None = None,
+        trae_path: str | None = None,
+    ) -> bool:
+        try:
+            config_data: dict[str, Any] = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config_data = yaml.safe_load(f) or {}
+
+            normalized = normalize_model_routing_config(routing_config)
+            for legacy_key in (
+                "config_groups",
+                "current_config_index",
+                "mapped_model_id",
+            ):
+                config_data.pop(legacy_key, None)
+            config_data.update(normalized)
+            if proxy_mode is not None:
+                config_data["proxy_mode"] = _normalize_proxy_mode(proxy_mode)
+            if trae_path is not None:
+                config_data["trae_path"] = str(trae_path or "").strip()
+
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    config_data,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    indent=2,
+                    sort_keys=False,
+                )
+            return True
+        except Exception:
+            return False
 
     def save_config_groups(  # noqa: PLR0913
         self,

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules.network.network_utils import is_port_in_use
+from modules.proxy.model_routing import build_model_routing_config
 from modules.proxy.proxy_server import ProxyServer
 from modules.runtime.error_codes import ErrorCode
 from modules.runtime.operation_result import OperationResult
@@ -44,8 +45,6 @@ def ensure_global_config_ready(
     missing_fields: list[str] = []
     if not mapped_model_id:
         missing_fields.append("映射模型ID")
-    if not mtga_auth_key:
-        missing_fields.append("MTGA鉴权Key")
 
     return GlobalConfigCheckResult(ok=not missing_fields, missing_fields=missing_fields)
 
@@ -65,6 +64,24 @@ def build_proxy_config(
     config["disable_ssl_strict_mode"] = disable_ssl_strict_mode
     config["stream_mode"] = stream_mode
     return config
+
+
+def build_model_routing_runtime_config(
+    *,
+    load_model_routing_config: Callable[[], dict[str, Any]],
+    debug_mode: bool,
+    disable_ssl_strict_mode: bool,
+    stream_mode: str | None,
+) -> dict[str, Any] | None:
+    routing_config = build_model_routing_config(load_model_routing_config())
+    if not routing_config.targets or not routing_config.enabled_published_models():
+        return None
+    return {
+        "model_routing": routing_config,
+        "debug_mode": debug_mode,
+        "disable_ssl_strict_mode": disable_ssl_strict_mode,
+        "stream_mode": stream_mode,
+    }
 
 
 def restart_proxy_result(

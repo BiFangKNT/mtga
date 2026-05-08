@@ -87,7 +87,7 @@ const formatBody = (body?: ProxyTraceBodyCapture) => {
 };
 
 const traceTitle = (trace: ProxyTraceSummary) => {
-  return trace.request_model || trace.upstream_model || trace.request_path;
+  return trace.published_model || trace.request_model || trace.upstream_model || trace.request_path;
 };
 
 const refresh = async () => {
@@ -200,6 +200,9 @@ onBeforeUnmount(() => {
             </span>
             <span class="flex items-center gap-2 text-[11px] text-slate-500">
               <span class="font-mono">{{ trace.request_id }}</span>
+              <span v-if="trace.target_display_name || trace.target_id">
+                {{ trace.target_display_name || trace.target_id }}
+              </span>
               <span>{{ trace.provider || "unknown" }}</span>
               <span>{{ formatDuration(trace.duration_ms) }}</span>
             </span>
@@ -283,6 +286,17 @@ onBeforeUnmount(() => {
                 class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-5 custom-scrollbar"
               >
                 <div class="grid min-w-0 grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
+                  <div
+                    class="min-w-0 overflow-hidden rounded-lg border border-slate-200/60 bg-white/50 p-3"
+                  >
+                    <div class="font-bold text-slate-500">路由</div>
+                    <div
+                      class="mt-1 overflow-x-auto whitespace-nowrap font-mono text-slate-700 custom-scrollbar"
+                    >
+                      {{ selectedTrace.published_model || selectedTrace.request_model || "-" }} →
+                      {{ selectedTrace.target_display_name || selectedTrace.target_id || "-" }}
+                    </div>
+                  </div>
                   <div
                     class="min-w-0 overflow-hidden rounded-lg border border-slate-200/60 bg-white/50 p-3"
                   >

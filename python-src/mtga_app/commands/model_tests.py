@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel
 from pytauri import Commands
@@ -42,6 +42,7 @@ class InlineThreadManager:
 
 class ConfigGroupTestPayload(BaseModel):
     index: int
+    target_id: str = ""
     mode: Literal["chat", "models"] = "chat"
 
 
@@ -120,6 +121,57 @@ def _apply_model_discovery_strategy_to_scope(
     return updated
 
 
+def _target_to_test_group(target: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "provider": target.get("provider"),
+        "api_url": target.get("api_base"),
+        "model_id": target.get("upstream_model"),
+        "api_key": target.get("api_key"),
+        "middle_route": target.get("middle_route"),
+        "model_discovery_strategy": target.get("model_discovery_strategy"),
+        "prompt_cache_enabled": target.get("prompt_cache_enabled"),
+    }
+
+
+def _resolve_test_group(
+    *,
+    config_store: ConfigStore,
+    target_id: str,
+    index: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    normalized_target_id = target_id.strip()
+    if normalized_target_id:
+        routing_config = config_store.load_model_routing_config()
+        targets_obj = routing_config.get("targets")
+        targets = cast(list[Any], targets_obj) if isinstance(targets_obj, list) else []
+        normalized_targets = [
+            cast(dict[str, Any], target_obj)
+            for target_obj in targets
+            if isinstance(target_obj, dict)
+        ]
+        target = next(
+            (
+                target_obj
+                for target_obj in normalized_targets
+                if str(target_obj.get("id") or "") == normalized_target_id
+            ),
+            None,
+        )
+        if target is None:
+            return None, "目标不存在"
+        return _target_to_test_group(target), None
+
+    config_groups, _ = config_store.load_config_groups()
+    if not config_groups:
+        return None, "没有可用的配置组"
+    if index < 0 or index >= len(config_groups):
+        return None, "配置组索引无效"
+    group_obj: object = config_groups[index]
+    if not isinstance(group_obj, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+        return None, "配置组格式无效"
+    return {str(key): value for key, value in group_obj.items()}, None
+
+
 def _persist_model_discovery_strategy_for_matching_group(
     *,
     config_store: ConfigStore,
@@ -148,18 +200,14 @@ def register_model_test_commands(commands: Commands) -> None:
     async def config_group_test(body: ConfigGroupTestPayload) -> dict[str, Any]:
         logs, log_func = collect_logs()
         config_store = _get_config_store()
-        config_groups, _ = config_store.load_config_groups()
-        if not config_groups:
-            result = OperationResult.failure("没有可用的配置组")
+        config_group, error_message = _resolve_test_group(
+            config_store=config_store,
+            target_id=body.target_id,
+            index=body.index,
+        )
+        if config_group is None:
+            result = OperationResult.failure(error_message or "测活目标无效")
             return build_result_payload(result, logs, "配置组测活失败")
-        if body.index < 0 or body.index >= len(config_groups):
-            result = OperationResult.failure("配置组索引无效")
-            return build_result_payload(result, logs, "配置组测活失败")
-        group_obj: object = config_groups[body.index]
-        if not isinstance(group_obj, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            result = OperationResult.failure("配置组格式无效")
-            return build_result_payload(result, logs, "配置组测活失败")
-        config_group = {str(key): value for key, value in group_obj.items()}
 
         thread_manager = InlineThreadManager()
         if body.mode == "models":
@@ -167,7 +215,7 @@ def register_model_test_commands(commands: Commands) -> None:
                 config_group,
                 log_func=log_func,
             )
-            if result.ok and result.strategy_id:
+            if result.ok and result.strategy_id and not body.target_id.strip():
                 _persist_model_discovery_strategy_at_index(
                     config_store=config_store,
                     index=body.index,

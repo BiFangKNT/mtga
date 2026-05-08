@@ -12,14 +12,49 @@ export type ConfigGroup = {
   prompt_cache_enabled?: boolean;
 };
 
+export type ModelRoutingTarget = {
+  id: string;
+  display_name: string;
+  provider: ProviderId;
+  api_base: string;
+  upstream_model: string;
+  api_key: string;
+  middle_route?: string;
+  model_discovery_strategy?: string | null;
+  prompt_cache_enabled?: boolean;
+};
+
+export type FailoverPoolMember = {
+  target_id: string;
+};
+
+export type FailoverPool = {
+  id: string;
+  trigger_statuses: number[];
+  cooldown_seconds: number;
+  members: FailoverPoolMember[];
+};
+
+export type PublishedModel = {
+  name: string;
+  enabled: boolean;
+  primary_target_id: string;
+  failover_pool_id?: string | null;
+};
+
 export type ConfigPayload = {
-  config_groups: ConfigGroup[];
-  current_config_index: number;
-  mapped_model_id: string;
+  schema_version: 2;
   mtga_auth_key: string;
+  targets: ModelRoutingTarget[];
+  failover_pools: FailoverPool[];
+  published_models: PublishedModel[];
+  prompt_cache_bucket_id?: string;
   proxy_mode: ProxyMode;
   trae_path: string;
   warnings?: string[];
+  config_groups?: ConfigGroup[];
+  current_config_index?: number;
+  mapped_model_id?: string;
 };
 
 export type ConfigGroupModelsResult = {
@@ -79,8 +114,11 @@ export type ProxyTraceSummary = {
   method: string;
   request_path: string;
   request_model?: string;
+  published_model?: string;
   provider?: string;
   upstream_model?: string;
+  target_id?: string;
+  target_display_name?: string;
   is_stream: boolean;
   status_code?: number;
   started_at: string;
@@ -100,6 +138,7 @@ export type ProxyTrace = ProxyTraceSummary & {
   request_api?: "chat_completions" | "responses";
   client_model?: string;
   resolved_target_label?: string;
+  failover_pool_id?: string;
   target_api_base_url?: string;
   target_model?: string;
   first_chunk_at?: string;
@@ -124,7 +163,7 @@ export type ProxyStartStepEvent = {
   step: MainTabKey;
   status: "ok" | "skipped" | "failed" | "started";
   message?: string | null;
-  panel_target?: "config-group" | "global-config" | "settings" | null;
+  panel_target?: "model-routing" | "settings" | null;
 };
 
 export type ProxyRuntimeStatusPayload = {

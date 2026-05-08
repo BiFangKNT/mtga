@@ -31,7 +31,7 @@ if (import.meta.client) {
 /**
  * 当前选中的左侧面板 ID
  */
-const activeTab = ref("config-group");
+const activeTab = ref("model-routing");
 const direction = ref<"down" | "up">("down");
 
 /**
@@ -139,8 +139,7 @@ const handleGlobalMouseOver = (e: MouseEvent) => {
  * 导航菜单配置
  */
 const navigation = [
-  { id: "config-group", name: "代理配置组", icon: ICONS.CONFIG_GROUP },
-  { id: "global-config", name: "全局配置", icon: ICONS.GLOBAL_CONFIG },
+  { id: "model-routing", name: "模型路由", icon: ICONS.MODEL_ROUTING },
   { id: "main-tabs", name: "主要流程", icon: ICONS.MAIN_TABS },
   { id: "proxy-logs", name: "代理日志", icon: ICONS.PROXY_LOGS },
   { id: "system-prompts", name: "系统提示词", icon: ICONS.SYSTEM_PROMPTS },
@@ -260,8 +259,7 @@ onBeforeUnmount(() => {
                 :key="activeTab"
                 class="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar"
               >
-                <ConfigGroupPanel v-if="activeTab === 'config-group'" />
-                <GlobalConfigPanel v-if="activeTab === 'global-config'" />
+                <ModelRoutingPanel v-if="activeTab === 'model-routing'" />
                 <MainTabs v-if="activeTab === 'main-tabs'" />
                 <ProxyLogPanel v-if="activeTab === 'proxy-logs'" />
                 <SystemPromptPanel v-if="activeTab === 'system-prompts'" />

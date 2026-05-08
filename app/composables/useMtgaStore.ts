@@ -6,10 +6,13 @@ import type {
   ConfigGroup,
   ConfigGroupModelsResult,
   ConfigPayload,
+  FailoverPool,
   InvokeResult,
   LogEventPayload,
   LogPullResult,
   MainTabKey,
+  ModelRoutingTarget,
+  PublishedModel,
   ProxyMode,
   ProxyRuntimeStatusPayload,
   ProxyStartStepEvent,
@@ -25,13 +28,7 @@ type RuntimeOptions = {
   streamMode: "true" | "false";
 };
 
-type PanelTarget =
-  | "config-group"
-  | "global-config"
-  | "main-tabs"
-  | "proxy-logs"
-  | "system-prompts"
-  | "settings";
+type PanelTarget = "model-routing" | "main-tabs" | "proxy-logs" | "system-prompts" | "settings";
 
 const DEFAULT_APP_INFO: AppInfo = {
   display_name: "MTGA",
@@ -79,8 +76,7 @@ const isProxyStepStatus = (value: unknown): value is ProxyStartStepEvent["status
   value === "ok" || value === "skipped" || value === "failed" || value === "started";
 
 const isPanelTarget = (value: unknown): value is PanelTarget =>
-  value === "config-group" ||
-  value === "global-config" ||
+  value === "model-routing" ||
   value === "main-tabs" ||
   value === "proxy-logs" ||
   value === "system-prompts" ||
@@ -228,6 +224,139 @@ const normalizeModelList = (value: unknown) => {
   return Array.from(unique).sort((a, b) => a.localeCompare(b));
 };
 
+const normalizeProvider = (value: unknown): ModelRoutingTarget["provider"] => {
+  if (
+    value === "openai_chat_completion" ||
+    value === "openai_response" ||
+    value === "anthropic" ||
+    value === "gemini"
+  ) {
+    return value;
+  }
+  return "openai_chat_completion";
+};
+
+const normalizeTargetId = (value: unknown, index: number, used: Set<string>) => {
+  const base = coerceText(value).trim() || `target-${index + 1}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
+};
+
+const normalizeTargets = (value: unknown): ModelRoutingTarget[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const used = new Set<string>();
+  return value
+    .filter(isRecord)
+    .map((item, index) => {
+      const apiBase = coerceText(item.api_base ?? item.api_url)
+        .trim()
+        .replace(/\/+$/, "");
+      const upstreamModel = coerceText(item.upstream_model ?? item.model_id).trim();
+      if (!apiBase || !upstreamModel) {
+        return null;
+      }
+      const target: ModelRoutingTarget = {
+        id: normalizeTargetId(item.id, index, used),
+        display_name: coerceText(item.display_name ?? item.name).trim(),
+        provider: normalizeProvider(item.provider),
+        api_base: apiBase,
+        upstream_model: upstreamModel,
+        api_key: coerceText(item.api_key).trim(),
+        middle_route: coerceText(item.middle_route).trim(),
+        prompt_cache_enabled: item.prompt_cache_enabled === true,
+      };
+      const strategy = coerceText(item.model_discovery_strategy).trim();
+      if (strategy) {
+        target.model_discovery_strategy = strategy;
+      }
+      return target;
+    })
+    .filter((item): item is ModelRoutingTarget => item !== null);
+};
+
+const normalizeFailoverPools = (value: unknown, targets: ModelRoutingTarget[]): FailoverPool[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const targetIds = new Set(targets.map((target) => target.id));
+  const usedPoolIds = new Set<string>();
+  return value.filter(isRecord).map((item, index) => {
+    const idBase = coerceText(item.id).trim() || `failover-pool-${index + 1}`;
+    let id = idBase;
+    let suffix = 2;
+    while (usedPoolIds.has(id)) {
+      id = `${idBase}-${suffix}`;
+      suffix += 1;
+    }
+    usedPoolIds.add(id);
+    const statuses = Array.isArray(item.trigger_statuses)
+      ? item.trigger_statuses
+          .map((status) => Number(status))
+          .filter((status) => Number.isInteger(status) && status > 0)
+      : [429];
+    const memberItems = Array.isArray(item.members) ? item.members : [];
+    const seenMembers = new Set<string>();
+    const members = memberItems
+      .map((member) => (isRecord(member) ? coerceText(member.target_id) : coerceText(member)))
+      .map((targetId) => targetId.trim())
+      .filter((targetId) => {
+        if (!targetId || !targetIds.has(targetId) || seenMembers.has(targetId)) {
+          return false;
+        }
+        seenMembers.add(targetId);
+        return true;
+      })
+      .map((target_id) => ({ target_id }));
+    const cooldownSeconds = Number(item.cooldown_seconds);
+    return {
+      id,
+      trigger_statuses: statuses.length ? Array.from(new Set(statuses)) : [429],
+      cooldown_seconds:
+        Number.isInteger(cooldownSeconds) && cooldownSeconds > 0 ? cooldownSeconds : 10,
+      members,
+    };
+  });
+};
+
+const normalizePublishedModels = (
+  value: unknown,
+  targets: ModelRoutingTarget[],
+  pools: FailoverPool[],
+): PublishedModel[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const targetIds = new Set(targets.map((target) => target.id));
+  const poolIds = new Set(pools.map((pool) => pool.id));
+  const usedNames = new Set<string>();
+  return value
+    .filter(isRecord)
+    .map((item): PublishedModel | null => {
+      const name = coerceText(item.name).trim();
+      const primaryTargetId = coerceText(item.primary_target_id).trim();
+      if (!name || usedNames.has(name) || !targetIds.has(primaryTargetId)) {
+        return null;
+      }
+      usedNames.add(name);
+      const failoverPoolId = coerceText(item.failover_pool_id).trim();
+      return {
+        name,
+        enabled: item.enabled !== false,
+        primary_target_id: primaryTargetId,
+        failover_pool_id: failoverPoolId && poolIds.has(failoverPoolId) ? failoverPoolId : null,
+      };
+    })
+    .filter((item): item is PublishedModel => item !== null);
+};
+
 const normalizeSystemPromptList = (value: unknown): SystemPromptItem[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -295,7 +424,16 @@ const normalizeProxyTraceSummary = (value: unknown): ProxyTraceSummary | null =>
     is_stream: value.is_stream === true,
     started_at: startedAt,
   };
-  const textFields = ["request_model", "provider", "upstream_model", "ended_at", "error"] as const;
+  const textFields = [
+    "request_model",
+    "published_model",
+    "provider",
+    "upstream_model",
+    "target_id",
+    "target_display_name",
+    "ended_at",
+    "error",
+  ] as const;
   textFields.forEach((field) => {
     const text = coerceText(value[field]).trim();
     if (text) {
@@ -347,6 +485,7 @@ const normalizeProxyTraceDetail = (value: unknown): ProxyTrace | null => {
     "request_api",
     "client_model",
     "resolved_target_label",
+    "failover_pool_id",
     "target_api_base_url",
     "target_model",
     "first_chunk_at",
@@ -378,13 +517,6 @@ const normalizeProxyTraceDetail = (value: unknown): ProxyTrace | null => {
   return detail;
 };
 
-const clampIndex = (value: number, max: number) => {
-  if (max <= 0) {
-    return 0;
-  }
-  return Math.min(Math.max(value, 0), max - 1);
-};
-
 export const useMtgaStore = () => {
   const api = useMtgaApi();
 
@@ -392,6 +524,10 @@ export const useMtgaStore = () => {
   const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0);
   const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
+  const routingTargets = useState<ModelRoutingTarget[]>("mtga-routing-targets", () => []);
+  const failoverPools = useState<FailoverPool[]>("mtga-failover-pools", () => []);
+  const publishedModels = useState<PublishedModel[]>("mtga-published-models", () => []);
+  const promptCacheBucketId = useState<string>("mtga-prompt-cache-bucket-id", () => "");
   const proxyMode = useState<ProxyMode>("mtga-proxy-mode", () => DEFAULT_PROXY_MODE);
   const savedProxyMode = useState<ProxyMode>("mtga-saved-proxy-mode", () => DEFAULT_PROXY_MODE);
   const traePath = useState<string>("mtga-trae-path", () => DEFAULT_TRAE_PATH);
@@ -467,18 +603,19 @@ export const useMtgaStore = () => {
     if (!normalized) {
       return;
     }
-    if (normalized.includes("全局配置缺失") || normalized === "global_config_missing") {
-      panelNavTarget.value = "global-config";
-      panelNavSignal.value += 1;
-      return;
-    }
     if (normalized.includes("Trae 路径") || normalized.startsWith("trae_path_")) {
       panelNavTarget.value = "settings";
       panelNavSignal.value += 1;
       return;
     }
-    if (normalized.includes("没有可用的配置组") || normalized === "config_group_missing") {
-      panelNavTarget.value = "config-group";
+    if (
+      normalized.includes("模型路由") ||
+      normalized.includes("没有可用的配置组") ||
+      normalized === "model_routing_missing" ||
+      normalized === "global_config_missing" ||
+      normalized === "config_group_missing"
+    ) {
+      panelNavTarget.value = "model-routing";
       panelNavSignal.value += 1;
     }
   };
@@ -691,13 +828,31 @@ export const useMtgaStore = () => {
     if (!result) {
       return false;
     }
-    configGroups.value = result.config_groups || [];
-    currentConfigIndex.value = clampIndex(
-      result.current_config_index ?? 0,
-      configGroups.value.length,
+    const normalizedTargets = normalizeTargets(result.targets);
+    const normalizedPools = normalizeFailoverPools(result.failover_pools, normalizedTargets);
+    const normalizedPublishedModels = normalizePublishedModels(
+      result.published_models,
+      normalizedTargets,
+      normalizedPools,
     );
-    mappedModelId.value = coerceText(result.mapped_model_id);
+
+    routingTargets.value = normalizedTargets;
+    failoverPools.value = normalizedPools;
+    publishedModels.value = normalizedPublishedModels;
+    promptCacheBucketId.value = coerceText(result.prompt_cache_bucket_id).trim();
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
+    configGroups.value = normalizedTargets.map((target) => ({
+      name: target.display_name,
+      provider: target.provider,
+      api_url: target.api_base,
+      model_id: target.upstream_model,
+      api_key: target.api_key,
+      middle_route: target.middle_route,
+      model_discovery_strategy: target.model_discovery_strategy || undefined,
+      prompt_cache_enabled: target.prompt_cache_enabled,
+    }));
+    currentConfigIndex.value = 0;
+    mappedModelId.value = normalizedPublishedModels[0]?.name || "";
     proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
     savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
@@ -714,13 +869,13 @@ export const useMtgaStore = () => {
   };
 
   const saveConfig = async () => {
-    const clampedIndex = clampIndex(currentConfigIndex.value, configGroups.value.length);
-    currentConfigIndex.value = clampedIndex;
     const payload: ConfigPayload = {
-      config_groups: configGroups.value,
-      current_config_index: clampedIndex,
-      mapped_model_id: coerceText(mappedModelId.value),
+      schema_version: 2,
       mtga_auth_key: coerceText(mtgaAuthKey.value),
+      targets: routingTargets.value,
+      failover_pools: failoverPools.value,
+      published_models: publishedModels.value,
+      prompt_cache_bucket_id: coerceText(promptCacheBucketId.value),
       proxy_mode: proxyMode.value,
       trae_path: coerceText(traePath.value).trim(),
     };
@@ -919,21 +1074,21 @@ export const useMtgaStore = () => {
       if (applyStatus === "deferred" || message === "proxy_not_running") {
         appendLog("代理未运行，配置将在下次启动时生效");
       } else {
-        appendLog("已应用当前配置组到运行中代理");
+        appendLog("已应用模型路由到运行中代理");
       }
       return true;
     }
 
-    if (message === "global_config_missing") {
-      appendLog("应用代理配置失败：请先完善全局配置");
-      return false;
-    }
-    if (message === "config_group_missing") {
-      appendLog("应用代理配置失败：没有可用的配置组");
+    if (
+      message === "model_routing_missing" ||
+      message === "global_config_missing" ||
+      message === "config_group_missing"
+    ) {
+      appendLog("应用代理配置失败：模型路由缺少可用的发布模型或目标");
       return false;
     }
     if (message === "config_invalid") {
-      appendLog("应用代理配置失败：当前配置组无效");
+      appendLog("应用代理配置失败：当前模型路由无效");
       return false;
     }
 
@@ -974,9 +1129,9 @@ export const useMtgaStore = () => {
     return ok;
   };
 
-  const runConfigGroupTest = async (index: number) => {
-    const result = await api.configGroupTest({ index });
-    return applyInvokeResult(result, "配置组测活");
+  const runConfigGroupTest = async (index: number, targetId = "") => {
+    const result = await api.configGroupTest({ index, target_id: targetId });
+    return applyInvokeResult(result, targetId ? "目标测活" : "配置组测活");
   };
 
   const fetchConfigGroupModels = async (payload: {
@@ -1247,6 +1402,10 @@ export const useMtgaStore = () => {
     currentConfigIndex,
     mappedModelId,
     mtgaAuthKey,
+    routingTargets,
+    failoverPools,
+    publishedModels,
+    promptCacheBucketId,
     proxyMode,
     savedProxyMode,
     proxyRuntimeKnown,

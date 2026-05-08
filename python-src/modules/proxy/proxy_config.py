@@ -4,11 +4,14 @@ import os
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
 from modules.runtime.resource_manager import ResourceManager
+
+if TYPE_CHECKING:
+    from modules.proxy.model_routing import ModelRoutingTarget
 
 PLACEHOLDER_API_URL = "YOUR_REVERSE_ENGINEERED_API_ENDPOINT_BASE_URL"
 DEFAULT_MIDDLE_ROUTE = "/v1"
@@ -275,6 +278,35 @@ def build_proxy_config(
     )
 
 
+def build_proxy_config_from_target(  # noqa: PLR0913
+    target: ModelRoutingTarget,
+    *,
+    mtga_auth_key: str,
+    prompt_cache_bucket_id: str = "",
+    stream_mode: str | None = None,
+    debug_mode: bool = False,
+    disable_ssl_strict_mode: bool = False,
+) -> ProxyConfig:
+    return ProxyConfig(
+        provider=normalize_provider(target.provider),
+        target_api_base_url=target.api_base,
+        middle_route=normalize_middle_route(
+            target.middle_route,
+            provider=target.provider,
+        ),
+        custom_model_id="",
+        target_model_id=target.upstream_model,
+        stream_mode=stream_mode,
+        debug_mode=debug_mode,
+        disable_ssl_strict_mode=disable_ssl_strict_mode,
+        api_key=target.api_key,
+        mtga_auth_key=mtga_auth_key,
+        model_discovery_strategy=target.model_discovery_strategy,
+        prompt_cache_bucket_id=prompt_cache_bucket_id,
+        prompt_cache_enabled=target.prompt_cache_enabled,
+    )
+
+
 __all__ = [
     "ANTHROPIC_PROVIDER",
     "DEFAULT_MIDDLE_ROUTE",
@@ -293,6 +325,7 @@ __all__ = [
     "SUPPORTED_MODEL_DISCOVERY_STRATEGY_IDS",
     "SUPPORTED_PROVIDER_IDS",
     "build_proxy_config",
+    "build_proxy_config_from_target",
     "get_default_middle_route",
     "load_global_config",
     "normalize_middle_route",
