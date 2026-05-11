@@ -454,6 +454,9 @@ const normalizeProxyTraceSummary = (value: unknown): ProxyTraceSummary | null =>
       nextTrace[field] = numberValue;
     }
   });
+  nextTrace.has_route_attempts = value.has_route_attempts === true;
+  nextTrace.has_failover = value.has_failover === true;
+  nextTrace.has_cooldown = value.has_cooldown === true;
   nextTrace.request_body_truncated = value.request_body_truncated === true;
   nextTrace.response_body_truncated = value.response_body_truncated === true;
   return nextTrace;

@@ -75,6 +75,81 @@ class ProxyTraceStoreTests(unittest.TestCase):
         event_message = trace["events"][0]["message"]
         self.assertEqual(len(event_message.encode("utf-8")), MAX_EVENT_MESSAGE_BYTES)
 
+    def test_summary_exposes_route_event_markers(self) -> None:
+        store = ProxyTraceStore(max_traces=10)
+        trace_id = store.start_trace(
+            request_id="request",
+            method="POST",
+            request_path="/v1/chat/completions",
+        )
+
+        store.add_event(
+            trace_id,
+            kind="route_attempt",
+            data={"target_id": "target-a", "attempt_index": 1},
+        )
+        store.add_event(
+            trace_id,
+            kind="target_cooldown",
+            data={"target_id": "target-a", "status_code": 429},
+        )
+        store.add_event(
+            trace_id,
+            kind="route_attempt",
+            data={"target_id": "target-b", "attempt_index": 2, "source": "failover"},
+        )
+
+        summary = store.list_traces()[0]
+
+        self.assertTrue(summary["has_route_attempts"])
+        self.assertTrue(summary["has_cooldown"])
+        self.assertTrue(summary["has_failover"])
+
+    def test_summary_does_not_mark_plain_route_attempt_as_failover(self) -> None:
+        store = ProxyTraceStore(max_traces=10)
+        trace_id = store.start_trace(
+            request_id="request",
+            method="POST",
+            request_path="/v1/chat/completions",
+        )
+
+        store.add_event(
+            trace_id,
+            kind="route_attempt",
+            data={"target_id": "target-a", "attempt_index": 1},
+        )
+
+        summary = store.list_traces()[0]
+
+        self.assertTrue(summary["has_route_attempts"])
+        self.assertFalse(summary["has_cooldown"])
+        self.assertFalse(summary["has_failover"])
+
+    def test_summary_does_not_mark_cooldown_without_next_attempt_as_failover(self) -> None:
+        store = ProxyTraceStore(max_traces=10)
+        trace_id = store.start_trace(
+            request_id="request",
+            method="POST",
+            request_path="/v1/chat/completions",
+        )
+
+        store.add_event(
+            trace_id,
+            kind="route_attempt",
+            data={"target_id": "target-a", "attempt_index": 1},
+        )
+        store.add_event(
+            trace_id,
+            kind="target_cooldown",
+            data={"target_id": "target-a", "status_code": 429},
+        )
+
+        summary = store.list_traces()[0]
+
+        self.assertTrue(summary["has_route_attempts"])
+        self.assertTrue(summary["has_cooldown"])
+        self.assertFalse(summary["has_failover"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -127,6 +127,9 @@ export type ProxyTraceSummary = {
   chunk_count?: number;
   error?: string;
   events_count?: number;
+  has_route_attempts?: boolean;
+  has_failover?: boolean;
+  has_cooldown?: boolean;
   request_body_bytes?: number;
   response_body_bytes?: number;
   request_body_truncated?: boolean;

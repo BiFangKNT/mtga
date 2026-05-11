@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import type { ProxyTrace, ProxyTraceBodyCapture, ProxyTraceSummary } from "~/composables/mtgaTypes";
+import type {
+  ProxyTrace,
+  ProxyTraceBodyCapture,
+  ProxyTraceEvent,
+  ProxyTraceSummary,
+} from "~/composables/mtgaTypes";
 
 const store = useMtgaStore();
 const loading = ref(false);
@@ -88,6 +93,85 @@ const formatBody = (body?: ProxyTraceBodyCapture) => {
 
 const traceTitle = (trace: ProxyTraceSummary) => {
   return trace.published_model || trace.request_model || trace.upstream_model || trace.request_path;
+};
+
+const eventKindLabel = (kind: string) => {
+  const labels: Record<string, string> = {
+    route_attempt: "路由尝试",
+    route_resolved: "命中目标",
+    target_cooldown: "冷却",
+    transport_failover: "故障转移",
+    upstream_request: "上游请求",
+  };
+  return labels[kind] || kind;
+};
+
+const isRoutingEvent = (event: ProxyTraceEvent) => {
+  return ["route_attempt", "route_resolved", "target_cooldown", "transport_failover"].includes(
+    event.kind,
+  );
+};
+
+const routingEvents = computed(() => selectedTrace.value?.events.filter(isRoutingEvent) || []);
+
+const eventDataText = (event: ProxyTraceEvent, key: string) => {
+  const value = event.data?.[key];
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
+};
+
+const routingEventAccentClass = (kind: string) => {
+  const classes: Record<string, string> = {
+    route_attempt: "border-sky-300 bg-sky-500",
+    route_resolved: "border-emerald-300 bg-emerald-500",
+    target_cooldown: "border-rose-300 bg-rose-500",
+    transport_failover: "border-orange-300 bg-orange-500",
+  };
+  return classes[kind] || "border-slate-300 bg-slate-400";
+};
+
+const routingEventMeta = (event: ProxyTraceEvent) => {
+  const target = eventDataText(event, "target_display_name") || eventDataText(event, "target_id");
+  if (event.kind === "route_attempt") {
+    const index = eventDataText(event, "attempt_index");
+    const source = eventDataText(event, "source");
+    const upstreamModel = eventDataText(event, "upstream_model");
+    return {
+      title: [index ? `#${index}` : "", source || "primary"].filter(Boolean).join(" · "),
+      detail: [target, upstreamModel].filter(Boolean).join(" · "),
+    };
+  }
+  if (event.kind === "target_cooldown") {
+    const status = eventDataText(event, "status_code");
+    const seconds = eventDataText(event, "cooldown_seconds");
+    return {
+      title: [target, status ? `HTTP ${status}` : ""].filter(Boolean).join(" · "),
+      detail: seconds ? `cooldown ${seconds}s` : "",
+    };
+  }
+  if (event.kind === "transport_failover") {
+    return {
+      title: target || "network",
+      detail: eventDataText(event, "error"),
+    };
+  }
+  if (event.kind === "route_resolved") {
+    const provider = eventDataText(event, "provider");
+    const model = eventDataText(event, "model");
+    return {
+      title: [target, provider].filter(Boolean).join(" · "),
+      detail: model,
+    };
+  }
+  return {
+    title: eventKindLabel(event.kind),
+    detail: event.message || "",
+  };
 };
 
 const refresh = async () => {
@@ -205,6 +289,29 @@ onBeforeUnmount(() => {
               </span>
               <span>{{ trace.provider || "unknown" }}</span>
               <span>{{ formatDuration(trace.duration_ms) }}</span>
+            </span>
+            <span
+              v-if="trace.published_model || trace.has_failover || trace.has_cooldown"
+              class="flex flex-wrap items-center gap-1.5"
+            >
+              <span
+                v-if="trace.published_model"
+                class="max-w-full truncate rounded-md border border-slate-200 bg-white/70 px-1.5 py-0.5 text-[10px] font-bold text-slate-500"
+              >
+                {{ trace.published_model }}
+              </span>
+              <span
+                v-if="trace.has_failover"
+                class="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700"
+              >
+                failover
+              </span>
+              <span
+                v-if="trace.has_cooldown"
+                class="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700"
+              >
+                cooldown
+              </span>
             </span>
             <span class="truncate text-[11px] text-slate-400">{{
               formatTime(trace.started_at)
@@ -332,6 +439,102 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
+                <section
+                  v-if="
+                    selectedTrace.published_model ||
+                    selectedTrace.target_id ||
+                    selectedTrace.failover_pool_id ||
+                    routingEvents.length
+                  "
+                  class="mt-4 min-w-0 rounded-lg border border-slate-200/70 bg-white/45 p-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h4 class="text-xs font-bold uppercase text-slate-400">Routing</h4>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span
+                        v-if="selectedTrace.has_failover"
+                        class="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700"
+                      >
+                        failover
+                      </span>
+                      <span
+                        v-if="selectedTrace.has_cooldown"
+                        class="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700"
+                      >
+                        cooldown
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 grid min-w-0 gap-3 text-xs sm:grid-cols-2">
+                    <div class="min-w-0">
+                      <div class="font-bold text-slate-500">Published Model</div>
+                      <div class="mt-1 truncate font-mono text-slate-700">
+                        {{ selectedTrace.published_model || selectedTrace.request_model || "-" }}
+                      </div>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-bold text-slate-500">Target</div>
+                      <div class="mt-1 truncate font-mono text-slate-700">
+                        {{ selectedTrace.target_display_name || selectedTrace.target_id || "-" }}
+                      </div>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-bold text-slate-500">Failover Pool</div>
+                      <div class="mt-1 truncate font-mono text-slate-700">
+                        {{ selectedTrace.failover_pool_id || "-" }}
+                      </div>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-bold text-slate-500">Upstream</div>
+                      <div class="mt-1 truncate font-mono text-slate-700">
+                        {{ selectedTrace.provider || "-" }} /
+                        {{ selectedTrace.upstream_model || selectedTrace.target_model || "-" }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="routingEvents.length"
+                    class="mt-3 overflow-hidden rounded-md border border-slate-200/70 bg-white/50"
+                  >
+                    <div
+                      v-for="event in routingEvents"
+                      :key="`routing-${event.at}-${event.kind}-${routingEventMeta(event).title}`"
+                      class="grid min-w-0 grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-2 border-b border-slate-200/60 px-3 py-2 last:border-b-0"
+                    >
+                      <div class="flex h-5 items-center justify-center">
+                        <span
+                          class="h-2 w-2 rounded-full border"
+                          :class="routingEventAccentClass(event.kind)"
+                        />
+                      </div>
+                      <div class="min-w-0">
+                        <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span class="text-xs font-bold text-slate-700">
+                            {{ eventKindLabel(event.kind) }}
+                          </span>
+                          <span
+                            v-if="routingEventMeta(event).title"
+                            class="truncate font-mono text-[11px] text-slate-600"
+                          >
+                            {{ routingEventMeta(event).title }}
+                          </span>
+                        </div>
+                        <div
+                          v-if="routingEventMeta(event).detail"
+                          class="mt-0.5 break-words font-mono text-[11px] text-slate-500"
+                        >
+                          {{ routingEventMeta(event).detail }}
+                        </div>
+                      </div>
+                      <span class="font-mono text-[10px] text-slate-400">
+                        {{ formatTime(event.at) }}
+                      </span>
+                    </div>
+                  </div>
+                </section>
+
                 <div
                   v-if="selectedTrace.error"
                   class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
@@ -343,14 +546,14 @@ onBeforeUnmount(() => {
                   <section class="min-w-0">
                     <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Request</h4>
                     <pre
-                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-100 [overflow-wrap:anywhere] custom-scrollbar"
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 [overflow-wrap:anywhere] custom-scrollbar"
                       >{{ formatBody(selectedTrace.request_body) || "-" }}</pre
                     >
                   </section>
                   <section class="min-w-0">
                     <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Response</h4>
                     <pre
-                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs text-slate-100 [overflow-wrap:anywhere] custom-scrollbar"
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 [overflow-wrap:anywhere] custom-scrollbar"
                       >{{ formatBody(selectedTrace.response_body) || "-" }}</pre
                     >
                   </section>

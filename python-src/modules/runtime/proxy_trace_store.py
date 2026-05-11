@@ -98,6 +98,9 @@ class ProxyTraceSummary(TypedDict, total=False):
     chunk_count: int
     error: str
     events_count: int
+    has_route_attempts: bool
+    has_failover: bool
+    has_cooldown: bool
     request_body_bytes: int
     response_body_bytes: int
     request_body_truncated: bool
@@ -398,6 +401,15 @@ class ProxyTraceStore:
             "started_at": trace["started_at"],
             "events_count": len(trace["events"]),
         }
+        event_kinds = {event.get("kind") for event in trace["events"]}
+        summary["has_route_attempts"] = "route_attempt" in event_kinds
+        summary["has_failover"] = any(
+            event.get("kind") == "route_attempt"
+            and (data := event.get("data")) is not None
+            and data.get("source") == "failover"
+            for event in trace["events"]
+        )
+        summary["has_cooldown"] = "target_cooldown" in event_kinds
         optional_keys = (
             "request_model",
             "published_model",
