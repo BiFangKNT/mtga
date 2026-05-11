@@ -26,11 +26,14 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: "Anthropic",
   gemini: "Gemini",
 };
+type RouteSectionId = "targets" | "published" | "failover";
+type RouteView = "overview" | RouteSectionId;
 
 const selectedTargetId = ref("");
 const selectedPublishedName = ref("");
 const selectedPoolId = ref("");
 const editorOpen = ref(false);
+const settingsOpen = ref(false);
 const editorKind = ref<"target" | "published" | "pool">("target");
 const editorMode = ref<"add" | "edit">("add");
 const formError = ref("");
@@ -38,6 +41,7 @@ const saving = ref(false);
 const refreshing = ref(false);
 const targetTesting = ref(false);
 const modelLoading = ref(false);
+const activeView = ref<RouteView>("overview");
 const availableModels = ref<string[]>([]);
 const targetDiscoveryStrategy = ref("");
 const targetDiscoveryScope = ref("");
@@ -66,6 +70,10 @@ const poolForm = reactive({
   cooldown_seconds: 10,
   member_ids: [] as string[],
 });
+const settingsForm = reactive({
+  mtga_auth_key: "",
+  prompt_cache_bucket_id: "",
+});
 
 const selectedTarget = computed(() =>
   targets.value.find((target) => target.id === selectedTargetId.value),
@@ -87,10 +95,31 @@ const poolOptions = computed(() => [
   { label: "不启用故障转移", value: "" },
   ...failoverPools.value.map((pool) => ({ label: pool.id, value: pool.id })),
 ]);
-const hasEnabledPublishedModel = computed(() =>
-  publishedModels.value.some((model) => model.enabled),
+const enabledPublishedModels = computed(() =>
+  publishedModels.value.filter((model) => model.enabled),
 );
+const hasEnabledPublishedModel = computed(() => enabledPublishedModels.value.length > 0);
 const hasModelRoute = computed(() => targets.value.length > 0 && hasEnabledPublishedModel.value);
+const routeSections = computed(() => [
+  {
+    id: "targets" as const,
+    label: "上游目标",
+    count: targets.value.length,
+    description: "上游 provider、Base URL、模型与 API Key",
+  },
+  {
+    id: "published" as const,
+    label: "发布模型",
+    count: publishedModels.value.length,
+    description: "暴露给下游 /models 与请求体 model 的名称",
+  },
+  {
+    id: "failover" as const,
+    label: "故障转移池",
+    count: failoverPools.value.length,
+    description: "429 冷却与网络重试耗尽后的候选目标",
+  },
+]);
 const routeWarnings = computed(() => {
   const messages: string[] = [];
   if (!targets.value.length) {
@@ -116,6 +145,59 @@ const isProviderId = (value: string | undefined): value is ProviderId =>
   value === "gemini";
 const getProviderLabel = (provider?: string) =>
   isProviderId(provider) ? PROVIDER_LABELS[provider] : "OpenAI Chat Completion";
+const activeSection = computed<RouteSectionId>({
+  get: () => (activeView.value === "overview" ? "targets" : activeView.value),
+  set: (value) => {
+    activeView.value = value;
+  },
+});
+const isOverview = computed(() => activeView.value === "overview");
+const routePreviewTitle = computed(() => {
+  if (enabledPublishedModels.value.length > 1) {
+    return `${enabledPublishedModels.value.length} 个发布模型已启用`;
+  }
+  if (enabledPublishedModels.value.length === 1) {
+    return enabledPublishedModels.value[0]?.name || "发布模型已启用";
+  }
+  return publishedModels.value.length ? "没有启用的发布模型" : "未发布模型";
+});
+const routePreviewSubtitle = computed(() => {
+  if (!enabledPublishedModels.value.length) {
+    return targets.value.length ? "发布模型启用后会暴露给下游" : "还没有可用上游目标";
+  }
+  const names = enabledPublishedModels.value.map((model) => model.name);
+  if (enabledPublishedModels.value.length === 1) {
+    const model = enabledPublishedModels.value[0];
+    const target = targets.value.find((item) => item.id === model?.primary_target_id);
+    return target ? `${getTargetLabel(target.id)} · ${target.upstream_model}` : "主目标未找到";
+  }
+  const targetCount = new Set(
+    enabledPublishedModels.value.map((model) => model.primary_target_id).filter(Boolean),
+  ).size;
+  const visibleNames = names.slice(0, 3).join(", ");
+  const suffix = names.length > 3 ? ` +${names.length - 3}` : "";
+  return `${visibleNames}${suffix} · ${targetCount} 个主目标`;
+});
+const routePreviewFailoverLabel = computed(() => {
+  const poolIds = Array.from(
+    new Set(
+      enabledPublishedModels.value
+        .map((model) => model.failover_pool_id)
+        .filter((poolId): poolId is string => Boolean(poolId)),
+    ),
+  );
+  if (!poolIds.length) {
+    return "";
+  }
+  return poolIds.join(", ");
+});
+const currentSectionLabel = computed(
+  () => routeSections.value.find((section) => section.id === activeSection.value)?.label || "",
+);
+const currentSectionDescription = computed(
+  () =>
+    routeSections.value.find((section) => section.id === activeSection.value)?.description || "",
+);
 const getDefaultMiddleRoute = (provider: ProviderId) =>
   provider === "gemini" ? GEMINI_DEFAULT_MIDDLE_ROUTE : DEFAULT_MIDDLE_ROUTE;
 const normalizeApiBase = (value: string) => value.trim().replace(/\/+$/, "");
@@ -147,6 +229,78 @@ const resetTargetDiscovery = () => {
   modelLoading.value = false;
   targetDiscoveryStrategy.value = "";
   targetDiscoveryScope.value = "";
+};
+const hasTargetReference = (targetId: string) =>
+  publishedModels.value.some((model) => model.primary_target_id === targetId);
+const deleteConfirmOpen = ref(false);
+const pendingDeleteKind = ref<"target" | "published" | "pool" | null>(null);
+const pendingDeleteLabel = computed(() => {
+  if (pendingDeleteKind.value === "target" && selectedTarget.value) {
+    return selectedTarget.value.display_name || selectedTarget.value.id;
+  }
+  if (pendingDeleteKind.value === "published" && selectedPublishedModel.value) {
+    return selectedPublishedModel.value.name;
+  }
+  if (pendingDeleteKind.value === "pool" && selectedPool.value) {
+    return selectedPool.value.id;
+  }
+  return "";
+});
+const pendingDeleteTitle = computed(() => {
+  if (pendingDeleteKind.value === "target") {
+    return "删除目标";
+  }
+  if (pendingDeleteKind.value === "published") {
+    return "删除发布模型";
+  }
+  return "删除故障池";
+});
+const pendingDeleteDescription = computed(() => {
+  if (pendingDeleteKind.value === "target") {
+    return "目标删除后会从故障池成员中移除。已被发布模型引用的目标不能删除。";
+  }
+  if (pendingDeleteKind.value === "published") {
+    return "删除后该模型名称不会再暴露给下游 /models。";
+  }
+  return "删除后引用该故障池的发布模型会自动改为不启用故障转移。";
+});
+const openDeleteConfirm = (kind: "target" | "published" | "pool") => {
+  if (kind === "target") {
+    const target = selectedTarget.value;
+    if (!target) {
+      return;
+    }
+    if (hasTargetReference(target.id)) {
+      store.appendLog("删除目标失败：仍有发布模型引用该目标");
+      return;
+    }
+  }
+  if (kind === "published" && !selectedPublishedModel.value) {
+    return;
+  }
+  if (kind === "pool" && !selectedPool.value) {
+    return;
+  }
+  pendingDeleteKind.value = kind;
+  deleteConfirmOpen.value = true;
+};
+const closeDeleteConfirm = () => {
+  deleteConfirmOpen.value = false;
+  pendingDeleteKind.value = null;
+};
+const openSettings = () => {
+  settingsForm.mtga_auth_key = store.mtgaAuthKey.value;
+  settingsForm.prompt_cache_bucket_id = store.promptCacheBucketId.value;
+  settingsOpen.value = true;
+};
+const closeSettings = () => {
+  settingsOpen.value = false;
+};
+const openOverview = () => {
+  activeView.value = "overview";
+};
+const openSection = (section: RouteSectionId) => {
+  activeView.value = section;
 };
 
 const openTargetEditor = (mode: "add" | "edit") => {
@@ -237,6 +391,18 @@ const persistConfig = async (successMessage: string) => {
   } finally {
     saving.value = false;
   }
+};
+const saveSettings = async () => {
+  const previousAuthKey = store.mtgaAuthKey.value;
+  const previousBucketId = store.promptCacheBucketId.value;
+  store.mtgaAuthKey.value = settingsForm.mtga_auth_key;
+  store.promptCacheBucketId.value = settingsForm.prompt_cache_bucket_id.trim();
+  if (await persistConfig("入站设置已保存")) {
+    closeSettings();
+    return;
+  }
+  store.mtgaAuthKey.value = previousAuthKey;
+  store.promptCacheBucketId.value = previousBucketId;
 };
 
 const saveTarget = async () => {
@@ -407,35 +573,57 @@ const handleEditorSave = () => {
 const deleteSelectedTarget = async () => {
   const target = selectedTarget.value;
   if (!target || saving.value) {
-    return;
+    return false;
   }
-  if (publishedModels.value.some((model) => model.primary_target_id === target.id)) {
+  if (hasTargetReference(target.id)) {
     store.appendLog("删除目标失败：仍有发布模型引用该目标");
-    return;
+    return false;
   }
+  const previousTargets = [...targets.value];
+  const previousPools = failoverPools.value.map((pool) => ({
+    ...pool,
+    members: pool.members.map((member) => ({ ...member })),
+  }));
+  const previousSelectedTargetId = selectedTargetId.value;
   targets.value = targets.value.filter((item) => item.id !== target.id);
   failoverPools.value.forEach((pool) => {
     pool.members = pool.members.filter((member) => member.target_id !== target.id);
   });
   selectedTargetId.value = targets.value[0]?.id || "";
-  await persistConfig(`已删除目标: ${target.display_name || target.id}`);
+  if (await persistConfig(`已删除目标: ${target.display_name || target.id}`)) {
+    return true;
+  }
+  targets.value = previousTargets;
+  failoverPools.value = previousPools;
+  selectedTargetId.value = previousSelectedTargetId;
+  return false;
 };
 
 const deleteSelectedPublished = async () => {
   const model = selectedPublishedModel.value;
   if (!model || saving.value) {
-    return;
+    return false;
   }
+  const previousPublishedModels = [...publishedModels.value];
+  const previousSelectedPublishedName = selectedPublishedName.value;
   publishedModels.value = publishedModels.value.filter((item) => item.name !== model.name);
   selectedPublishedName.value = publishedModels.value[0]?.name || "";
-  await persistConfig(`已删除发布模型: ${model.name}`);
+  if (await persistConfig(`已删除发布模型: ${model.name}`)) {
+    return true;
+  }
+  publishedModels.value = previousPublishedModels;
+  selectedPublishedName.value = previousSelectedPublishedName;
+  return false;
 };
 
 const deleteSelectedPool = async () => {
   const pool = selectedPool.value;
   if (!pool || saving.value) {
-    return;
+    return false;
   }
+  const previousPools = [...failoverPools.value];
+  const previousPublishedModels = publishedModels.value.map((model) => ({ ...model }));
+  const previousSelectedPoolId = selectedPoolId.value;
   publishedModels.value.forEach((model) => {
     if (model.failover_pool_id === pool.id) {
       model.failover_pool_id = null;
@@ -443,7 +631,29 @@ const deleteSelectedPool = async () => {
   });
   failoverPools.value = failoverPools.value.filter((item) => item.id !== pool.id);
   selectedPoolId.value = failoverPools.value[0]?.id || "";
-  await persistConfig(`已删除故障池: ${pool.id}`);
+  if (await persistConfig(`已删除故障池: ${pool.id}`)) {
+    return true;
+  }
+  failoverPools.value = previousPools;
+  publishedModels.value = previousPublishedModels;
+  selectedPoolId.value = previousSelectedPoolId;
+  return false;
+};
+
+const confirmDelete = async () => {
+  const kind = pendingDeleteKind.value;
+  if (!kind || saving.value) {
+    return;
+  }
+  const ok =
+    kind === "target"
+      ? await deleteSelectedTarget()
+      : kind === "published"
+        ? await deleteSelectedPublished()
+        : await deleteSelectedPool();
+  if (ok) {
+    closeDeleteConfirm();
+  }
 };
 
 const refreshConfig = async () => {
@@ -557,13 +767,13 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-4">
+  <div class="flex h-full min-h-0 flex-col gap-3">
     <div class="flex shrink-0 flex-wrap items-start justify-between gap-3">
-      <div>
+      <div class="min-w-0">
         <h2 class="mtga-card-title">模型路由</h2>
         <p class="mtga-card-subtitle">维护 MTGA 入站模型、上游目标与故障转移关系</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 items-center gap-2">
         <span
           class="rounded-full border px-3 py-1 text-xs font-bold"
           :class="
@@ -574,281 +784,545 @@ watch(
         >
           {{ hasModelRoute ? "可启动" : routeWarnings.join(" / ") || "待配置" }}
         </span>
+      </div>
+    </div>
+
+    <section
+      v-if="isOverview"
+      class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto pr-1 custom-scrollbar"
+    >
+      <div class="rounded-xl border border-slate-200/70 bg-white/60 p-4">
+        <div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+              </svg>
+              路由概览
+            </div>
+            <div class="mt-1 truncate text-base font-semibold text-slate-900">
+              {{ routePreviewTitle }}
+            </div>
+            <div class="mt-1 truncate text-sm text-slate-500">
+              {{ routePreviewSubtitle }}
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-3 gap-2">
+          <div
+            class="rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 flex flex-col justify-between"
+          >
+            <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <circle cx="12" cy="12" r="6"></circle>
+                <circle cx="12" cy="12" r="2"></circle>
+              </svg>
+              上游目标
+            </div>
+            <div class="mt-1 font-mono text-lg font-bold text-slate-900">{{ targets.length }}</div>
+          </div>
+          <div
+            class="rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 flex flex-col justify-between"
+          >
+            <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                ></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+              发布模型
+            </div>
+            <div class="mt-1 font-mono text-lg font-bold text-slate-900">
+              {{ publishedModels.length }}
+            </div>
+          </div>
+          <div
+            class="rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 flex flex-col justify-between"
+          >
+            <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M2 12h5"></path>
+                <path d="M17 12h5"></path>
+                <path d="M12 2v5"></path>
+                <path d="M12 17v5"></path>
+                <path d="m19 5-3.5 3.5"></path>
+                <path d="m5 19 3.5-3.5"></path>
+                <path d="m5 5 3.5 3.5"></path>
+                <path d="m19 19-3.5-3.5"></path>
+              </svg>
+              故障转移池
+            </div>
+            <div class="mt-1 font-mono text-lg font-bold text-slate-900">
+              {{ failoverPools.length }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="routePreviewFailoverLabel || routeWarnings.length" class="mt-3 grid gap-2">
+          <span
+            v-if="routePreviewFailoverLabel"
+            class="rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-xs font-semibold text-slate-600"
+          >
+            故障转移: {{ routePreviewFailoverLabel }}
+          </span>
+          <span
+            v-for="warning in routeWarnings"
+            :key="warning"
+            class="rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-xs font-semibold text-amber-700"
+          >
+            {{ warning }}
+          </span>
+        </div>
+      </div>
+
+      <div class="grid gap-2">
         <button
-          class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600"
+          v-for="section in routeSections"
+          :key="section.id"
+          class="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200/70 bg-white/55 px-4 py-3 text-left transition hover:border-amber-300 hover:bg-amber-50/70"
+          @click="openSection(section.id)"
+        >
+          <span class="min-w-0">
+            <span class="block text-sm font-bold text-slate-800">{{ section.label }}</span>
+            <span class="block truncate text-xs text-slate-500">{{ section.description }}</span>
+          </span>
+          <span class="flex shrink-0 items-center gap-3">
+            <span class="font-mono text-lg font-bold text-slate-900">{{ section.count }}</span>
+            <span
+              class="flex items-center text-xs font-bold text-amber-600 transition-transform group-hover:translate-x-0.5 group-hover:text-amber-700"
+            >
+              管理
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="ml-0.5"
+              >
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </span>
+          </span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <button
+          class="btn btn-sm rounded-xl border border-slate-200 bg-white/65 text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+          @click="openSettings"
+        >
+          入站设置
+        </button>
+        <button
+          class="btn btn-sm rounded-xl border border-slate-200 bg-white/65 text-slate-700 hover:border-amber-300 hover:bg-amber-50"
           :class="refreshing ? 'loading' : ''"
           :disabled="refreshing || saving"
           @click="refreshConfig"
         >
-          刷新
+          刷新配置
         </button>
       </div>
-    </div>
+    </section>
 
-    <div class="grid shrink-0 gap-3 lg:grid-cols-[minmax(0,1fr),260px]">
-      <div class="mtga-soft-panel bg-white/40">
-        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr),260px]">
-          <MtgaInput
-            v-model="store.mtgaAuthKey.value"
-            label="MTGA Auth Key"
-            placeholder="为空则不鉴权"
-            type="password"
-            description="只用于 MTGA 入站鉴权；上游 API Key 在目标中维护"
-            :clearable="true"
-          />
-          <MtgaInput
-            v-model="store.promptCacheBucketId.value"
-            label="Prompt Cache Bucket"
-            placeholder="自动生成或留空"
-            description="用于 prompt cache 隔离"
-            :clearable="true"
-          />
-        </div>
-      </div>
-      <div class="flex items-end">
-        <button
-          class="btn btn-primary btn-sm w-full rounded-xl"
-          :class="saving ? 'loading' : ''"
-          :disabled="saving"
-          @click="persistConfig('模型路由已保存')"
-        >
-          保存路由
-        </button>
-      </div>
-    </div>
-
-    <div class="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.1fr),minmax(0,1fr)]">
-      <section class="flex min-h-0 flex-col">
-        <div class="mb-2 flex items-center justify-between gap-2">
-          <div>
-            <h3 class="text-sm font-bold text-slate-800">Targets</h3>
-            <p class="text-xs text-slate-500">上游 provider、base URL、模型与 API Key</p>
-          </div>
-          <div class="flex gap-2">
-            <button class="btn btn-xs btn-outline rounded-lg" @click="openTargetEditor('add')">
-              新增
-            </button>
+    <section
+      v-else
+      class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200/70 bg-white/55"
+    >
+      <div class="shrink-0 border-b border-slate-200/70 bg-slate-50/70 px-4 py-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-start gap-3">
             <button
-              class="btn btn-xs btn-outline rounded-lg"
-              :disabled="!selectedTarget"
-              @click="openTargetEditor('edit')"
+              class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50"
+              @click="openOverview"
             >
-              修改
-            </button>
-            <button
-              class="btn btn-xs btn-outline rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50"
-              :disabled="!selectedTarget || saving"
-              @click="deleteSelectedTarget"
-            >
-              删除
-            </button>
-          </div>
-        </div>
-
-        <div
-          class="min-h-0 overflow-auto rounded-xl border border-slate-200/70 bg-white/50 custom-scrollbar"
-        >
-          <table class="table table-sm w-full text-sm">
-            <thead class="sticky top-0 z-10 bg-slate-50/90">
-              <tr>
-                <th>ID</th>
-                <th>名称</th>
-                <th>Provider</th>
-                <th>上游模型</th>
-                <th>API Base</th>
-              </tr>
-            </thead>
-            <tbody v-if="targets.length">
-              <tr
-                v-for="target in targets"
-                :key="target.id"
-                class="cursor-pointer hover:bg-amber-50/50"
-                :class="selectedTargetId === target.id ? 'bg-amber-100/70' : ''"
-                @click="selectedTargetId = target.id"
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="-ml-0.5"
               >
-                <td class="max-w-[120px] truncate font-mono text-xs">{{ target.id }}</td>
-                <td class="max-w-[150px] truncate">{{ target.display_name || "-" }}</td>
-                <td class="max-w-[160px] truncate">{{ getProviderLabel(target.provider) }}</td>
-                <td class="max-w-[160px] truncate font-mono text-xs">
-                  {{ target.upstream_model }}
-                </td>
-                <td class="max-w-[220px] truncate font-mono text-xs">{{ target.api_base }}</td>
-              </tr>
-            </tbody>
-            <tbody v-else>
-              <tr>
-                <td colspan="5" class="py-6 text-center text-sm text-slate-400">暂无目标</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="mt-3 flex justify-end">
-          <button
-            class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600"
-            :class="targetTesting ? 'loading' : ''"
-            :disabled="!selectedTarget || targetTesting"
-            @click="testSelectedTarget"
-          >
-            测活选中目标
-          </button>
-        </div>
-      </section>
-
-      <div class="grid min-h-0 gap-4 lg:grid-rows-[minmax(0,1fr),minmax(0,0.9fr)]">
-        <section class="flex min-h-0 flex-col">
-          <div class="mb-2 flex items-center justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-bold text-slate-800">Published Models</h3>
-              <p class="text-xs text-slate-500">暴露给下游 `/models` 与请求体 `model` 的名称</p>
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+              返回
+            </button>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="truncate text-sm font-bold text-slate-900">{{ currentSectionLabel }}</h3>
+                <span class="font-mono text-xs font-bold text-slate-500">
+                  {{ routeSections.find((section) => section.id === activeSection)?.count || 0 }}
+                </span>
+              </div>
+              <p class="mt-0.5 line-clamp-2 text-xs text-slate-500">
+                {{ currentSectionDescription }}
+              </p>
             </div>
-            <div class="flex gap-2">
+          </div>
+          <div class="flex shrink-0 flex-wrap justify-end gap-2">
+            <template v-if="activeSection === 'targets'">
+              <button class="btn btn-xs btn-primary rounded-lg" @click="openTargetEditor('add')">
+                新增
+              </button>
               <button
-                class="btn btn-xs btn-outline rounded-lg"
+                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                :disabled="!selectedTarget"
+                @click="openTargetEditor('edit')"
+              >
+                编辑
+              </button>
+              <button
+                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                :class="targetTesting ? 'loading' : ''"
+                :disabled="!selectedTarget || targetTesting"
+                @click="testSelectedTarget"
+              >
+                测活
+              </button>
+              <button
+                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+                :disabled="!selectedTarget || saving"
+                @click="openDeleteConfirm('target')"
+              >
+                删除
+              </button>
+            </template>
+            <template v-else-if="activeSection === 'published'">
+              <button
+                class="btn btn-xs btn-primary rounded-lg"
                 :disabled="!targets.length"
                 @click="openPublishedEditor('add')"
               >
                 新增
               </button>
               <button
-                class="btn btn-xs btn-outline rounded-lg"
+                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :disabled="!selectedPublishedModel"
                 @click="openPublishedEditor('edit')"
               >
-                修改
+                编辑
               </button>
               <button
-                class="btn btn-xs btn-outline rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50"
+                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
                 :disabled="!selectedPublishedModel || saving"
-                @click="deleteSelectedPublished"
+                @click="openDeleteConfirm('published')"
               >
                 删除
               </button>
-            </div>
-          </div>
-
-          <div
-            class="min-h-0 overflow-auto rounded-xl border border-slate-200/70 bg-white/50 custom-scrollbar"
-          >
-            <table class="table table-sm w-full text-sm">
-              <thead class="sticky top-0 z-10 bg-slate-50/90">
-                <tr>
-                  <th>发布名</th>
-                  <th>主目标</th>
-                  <th>故障池</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody v-if="publishedModels.length">
-                <tr
-                  v-for="model in publishedModels"
-                  :key="model.name"
-                  class="cursor-pointer hover:bg-amber-50/50"
-                  :class="selectedPublishedName === model.name ? 'bg-amber-100/70' : ''"
-                  @click="selectedPublishedName = model.name"
-                >
-                  <td class="max-w-[170px] truncate font-mono text-xs">{{ model.name }}</td>
-                  <td class="max-w-[140px] truncate">
-                    {{ getTargetLabel(model.primary_target_id) }}
-                  </td>
-                  <td class="max-w-[120px] truncate font-mono text-xs">
-                    {{ model.failover_pool_id || "-" }}
-                  </td>
-                  <td>
-                    <span
-                      class="rounded-full border px-2 py-0.5 text-[11px] font-bold"
-                      :class="
-                        model.enabled
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border-slate-200 bg-slate-100 text-slate-500'
-                      "
-                    >
-                      {{ model.enabled ? "启用" : "停用" }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-              <tbody v-else>
-                <tr>
-                  <td colspan="4" class="py-6 text-center text-sm text-slate-400">暂无发布模型</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="flex min-h-0 flex-col">
-          <div class="mb-2 flex items-center justify-between gap-2">
-            <div>
-              <h3 class="text-sm font-bold text-slate-800">Failover Pools</h3>
-              <p class="text-xs text-slate-500">429 冷却与网络重试耗尽后的候选目标</p>
-            </div>
-            <div class="flex gap-2">
+            </template>
+            <template v-else>
               <button
-                class="btn btn-xs btn-outline rounded-lg"
+                class="btn btn-xs btn-primary rounded-lg"
                 :disabled="!targets.length"
                 @click="openPoolEditor('add')"
               >
                 新增
               </button>
               <button
-                class="btn btn-xs btn-outline rounded-lg"
+                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :disabled="!selectedPool"
                 @click="openPoolEditor('edit')"
               >
-                修改
+                编辑
               </button>
               <button
-                class="btn btn-xs btn-outline rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50"
+                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
                 :disabled="!selectedPool || saving"
-                @click="deleteSelectedPool"
+                @click="openDeleteConfirm('pool')"
               >
                 删除
               </button>
-            </div>
+            </template>
           </div>
-
-          <div
-            class="min-h-0 overflow-auto rounded-xl border border-slate-200/70 bg-white/50 custom-scrollbar"
-          >
-            <table class="table table-sm w-full text-sm">
-              <thead class="sticky top-0 z-10 bg-slate-50/90">
-                <tr>
-                  <th>ID</th>
-                  <th>状态码</th>
-                  <th>冷却</th>
-                  <th>成员</th>
-                </tr>
-              </thead>
-              <tbody v-if="failoverPools.length">
-                <tr
-                  v-for="pool in failoverPools"
-                  :key="pool.id"
-                  class="cursor-pointer hover:bg-amber-50/50"
-                  :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : ''"
-                  @click="selectedPoolId = pool.id"
-                >
-                  <td class="max-w-[140px] truncate font-mono text-xs">{{ pool.id }}</td>
-                  <td class="font-mono text-xs">{{ pool.trigger_statuses.join(", ") }}</td>
-                  <td>{{ pool.cooldown_seconds }}s</td>
-                  <td class="max-w-[180px] truncate">
-                    {{
-                      pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") ||
-                      "-"
-                    }}
-                  </td>
-                </tr>
-              </tbody>
-              <tbody v-else>
-                <tr>
-                  <td colspan="4" class="py-6 text-center text-sm text-slate-400">暂无故障池</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+        </div>
       </div>
-    </div>
+
+      <div class="min-h-0 flex-1 overflow-auto custom-scrollbar">
+        <div v-if="activeSection === 'targets'" class="divide-y divide-slate-200/70">
+          <button
+            v-for="target in targets"
+            :key="target.id"
+            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+            :class="selectedTargetId === target.id ? 'bg-amber-100/70' : ''"
+            @click="selectedTargetId = target.id"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="truncate text-sm font-bold text-slate-900">
+                  {{ target.display_name || target.id }}
+                </div>
+                <div class="mt-1 truncate font-mono text-xs text-slate-500">{{ target.id }}</div>
+              </div>
+              <span
+                class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+              >
+                {{ getProviderLabel(target.provider) }}
+              </span>
+            </div>
+            <div class="mt-2 grid gap-1 text-xs text-slate-500">
+              <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
+              <div class="truncate font-mono">{{ target.api_base }}</div>
+            </div>
+          </button>
+          <div
+            v-if="!targets.length"
+            class="flex flex-col items-center justify-center px-4 py-12 text-center"
+          >
+            <div class="rounded-full bg-slate-100/60 p-3 text-slate-400">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <circle cx="12" cy="12" r="6"></circle>
+                <circle cx="12" cy="12" r="2"></circle>
+              </svg>
+            </div>
+            <div class="mt-3 text-sm font-medium text-slate-500">暂无目标</div>
+            <div class="mt-1 text-xs text-slate-400">配置上游提供商、API Key 和模型信息</div>
+            <button class="btn btn-sm btn-primary mt-4 rounded-xl" @click="openTargetEditor('add')">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+              新增 Target
+            </button>
+          </div>
+        </div>
+
+        <div v-else-if="activeSection === 'published'" class="divide-y divide-slate-200/70">
+          <button
+            v-for="model in publishedModels"
+            :key="model.name"
+            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+            :class="selectedPublishedName === model.name ? 'bg-amber-100/70' : ''"
+            @click="selectedPublishedName = model.name"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="truncate font-mono text-sm font-bold text-slate-900">
+                  {{ model.name }}
+                </div>
+                <div class="mt-1 truncate text-xs text-slate-500">
+                  主目标: {{ getTargetLabel(model.primary_target_id) }}
+                </div>
+              </div>
+              <span
+                class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold"
+                :class="
+                  model.enabled
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-slate-200 bg-slate-100 text-slate-500'
+                "
+              >
+                {{ model.enabled ? "启用" : "停用" }}
+              </span>
+            </div>
+            <div class="mt-2 truncate font-mono text-xs text-slate-500">
+              故障转移: {{ model.failover_pool_id || "-" }}
+            </div>
+          </button>
+          <div
+            v-if="!publishedModels.length"
+            class="flex flex-col items-center justify-center px-4 py-12 text-center"
+          >
+            <div class="rounded-full bg-slate-100/60 p-3 text-slate-400">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                ></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </div>
+            <div class="mt-3 text-sm font-medium text-slate-500">暂无发布模型 (Published)</div>
+            <div class="mt-1 text-xs text-slate-400">定义暴露给客户端的模型名称和主路由</div>
+            <button
+              class="btn btn-sm btn-primary mt-4 rounded-xl"
+              :disabled="!targets.length"
+              @click="openPublishedEditor('add')"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+              新增 Published
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="divide-y divide-slate-200/70">
+          <button
+            v-for="pool in failoverPools"
+            :key="pool.id"
+            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+            :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : ''"
+            @click="selectedPoolId = pool.id"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="truncate font-mono text-sm font-bold text-slate-900">
+                  {{ pool.id }}
+                </div>
+                <div class="mt-1 truncate text-xs text-slate-500">
+                  成员: {{ pool.members.length }}
+                </div>
+              </div>
+              <span
+                class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600"
+              >
+                {{ pool.cooldown_seconds }}s
+              </span>
+            </div>
+            <div class="mt-2 truncate text-xs text-slate-500">
+              状态码 {{ pool.trigger_statuses.join(", ") }} ·
+              {{ pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-" }}
+            </div>
+          </button>
+          <div
+            v-if="!failoverPools.length"
+            class="flex flex-col items-center justify-center px-4 py-12 text-center"
+          >
+            <div class="rounded-full bg-slate-100/60 p-3 text-slate-400">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M2 12h5"></path>
+                <path d="M17 12h5"></path>
+                <path d="M12 2v5"></path>
+                <path d="M12 17v5"></path>
+                <path d="m19 5-3.5 3.5"></path>
+                <path d="m5 19 3.5-3.5"></path>
+                <path d="m5 5 3.5 3.5"></path>
+                <path d="m19 19-3.5-3.5"></path>
+              </svg>
+            </div>
+            <div class="mt-3 text-sm font-medium text-slate-500">暂无故障转移池 (Pools)</div>
+            <div class="mt-1 text-xs text-slate-400">配置备用目标，以便在上游失败时自动重试</div>
+            <button
+              class="btn btn-sm btn-primary mt-4 rounded-xl"
+              :disabled="!targets.length"
+              @click="openPoolEditor('add')"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+              新增 Pool
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <MtgaDialog v-model:open="editorOpen" max-width="max-w-2xl" @close="closeEditor">
       <template #header>
@@ -869,9 +1343,8 @@ watch(
                       : "修改故障池"
               }}
             </h3>
-            <p class="text-xs text-slate-500">保存后写入 v2.6.0 模型路由配置</p>
+            <p class="text-xs text-slate-500">保存后写入模型路由配置</p>
           </div>
-          <span class="mtga-chip">v2.6.0</span>
         </div>
       </template>
 
@@ -917,13 +1390,15 @@ watch(
             label="Middle Route"
             :placeholder="getDefaultMiddleRoute(targetForm.provider)"
           />
-          <label class="mt-7 flex cursor-pointer items-center gap-2">
+          <label
+            class="mt-7 flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50/50 px-4 py-3"
+          >
+            <span class="label-text text-sm font-medium text-slate-700">启用提示缓存</span>
             <input
               v-model="targetForm.prompt_cache_enabled"
               type="checkbox"
-              class="checkbox checkbox-primary checkbox-sm"
+              class="toggle toggle-primary toggle-sm"
             />
-            <span class="label-text text-sm font-medium text-slate-700">启用提示缓存</span>
           </label>
         </div>
 
@@ -947,13 +1422,15 @@ watch(
             :options="poolOptions"
             class="w-full"
           />
-          <label class="mt-7 flex cursor-pointer items-center gap-2">
+          <label
+            class="mt-7 flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50/50 px-4 py-3"
+          >
+            <span class="label-text text-sm font-medium text-slate-700">启用（暴露给下游）</span>
             <input
               v-model="publishedForm.enabled"
               type="checkbox"
-              class="checkbox checkbox-primary checkbox-sm"
+              class="toggle toggle-primary toggle-sm"
             />
-            <span class="label-text text-sm font-medium text-slate-700">在 `/models` 中启用</span>
           </label>
         </div>
 
@@ -985,15 +1462,15 @@ watch(
               <label
                 v-for="target in targets"
                 :key="target.id"
-                class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white/50 px-3 py-2 text-sm"
+                class="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white/50 px-3 py-2 text-sm transition-colors hover:border-amber-200 hover:bg-amber-50/50"
               >
                 <input
                   type="checkbox"
-                  class="checkbox checkbox-primary checkbox-sm"
+                  class="checkbox checkbox-primary checkbox-sm rounded"
                   :checked="poolForm.member_ids.includes(target.id)"
                   @change="togglePoolMember(target.id, ($event.target as HTMLInputElement).checked)"
                 />
-                <span class="min-w-0 truncate">{{ target.display_name || target.id }}</span>
+                <span class="min-w-0 flex-1 truncate">{{ target.display_name || target.id }}</span>
               </label>
             </div>
           </div>
@@ -1011,6 +1488,75 @@ watch(
           :class="saving ? 'loading' : ''"
           :disabled="saving"
           @click="handleEditorSave"
+        >
+          保存
+        </button>
+      </template>
+    </MtgaDialog>
+
+    <MtgaDialog v-model:open="deleteConfirmOpen" max-width="max-w-md" @close="closeDeleteConfirm">
+      <template #header>
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">{{ pendingDeleteTitle }}</h3>
+          <p class="text-xs text-slate-500">{{ pendingDeleteDescription }}</p>
+        </div>
+      </template>
+
+      <div class="px-6 py-6">
+        <div class="rounded-xl border border-rose-100 bg-rose-50/70 px-4 py-3">
+          <div class="text-xs font-semibold text-rose-500">即将删除</div>
+          <div class="mt-1 break-all font-mono text-sm font-bold text-rose-700">
+            {{ pendingDeleteLabel || "-" }}
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <button class="mtga-btn-dialog-ghost flex-1" @click="closeDeleteConfirm">取消</button>
+        <button
+          class="flex-1 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+          :class="saving ? 'loading' : ''"
+          :disabled="saving"
+          @click="confirmDelete"
+        >
+          删除
+        </button>
+      </template>
+    </MtgaDialog>
+
+    <MtgaDialog v-model:open="settingsOpen" max-width="max-w-xl" @close="closeSettings">
+      <template #header>
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">入站设置</h3>
+          <p class="text-xs text-slate-500">只影响 MTGA 入站鉴权与 prompt cache 隔离</p>
+        </div>
+      </template>
+
+      <div class="grid gap-4 px-6 py-6">
+        <MtgaInput
+          v-model="settingsForm.mtga_auth_key"
+          label="MTGA Auth Key"
+          placeholder="为空则不鉴权"
+          type="password"
+          description="为空时 MTGA 入站请求不做鉴权；上游 API Key 在 上游目标 中维护"
+          :clearable="true"
+        />
+        <MtgaInput
+          v-model="settingsForm.prompt_cache_bucket_id"
+          label="Prompt Cache Bucket"
+          placeholder="自动生成或留空"
+          description="用于 prompt cache 隔离"
+          :clearable="true"
+        />
+      </div>
+
+      <template #footer>
+        <button class="mtga-btn-dialog-ghost flex-1" @click="closeSettings">取消</button>
+        <button
+          class="mtga-btn-dialog-primary flex-1"
+          :class="saving ? 'loading' : ''"
+          :disabled="saving"
+          @click="saveSettings"
         >
           保存
         </button>

@@ -285,7 +285,10 @@ def normalize_model_routing_config(raw_config: Any) -> dict[str, Any]:
         raw_config = {}
     config = cast(dict[str, Any], raw_config)
     if int(config.get("schema_version") or 0) == MODEL_ROUTING_SCHEMA_VERSION:
-        return _normalize_v2_config(config)
+        normalized = _normalize_v2_config(config)
+        if not normalized["targets"] and isinstance(config.get("config_groups"), list):
+            return migrate_legacy_config_to_model_routing(config)
+        return normalized
     return migrate_legacy_config_to_model_routing(config)
 
 

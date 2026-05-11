@@ -829,19 +829,34 @@ export const useMtgaStore = () => {
       return false;
     }
     const normalizedTargets = normalizeTargets(result.targets);
-    const normalizedPools = normalizeFailoverPools(result.failover_pools, normalizedTargets);
+    const effectiveTargets = normalizedTargets.length
+      ? normalizedTargets
+      : normalizeTargets(result.config_groups);
+    const normalizedPools = normalizeFailoverPools(result.failover_pools, effectiveTargets);
     const normalizedPublishedModels = normalizePublishedModels(
       result.published_models,
-      normalizedTargets,
+      effectiveTargets,
       normalizedPools,
     );
+    const mappedModelName = coerceText(result.mapped_model_id).trim();
+    const effectivePublishedModels =
+      normalizedPublishedModels.length || !mappedModelName || !effectiveTargets.length
+        ? normalizedPublishedModels
+        : [
+            {
+              name: mappedModelName,
+              enabled: true,
+              primary_target_id: effectiveTargets[0]?.id || "",
+              failover_pool_id: null,
+            },
+          ];
 
-    routingTargets.value = normalizedTargets;
+    routingTargets.value = effectiveTargets;
     failoverPools.value = normalizedPools;
-    publishedModels.value = normalizedPublishedModels;
+    publishedModels.value = effectivePublishedModels;
     promptCacheBucketId.value = coerceText(result.prompt_cache_bucket_id).trim();
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
-    configGroups.value = normalizedTargets.map((target) => ({
+    configGroups.value = effectiveTargets.map((target) => ({
       name: target.display_name,
       provider: target.provider,
       api_url: target.api_base,
@@ -852,7 +867,7 @@ export const useMtgaStore = () => {
       prompt_cache_enabled: target.prompt_cache_enabled,
     }));
     currentConfigIndex.value = 0;
-    mappedModelId.value = normalizedPublishedModels[0]?.name || "";
+    mappedModelId.value = effectivePublishedModels[0]?.name || mappedModelName;
     proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
     savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
