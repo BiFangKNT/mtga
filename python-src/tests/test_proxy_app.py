@@ -8,10 +8,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import httpx
+
 from modules.proxy.model_routing import build_model_routing_config
 from modules.proxy.proxy_app import ProxyApp
 from modules.proxy.proxy_config import (
     GEMINI_PROVIDER,
+    OPENAI_CHAT_COMPLETION_PROVIDER,
     OPENAI_RESPONSE_PROVIDER,
     ProxyConfig,
 )
@@ -73,6 +76,12 @@ class DummyAsyncClosableStream:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class DummyUpstreamStatusError(Exception):
+    def __init__(self, status_code: int, message: str = "upstream error") -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ProxyAppGeminiTests(unittest.TestCase):
@@ -201,6 +210,374 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertEqual(trace["published_model"], "gemini-public")
         self.assertEqual(trace["target_id"], "gemini-main")
         self.assertEqual(trace["target_display_name"], "Gemini Main")
+
+    def test_model_routing_failover_uses_backup_after_429(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-429-failover-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://primary.example.com",
+                        "upstream_model": "gpt-primary",
+                        "api_key": "primary-key",
+                    },
+                    {
+                        "id": "backup",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://backup.example.com",
+                        "upstream_model": "gpt-backup",
+                        "api_key": "backup-key",
+                    },
+                ],
+                "failover_pools": [
+                    {
+                        "id": "pool-a",
+                        "trigger_statuses": [429],
+                        "cooldown_seconds": 10,
+                        "members": [{"target_id": "backup"}],
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "primary",
+                        "failover_pool_id": "pool-a",
+                    }
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        attempted_models: list[str] = []
+
+        def fake_create_chat_completion(
+            *, route: UpstreamRoute, request_data: dict[str, Any]
+        ) -> dict[str, Any]:
+            _ = route
+            attempted_models.append(str(request_data["model"]))
+            if request_data["model"] == "gpt-primary":
+                raise DummyUpstreamStatusError(429, "rate limited")
+            return {
+                "id": "chatcmpl_backup",
+                "object": "chat.completion",
+                "created": 123,
+                "model": "gpt-backup",
+                "choices": [{"index": 0, "message": {"content": "ok"}}],
+            }
+
+        transport = app_layer.transport
+        with patch.object(
+            transport.adapter,
+            "create_chat_completion",
+            side_effect=fake_create_chat_completion,
+        ):
+            response = app_layer.app.test_client().post(
+                "/v1/chat/completions",
+                json={
+                    "model": "public-gpt",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(attempted_models, ["gpt-primary", "gpt-backup"])
+        trace_summary = list_proxy_traces()[0]
+        self.assertTrue(trace_summary["has_cooldown"])
+        self.assertTrue(trace_summary["has_failover"])
+        trace = get_proxy_trace(trace_summary["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["target_id"], "backup")
+        event_text = str(trace["events"])
+        self.assertIn("'kind': 'target_cooldown'", event_text)
+        self.assertIn("'source': 'failover'", event_text)
+
+    def test_model_routing_all_targets_cooling_returns_route_unavailable(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-all-cooling-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://primary.example.com",
+                        "upstream_model": "gpt-primary",
+                        "api_key": "primary-key",
+                    },
+                    {
+                        "id": "backup",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://backup.example.com",
+                        "upstream_model": "gpt-backup",
+                        "api_key": "backup-key",
+                    },
+                ],
+                "failover_pools": [
+                    {
+                        "id": "pool-a",
+                        "trigger_statuses": [429],
+                        "cooldown_seconds": 10,
+                        "members": [{"target_id": "backup"}],
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "primary",
+                        "failover_pool_id": "pool-a",
+                    }
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+        app_layer._target_cooldowns.mark_cooling("primary", 10)
+        app_layer._target_cooldowns.mark_cooling("backup", 10)
+
+        response = app_layer.app.test_client().post(
+            "/v1/chat/completions",
+            json={
+                "model": "public-gpt",
+                "messages": [{"role": "user", "content": "hello"}],
+                "stream": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.get_json()
+        self.assertEqual(payload["error"]["code"], "route_unavailable")
+        trace = get_proxy_trace(list_proxy_traces()[0]["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["status"], "failed")
+        self.assertEqual(trace["status_code"], 503)
+
+    def test_model_routing_connect_error_uses_backup_target(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-connect-failover-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://primary.example.com",
+                        "upstream_model": "gpt-primary",
+                        "api_key": "primary-key",
+                    },
+                    {
+                        "id": "backup",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://backup.example.com",
+                        "upstream_model": "gpt-backup",
+                        "api_key": "backup-key",
+                    },
+                ],
+                "failover_pools": [
+                    {
+                        "id": "pool-a",
+                        "trigger_statuses": [429],
+                        "cooldown_seconds": 10,
+                        "members": [{"target_id": "backup"}],
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "primary",
+                        "failover_pool_id": "pool-a",
+                    }
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        attempted_models: list[str] = []
+
+        def fake_create_chat_completion(
+            *, route: UpstreamRoute, request_data: dict[str, Any]
+        ) -> dict[str, Any]:
+            _ = route
+            attempted_models.append(str(request_data["model"]))
+            if request_data["model"] == "gpt-primary":
+                raise httpx.ConnectError("connect failed")
+            return {
+                "id": "chatcmpl_backup",
+                "object": "chat.completion",
+                "created": 123,
+                "model": "gpt-backup",
+                "choices": [{"index": 0, "message": {"content": "ok"}}],
+            }
+
+        transport = app_layer.transport
+        with patch.object(
+            transport.adapter,
+            "create_chat_completion",
+            side_effect=fake_create_chat_completion,
+        ):
+            response = app_layer.app.test_client().post(
+                "/v1/chat/completions",
+                json={
+                    "model": "public-gpt",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(attempted_models, ["gpt-primary", "gpt-backup"])
+        trace_summary = list_proxy_traces()[0]
+        self.assertFalse(trace_summary["has_cooldown"])
+        self.assertTrue(trace_summary["has_failover"])
+        trace = get_proxy_trace(trace_summary["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace["target_id"], "backup")
+        self.assertIn("transport_failover", str(trace["events"]))
+
+    def test_model_routing_runtime_config_hot_switches_next_request(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-hot-switch-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        first_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "target-a",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://a.example.com",
+                        "upstream_model": "gpt-a",
+                        "api_key": "a-key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-a",
+                        "enabled": True,
+                        "primary_target_id": "target-a",
+                    }
+                ],
+            }
+        )
+        second_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "target-b",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://b.example.com",
+                        "upstream_model": "gpt-b",
+                        "api_key": "b-key",
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-b",
+                        "enabled": True,
+                        "primary_target_id": "target-b",
+                    }
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": first_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+        attempted_models: list[str] = []
+
+        def fake_create_chat_completion(
+            *, route: UpstreamRoute, request_data: dict[str, Any]
+        ) -> dict[str, Any]:
+            _ = route
+            attempted_models.append(str(request_data["model"]))
+            return {
+                "id": f"chatcmpl_{request_data['model']}",
+                "object": "chat.completion",
+                "created": 123,
+                "model": request_data["model"],
+                "choices": [{"index": 0, "message": {"content": "ok"}}],
+            }
+
+        with patch(
+            "modules.proxy.upstream_adapter.MLiteLLMUpstreamAdapter.create_chat_completion",
+            side_effect=fake_create_chat_completion,
+        ):
+            client = app_layer.app.test_client()
+            first_response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "public-a",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+            apply_result = app_layer.apply_runtime_config({"model_routing": second_config})
+            second_response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "public-b",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertTrue(apply_result.ok)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(attempted_models, ["gpt-a", "gpt-b"])
 
     def test_model_routing_chat_auth_runs_before_route_resolution(self) -> None:
         clear_proxy_traces(include_active=True)

@@ -17,11 +17,11 @@
 
 ## 路线图总览
 
-| 版本     | 核心主题             | 主要产出                                                              | 状态        |
-| -------- | -------------------- | --------------------------------------------------------------------- | ----------- |
-| `v2.4.0` | 多供应商上游适配     | MLiteLLM 执行层、上游适配层、非 OpenAI 上游转发能力                   | `Done`      |
-| `v2.5.0` | 结构化代理日志与并发 | `trace` 体系、代理日志页、单模型并发处理                              | `Done`      |
-| `v2.6.0` | 模型路由重构         | `published_model / target / failover_pool` 配置模型、动态路由、热切换 | `In Design` |
+| 版本     | 核心主题             | 主要产出                                                              | 状态   |
+| -------- | -------------------- | --------------------------------------------------------------------- | ------ |
+| `v2.4.0` | 多供应商上游适配     | MLiteLLM 执行层、上游适配层、非 OpenAI 上游转发能力                   | `Done` |
+| `v2.5.0` | 结构化代理日志与并发 | `trace` 体系、代理日志页、单模型并发处理                              | `Done` |
+| `v2.6.0` | 模型路由重构         | `published_model / target / failover_pool` 配置模型、动态路由、热切换 | `Done` |
 
 ## 规划原则
 
@@ -376,9 +376,10 @@ published_models:
 
 ### trace 字段要求
 
-- v2.6.0 应在 `ProxyTrace` 中补充路由相关字段：`published_model`、`target_id`、`target_display_name`、`failover_pool_id`、`attempt_index`、`attempts`。
-- 每个 attempt 至少记录：`target_id`、`provider`、`upstream_model`、`base_url`、`status_code`、`started_at`、`ended_at`、`duration_ms`、`error`。
-- route 解析失败、配置引用缺失、cooldown 命中、failover 切换、最终选中目标都必须写入 trace event。
+- v2.6.0 复用 `v2.5.0` 已有 `ProxyTrace` 与代理日志页，不新增独立路由日志系统。
+- `ProxyTrace` 应补充路由 summary 字段：`published_model`、`target_id`、`target_display_name`、`failover_pool_id`。
+- 路由 attempt 明细通过 `events` 承载，不在第一阶段新增顶层 `attempts` 聚合字段；`route_attempt` event 至少记录 `attempt_index`、`source`、`target_id`、`target_display_name`、`upstream_model`。
+- `target_cooldown`、`transport_failover`、`route_resolved` event 分别记录 cooldown、网络故障转移入口和最终选中目标；代理日志页可基于 summary 标记显示 `has_route_attempts`、`has_failover`、`has_cooldown`。
 - trace 中不得保存明文 `api_key`、Authorization header 或 provider token。
 
 ### 测试矩阵
@@ -387,8 +388,8 @@ published_models:
 - 动态路由：多个 enabled `published_model` 命中不同 `target`，disabled 模型不可访问，未知模型返回 `model_not_found`。
 - `/models`：按 `published_models` 配置顺序返回 enabled `published_model.name`，不返回 disabled 模型或内部 `target.upstream_model`。
 - 热切换：代理运行中保存新 route plan 后，新请求命中新配置，旧请求继续使用旧快照。
-- 429 failover：主目标 429 后进入 target-level cooldown，后续请求跳过冷却目标，cooldown 到期后重新尝试主目标。
-- 网络错误 failover：retry 耗尽后的可重试网络运输错误可以进入 failover，但普通 4xx/5xx、上游鉴权失败和配置错误不触发。
+- 429 failover：主目标 429 后进入 target-level cooldown，同次请求可切换到 failover target；所有候选目标冷却时返回 `route_unavailable`。
+- 网络错误 failover：retry 耗尽后的可重试网络运输错误可以进入 failover，但普通 4xx/5xx、上游鉴权失败和配置错误不触发；第一阶段以连接阶段错误为可重试运输错误边界。
 - target 复用：同一 target 被多个 published model 和 pool 复用时，共享 cooldown 和一致的 trace 语义。
 - 流式边界：首 chunk 前 429 可 failover；首 chunk 后异常不切换目标，只结束当前 trace。
 
