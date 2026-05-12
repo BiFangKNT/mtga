@@ -1,6 +1,6 @@
 [package]
 name = "mtga-tauri"
-version = "2.6.0-beta.2"
+version = "2.6.0-beta.3"
 description = "MTGA 的 Tauri App"
 authors = ["BiFangKNT"]
 license = "AGPL-3.0-only"
