@@ -224,6 +224,13 @@ const normalizeModelList = (value: unknown) => {
   return Array.from(unique).sort((a, b) => a.localeCompare(b));
 };
 
+const normalizeRequestBodyPatch = (value: unknown): Record<string, unknown>[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((operation) => ({ ...operation }));
+};
+
 const normalizeProvider = (value: unknown): ModelRoutingTarget["provider"] => {
   if (
     value === "openai_chat_completion" ||
@@ -276,6 +283,10 @@ const normalizeTargets = (value: unknown): ModelRoutingTarget[] => {
       const strategy = coerceText(item.model_discovery_strategy).trim();
       if (strategy) {
         target.model_discovery_strategy = strategy;
+      }
+      const requestBodyPatch = normalizeRequestBodyPatch(item.request_body_patch);
+      if (requestBodyPatch.length) {
+        target.request_body_patch = requestBodyPatch;
       }
       return target;
     })

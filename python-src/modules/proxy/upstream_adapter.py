@@ -93,6 +93,7 @@ class UpstreamRoute:
     mlitellm_base_url: str = ""
     model_discovery_strategy: str | None = None
     prompt_cache_key: str = ""
+    request_body_patch: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,7 @@ def build_upstream_route(
         mlitellm_base_url=mlitellm_base_url,
         model_discovery_strategy=proxy_config.model_discovery_strategy,
         prompt_cache_key=_build_prompt_cache_key(proxy_config.prompt_cache_bucket_id),
+        request_body_patch=proxy_config.request_body_patch,
     )
 
 
@@ -883,6 +885,10 @@ class MLiteLLMUpstreamAdapter:
             and route.prompt_cache_key
         ):
             call_kwargs.setdefault("prompt_cache_key", route.prompt_cache_key)
+        if route.request_body_patch:
+            call_kwargs["request_body_patch"] = [
+                dict(operation) for operation in route.request_body_patch
+            ]
         # 关闭 MLiteLLM / OpenAI SDK 内层默认重试，避免和外层建连重试叠加。
         call_kwargs["max_retries"] = 0
         call_kwargs["num_retries"] = 0

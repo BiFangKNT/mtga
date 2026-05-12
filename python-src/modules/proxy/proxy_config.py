@@ -60,6 +60,7 @@ class ProxyConfig:
     model_discovery_strategy: str | None = None
     prompt_cache_bucket_id: str = ""
     prompt_cache_enabled: bool = True
+    request_body_patch: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -275,6 +276,7 @@ def build_proxy_config(
         prompt_cache_enabled=normalize_prompt_cache_enabled(
             raw_config.get("prompt_cache_enabled")
         ),
+        request_body_patch=(),
     )
 
 
@@ -304,6 +306,7 @@ def build_proxy_config_from_target(  # noqa: PLR0913
         model_discovery_strategy=target.model_discovery_strategy,
         prompt_cache_bucket_id=prompt_cache_bucket_id,
         prompt_cache_enabled=target.prompt_cache_enabled,
+        request_body_patch=target.request_body_patch,
     )
 
 

@@ -24,6 +24,7 @@ NON_RETRYABLE_INTERNAL_CALL_KWARGS: frozenset[str] = frozenset(
         "num_retries",
         "allowed_openai_params",
         "extra_headers",
+        "request_body_patch",
     }
 )
 

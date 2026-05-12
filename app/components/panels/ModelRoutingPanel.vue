@@ -26,6 +26,18 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: "Anthropic",
   gemini: "Gemini",
 };
+const requestBodyPatchTooltip = [
+  "格式：JSON Patch 数组，按从上到下的顺序依次应用。",
+  "path 使用 JSON Pointer：/thinking 表示根对象字段，/tools/0 表示数组第 1 项;",
+  "value 可写字符串、数字、布尔、对象或数组。",
+  "add：新增字段或数组元素。",
+  "remove：删除已有字段或数组元素。",
+  "replace：替换已有字段的值。",
+  "copy：把 from 指向的值复制到 path。",
+  "move：把 from 指向的值移动到 path，原位置会被移除。",
+  "test：断言 path 当前值等于 value；失败时本次参数编辑失败。",
+  "限制：不允许修改 stream。",
+].join("\n");
 type RouteSectionId = "targets" | "published" | "failover";
 type RouteView = "overview" | RouteSectionId;
 
@@ -45,6 +57,7 @@ const activeView = ref<RouteView>("overview");
 const availableModels = ref<string[]>([]);
 const targetDiscoveryStrategy = ref("");
 const targetDiscoveryScope = ref("");
+const requestBodyPatchOpen = ref(false);
 
 const targetForm = reactive({
   id: "",
@@ -55,6 +68,7 @@ const targetForm = reactive({
   api_key: "",
   middle_route: "",
   prompt_cache_enabled: false,
+  request_body_patch_text: "",
 });
 
 const publishedForm = reactive({
@@ -208,6 +222,119 @@ const normalizeMiddleRoute = (value: string, provider: ProviderId) => {
   }
   return route.length > 1 ? route.replace(/\/+$/, "") : route;
 };
+const formatJsonPatch = (patch: ModelRoutingTarget["request_body_patch"]) => {
+  if (!patch?.length) {
+    return "";
+  }
+  return JSON.stringify(patch, null, 2);
+};
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const normalizePatchPointer = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+const decodePatchPointer = (pointer: string, label: string, index: number) => {
+  const tokens: string[] = [];
+  for (const token of pointer.split("/").slice(1)) {
+    let decoded = "";
+    for (let position = 0; position < token.length; position += 1) {
+      const char = token[position];
+      if (char !== "~") {
+        decoded += char;
+        continue;
+      }
+      const escape = token[position + 1];
+      if (escape === "0") {
+        decoded += "~";
+      } else if (escape === "1") {
+        decoded += "/";
+      } else {
+        formError.value = `参数编辑第 ${index + 1} 项 ${label} 包含无效转义`;
+        return null;
+      }
+      position += 1;
+    }
+    tokens.push(decoded);
+  }
+  return tokens;
+};
+const validatePatchPointer = (value: unknown, label: string, index: number) => {
+  const pointer = normalizePatchPointer(value);
+  if (!pointer) {
+    formError.value = `参数编辑第 ${index + 1} 项缺少 ${label}`;
+    return null;
+  }
+  if (!pointer.startsWith("/")) {
+    formError.value = `参数编辑第 ${index + 1} 项 ${label} 必须以 / 开头`;
+    return null;
+  }
+  if (pointer === "/stream" || pointer.startsWith("/stream/")) {
+    formError.value = "参数编辑不允许修改 stream";
+    return null;
+  }
+  const tokens = decodePatchPointer(pointer, label, index);
+  if (tokens === null) {
+    return null;
+  }
+  return { pointer, tokens };
+};
+const parseTargetRequestBodyPatch = () => {
+  const source = targetForm.request_body_patch_text.trim();
+  if (!source) {
+    return [] as Record<string, unknown>[];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    formError.value = "参数编辑必须是合法 JSON";
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    formError.value = "参数编辑必须是 JSON Patch 数组";
+    return null;
+  }
+  const operations: Record<string, unknown>[] = [];
+  for (const [index, operation] of parsed.entries()) {
+    if (!isPlainObject(operation)) {
+      formError.value = `参数编辑第 ${index + 1} 项必须是对象`;
+      return null;
+    }
+    const op = String(operation.op);
+    if (!["add", "remove", "replace", "copy", "move", "test"].includes(op)) {
+      formError.value = `参数编辑第 ${index + 1} 项 op 不支持`;
+      return null;
+    }
+    const path = validatePatchPointer(operation.path, "path", index);
+    if (path === null) {
+      return null;
+    }
+    const normalizedOperation: Record<string, unknown> = {
+      ...operation,
+      op,
+      path: path.pointer,
+    };
+    if (["add", "replace", "test"].includes(op) && !("value" in operation)) {
+      formError.value = `参数编辑第 ${index + 1} 项缺少 value`;
+      return null;
+    }
+    if (["copy", "move"].includes(op)) {
+      const from = validatePatchPointer(operation.from, "from", index);
+      if (from === null) {
+        return null;
+      }
+      if (
+        op === "move" &&
+        path.tokens.length > from.tokens.length &&
+        from.tokens.every((token, tokenIndex) => token === path.tokens[tokenIndex])
+      ) {
+        formError.value = `参数编辑第 ${index + 1} 项不能把值移动到自己的子路径`;
+        return null;
+      }
+      normalizedOperation.from = from.pointer;
+    }
+    operations.push(normalizedOperation);
+  }
+  return operations;
+};
 const makeIdentifier = (prefix: string, used: Set<string>) => {
   let index = used.size + 1;
   let candidate = `${prefix}-${index}`;
@@ -318,6 +445,8 @@ const openTargetEditor = (mode: "add" | "edit") => {
     targetForm.api_key = target.api_key;
     targetForm.middle_route = target.middle_route || "";
     targetForm.prompt_cache_enabled = target.prompt_cache_enabled === true;
+    targetForm.request_body_patch_text = formatJsonPatch(target.request_body_patch);
+    requestBodyPatchOpen.value = Boolean(targetForm.request_body_patch_text.trim());
     targetDiscoveryStrategy.value = target.model_discovery_strategy || "";
     targetDiscoveryScope.value = buildDiscoveryScope();
   } else {
@@ -329,6 +458,8 @@ const openTargetEditor = (mode: "add" | "edit") => {
     targetForm.api_key = "";
     targetForm.middle_route = "";
     targetForm.prompt_cache_enabled = false;
+    targetForm.request_body_patch_text = "";
+    requestBodyPatchOpen.value = false;
   }
   editorOpen.value = true;
 };
@@ -423,6 +554,10 @@ const saveTarget = async () => {
     formError.value = "目标ID已存在";
     return;
   }
+  const requestBodyPatch = parseTargetRequestBodyPatch();
+  if (requestBodyPatch === null) {
+    return;
+  }
   const target: ModelRoutingTarget = {
     id: targetId,
     display_name: targetForm.display_name.trim(),
@@ -433,6 +568,9 @@ const saveTarget = async () => {
     middle_route: normalizeMiddleRoute(targetForm.middle_route, targetForm.provider),
     prompt_cache_enabled: targetForm.prompt_cache_enabled,
   };
+  if (requestBodyPatch.length) {
+    target.request_body_patch = requestBodyPatch;
+  }
   if (targetDiscoveryStrategy.value && targetDiscoveryScope.value === buildDiscoveryScope()) {
     target.model_discovery_strategy = targetDiscoveryStrategy.value;
   }
@@ -1349,57 +1487,97 @@ watch(
       </template>
 
       <div class="px-6 py-6">
-        <div v-if="editorKind === 'target'" class="grid gap-4 md:grid-cols-2">
-          <MtgaInput v-model="targetForm.id" label="Target ID" required placeholder="target-1" />
-          <MtgaInput
-            v-model="targetForm.display_name"
-            label="显示名称"
-            placeholder="Claude 主线路"
-          />
-          <MtgaSelect
-            v-model="targetForm.provider"
-            label="Provider"
-            required
-            :options="PROVIDER_OPTIONS"
-            class="w-full"
-          />
-          <MtgaInput
-            v-model="targetForm.api_base"
-            label="API Base"
-            required
-            placeholder="https://api.openai.com"
-          />
-          <MtgaInput
-            v-model="targetForm.upstream_model"
-            label="上游模型"
-            required
-            show-dropdown
-            :options="availableModels"
-            :loading="modelLoading"
-            placeholder="gpt-5"
-            @dropdown="fetchTargetModels"
-          />
-          <MtgaInput
-            v-model="targetForm.api_key"
-            label="API Key"
-            type="password"
-            placeholder="sk-..."
-          />
-          <MtgaInput
-            v-model="targetForm.middle_route"
-            label="Middle Route"
-            :placeholder="getDefaultMiddleRoute(targetForm.provider)"
-          />
-          <label
-            class="mt-7 flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50/50 px-4 py-3"
-          >
-            <span class="label-text text-sm font-medium text-slate-700">启用提示缓存</span>
-            <input
-              v-model="targetForm.prompt_cache_enabled"
-              type="checkbox"
-              class="toggle toggle-primary toggle-sm"
+        <div v-if="editorKind === 'target'" class="space-y-4">
+          <div class="grid gap-4 md:grid-cols-2">
+            <MtgaInput v-model="targetForm.id" label="Target ID" required placeholder="target-1" />
+            <MtgaInput
+              v-model="targetForm.display_name"
+              label="显示名称"
+              placeholder="Claude 主线路"
             />
-          </label>
+            <MtgaSelect
+              v-model="targetForm.provider"
+              label="Provider"
+              required
+              :options="PROVIDER_OPTIONS"
+              class="w-full"
+            />
+            <MtgaInput
+              v-model="targetForm.api_base"
+              label="API Base"
+              required
+              placeholder="https://api.openai.com"
+            />
+            <MtgaInput
+              v-model="targetForm.upstream_model"
+              label="上游模型"
+              required
+              show-dropdown
+              :options="availableModels"
+              :loading="modelLoading"
+              placeholder="gpt-5"
+              @dropdown="fetchTargetModels"
+            />
+            <MtgaInput
+              v-model="targetForm.api_key"
+              label="API Key"
+              type="password"
+              placeholder="sk-..."
+            />
+            <MtgaInput
+              v-model="targetForm.middle_route"
+              label="Middle Route"
+              :placeholder="getDefaultMiddleRoute(targetForm.provider)"
+            />
+            <label
+              class="mt-7 flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50/50 px-4 py-3"
+            >
+              <span class="label-text text-sm font-medium text-slate-700">启用提示缓存</span>
+              <input
+                v-model="targetForm.prompt_cache_enabled"
+                type="checkbox"
+                class="toggle toggle-primary toggle-sm"
+              />
+            </label>
+          </div>
+
+          <details
+            class="tooltip mtga-tooltip block w-full rounded-xl border border-slate-200/70 bg-slate-50/60 px-4 py-3"
+            :data-tip="requestBodyPatchTooltip"
+            style="--mtga-tooltip-max: 520px"
+            :open="requestBodyPatchOpen"
+            @toggle="requestBodyPatchOpen = ($event.target as HTMLDetailsElement).open"
+          >
+            <summary
+              class="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700"
+            >
+              <span class="flex min-w-0 items-center gap-2">
+                <span>参数编辑</span>
+              </span>
+              <span
+                class="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500"
+              >
+                JSON Patch
+              </span>
+            </summary>
+            <div class="mt-3">
+              <textarea
+                v-model="targetForm.request_body_patch_text"
+                class="min-h-36 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs leading-5 text-slate-800 outline-none transition focus:border-amber-300 focus:ring-4 focus:ring-amber-100"
+                spellcheck="false"
+                placeholder='[
+  {"op":"add","path":"/thinking","value":{"type":"enabled","budget_tokens":1024}},
+  {"op":"replace","path":"/temperature","value":0.2},
+  {"op":"add","path":"/tools/0","value":{"type":"web_search"}},
+  {"op":"copy","from":"/metadata/user_id","path":"/user"},
+  {"op":"test","path":"/model","value":"Qwen/Qwen3.5-27B"}
+]'
+              ></textarea>
+              <div class="mt-2 text-xs leading-5 text-slate-500">
+                此处优先级高于 provider 适配层，请谨慎使用，任何后果自行承担。
+              </div>
+            </div>
+          </details>
         </div>
 
         <div v-else-if="editorKind === 'published'" class="grid gap-4 md:grid-cols-2">

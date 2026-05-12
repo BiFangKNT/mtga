@@ -154,6 +154,7 @@ class ModelRoutingConfigTests(unittest.TestCase):
         self.assertEqual(normalized["targets"][0]["api_base"], "https://anthropic.example.com")
         self.assertEqual(normalized["published_models"][0]["name"], "sonnet-proxy")
         self.assertEqual(normalized["published_models"][0]["primary_target_id"], "target-1")
+        self.assertEqual(normalized["targets"][0]["request_body_patch"], [])
 
     def test_legacy_config_without_mapped_model_does_not_publish_model(self) -> None:
         normalized = normalize_model_routing_config(
@@ -206,6 +207,41 @@ class ModelRoutingConfigTests(unittest.TestCase):
 
         missing = resolve_published_model(config, "disabled-gpt")
         self.assertEqual(missing.status_code, 404)  # type: ignore[union-attr]
+
+    def test_target_request_body_patch_is_preserved(self) -> None:
+        config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "targets": [
+                    {
+                        "id": "main",
+                        "provider": "openai_chat_completion",
+                        "api_base": "https://api.example.com",
+                        "upstream_model": "gpt-5",
+                        "api_key": "key",
+                        "request_body_patch": [
+                            {
+                                "op": "add",
+                                "path": "/thinking",
+                                "value": {"type": "enabled"},
+                            }
+                        ],
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "main",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            config.targets[0].request_body_patch,
+            ({"op": "add", "path": "/thinking", "value": {"type": "enabled"}},),
+        )
 
     def test_runtime_config_requires_enabled_published_model(self) -> None:
         runtime_config = build_model_routing_runtime_config(

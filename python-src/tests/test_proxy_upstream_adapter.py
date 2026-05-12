@@ -2181,6 +2181,47 @@ class MLiteLLMUpstreamAdapterTests(unittest.TestCase):
         call_kwargs = completion_mock.call_args.kwargs
         self.assertNotIn("prompt_cache_key", call_kwargs)
 
+    def test_target_request_body_patch_is_passed_to_mlitellm(self) -> None:
+        adapter = MLiteLLMUpstreamAdapter(
+            disable_ssl_strict_mode=False,
+            log_func=lambda _message: None,
+        )
+        route = build_upstream_route(
+            ProxyConfig(
+                provider=OPENAI_CHAT_COMPLETION_PROVIDER,
+                target_api_base_url="https://example.com",
+                middle_route="/v1",
+                custom_model_id="gpt-5",
+                target_model_id="gpt-5",
+                stream_mode=None,
+                debug_mode=False,
+                disable_ssl_strict_mode=False,
+                api_key="test-key",
+                mtga_auth_key="mtga-auth",
+                request_body_patch=(
+                    {
+                        "op": "add",
+                        "path": "/thinking",
+                        "value": {"type": "enabled"},
+                    },
+                ),
+            )
+        )
+
+        with patch(
+            "modules.proxy.upstream_adapter.mlitellm.completion",
+            return_value={"id": "chatcmpl_123", "choices": []},
+        ) as completion_mock:
+            adapter.create_chat_completion(
+                route=route,
+                request_data={"messages": [{"role": "user", "content": "你好"}]},
+            )
+
+        self.assertEqual(
+            completion_mock.call_args.kwargs["request_body_patch"],
+            [{"op": "add", "path": "/thinking", "value": {"type": "enabled"}}],
+        )
+
     def test_ssl_verify_is_passed_per_request_without_mutating_global_state(self) -> None:
         adapter = MLiteLLMUpstreamAdapter(
             disable_ssl_strict_mode=True,
@@ -2251,9 +2292,9 @@ class UpstreamErrorTests(unittest.TestCase):
 
         self.assertEqual(info.status_code, 429)
         self.assertEqual(info.response_body["error"], "Target API error: 429")
-        self.assertEqual(info.response_body["details"], "too many requests")
-        self.assertEqual(info.detail_text, "too many requests")
-        self.assertIsNone(info.raw_response_text)
+        self.assertEqual(info.response_body["details"], "rate limited")
+        self.assertEqual(info.detail_text, "rate limited")
+        self.assertEqual(info.raw_response_text, "rate limited")
         self.assertIsNone(info.parsed_response_body)
 
     def test_http_status_error_parses_response_body_from_raw_response_text(self) -> None:

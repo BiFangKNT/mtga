@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import ssl
 import sys
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import httpx
 
@@ -44,9 +45,20 @@ _LOCAL_ONLY_KWARGS: frozenset[str] = frozenset(
     {
         "allowed_openai_params",
         "prompt_cache_key",
+        "request_body_patch",
     }
 )
 ssl_verify: bool | str = True
+
+
+class _PatchContext:
+    def __init__(self, *, index: int, model: str, provider: str) -> None:
+        self.index = index
+        self.model = model
+        self.provider = provider
+
+    def fail(self, message: str) -> NoReturn:
+        _raise_patch_error(message, model=self.model, provider=self.provider)
 
 
 def _global_ssl_verify() -> bool | str:
@@ -269,6 +281,344 @@ def _request_body_from_kwargs(kwargs: dict[str, Any], *, model: str) -> dict[str
     if isinstance(extra_body, dict):
         body.update(cast(dict[str, Any], extra_body))
     return body
+
+
+def _apply_request_body_patch(
+    body: dict[str, Any],
+    kwargs: dict[str, Any],
+    *,
+    model: str,
+    provider: str,
+) -> dict[str, Any]:
+    patch_obj = kwargs.get("request_body_patch")
+    if patch_obj in (None, "", ()):
+        return body
+    if not isinstance(patch_obj, list):
+        _raise_patch_error(
+            "request_body_patch must be a JSON Patch operation list",
+            model=model,
+            provider=provider,
+        )
+
+    patched_body = body
+    for index, operation_obj in enumerate(cast(list[Any], patch_obj), start=1):
+        context = _PatchContext(index=index, model=model, provider=provider)
+        if not isinstance(operation_obj, dict):
+            context.fail(f"request_body_patch[{index}] must be an object")
+        operation = cast(dict[str, Any], operation_obj)
+        _apply_request_body_patch_operation(patched_body, operation, context)
+    return patched_body
+
+
+def _apply_request_body_patch_operation(
+    document: dict[str, Any],
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> None:
+    op = _as_str(operation.get("op")).strip()
+    path = operation.get("path")
+    if not isinstance(path, str):
+        context.fail(f"request_body_patch[{context.index}].path must be a string")
+    _ensure_patch_path_allowed(path, context)
+
+    if op in {"add", "replace"}:
+        _apply_value_patch_operation(document, op, path, operation, context)
+        return
+    if op == "remove":
+        _json_pointer_remove(document, path, context)
+        return
+    if op == "copy":
+        _apply_copy_patch_operation(document, path, operation, context)
+        return
+    if op == "move":
+        _apply_move_patch_operation(document, path, operation, context)
+        return
+    if op == "test":
+        _apply_test_patch_operation(document, path, operation, context)
+        return
+    context.fail(
+        f"request_body_patch[{context.index}].op is unsupported: {op or '<empty>'}"
+    )
+
+
+def _apply_value_patch_operation(
+    document: dict[str, Any],
+    op: str,
+    path: str,
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> None:
+    if "value" not in operation:
+        context.fail(f"request_body_patch[{context.index}].value is required for {op}")
+    if op == "add":
+        _json_pointer_add(document, path, operation["value"], context)
+        return
+    _json_pointer_replace(document, path, operation["value"], context)
+
+
+def _apply_copy_patch_operation(
+    document: dict[str, Any],
+    path: str,
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> None:
+    from_path = _operation_from_path(operation, context)
+    value = copy.deepcopy(_json_pointer_get(document, from_path, context))
+    _json_pointer_add(document, path, value, context)
+
+
+def _apply_move_patch_operation(
+    document: dict[str, Any],
+    path: str,
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> None:
+    from_path = _operation_from_path(operation, context)
+    from_tokens = _decode_json_pointer(from_path, context)
+    path_tokens = _decode_json_pointer(path, context)
+    if (
+        len(path_tokens) > len(from_tokens)
+        and path_tokens[: len(from_tokens)] == from_tokens
+    ):
+        context.fail(
+            f"request_body_patch[{context.index}] cannot move a value into its own child"
+        )
+    value = _json_pointer_get(document, from_path, context)
+    _json_pointer_remove(document, from_path, context)
+    _json_pointer_add(document, path, value, context)
+
+
+def _apply_test_patch_operation(
+    document: dict[str, Any],
+    path: str,
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> None:
+    if "value" not in operation:
+        context.fail(f"request_body_patch[{context.index}].value is required for test")
+    current_value = _json_pointer_get(document, path, context)
+    if current_value != operation["value"]:
+        context.fail(f"request_body_patch[{context.index}] test operation failed")
+
+
+def _operation_from_path(
+    operation: dict[str, Any],
+    context: _PatchContext,
+) -> str:
+    from_path = operation.get("from")
+    if not isinstance(from_path, str):
+        context.fail(f"request_body_patch[{context.index}].from must be a string")
+    _ensure_patch_path_allowed(from_path, context)
+    return from_path
+
+
+def _ensure_patch_path_allowed(
+    path: str,
+    context: _PatchContext,
+) -> None:
+    if path in {"", "/stream"} or path.startswith("/stream/"):
+        context.fail(
+            f"request_body_patch[{context.index}] cannot patch stream or the document root"
+        )
+
+
+def _decode_json_pointer(
+    path: str,
+    context: _PatchContext,
+) -> tuple[str, ...]:
+    if not path.startswith("/"):
+        context.fail(f"request_body_patch[{context.index}].path must be a JSON Pointer")
+    decoded: list[str] = []
+    for token in path.split("/")[1:]:
+        decoded.append(_decode_json_pointer_token(token, context))
+    return tuple(decoded)
+
+
+def _decode_json_pointer_token(
+    token: str,
+    context: _PatchContext,
+) -> str:
+    chars: list[str] = []
+    position = 0
+    while position < len(token):
+        char = token[position]
+        if char != "~":
+            chars.append(char)
+            position += 1
+            continue
+        if position + 1 >= len(token):
+            context.fail(
+                f"request_body_patch[{context.index}].path has an invalid escape"
+            )
+        escape = token[position + 1]
+        if escape == "0":
+            chars.append("~")
+        elif escape == "1":
+            chars.append("/")
+        else:
+            context.fail(
+                f"request_body_patch[{context.index}].path has an invalid escape"
+            )
+        position += 2
+    return "".join(chars)
+
+
+def _json_pointer_get(
+    document: Any,
+    path: str,
+    context: _PatchContext,
+) -> Any:
+    current = document
+    for token in _decode_json_pointer(path, context):
+        current = _json_pointer_child(current, token, context)
+    return current
+
+
+def _json_pointer_parent(
+    document: dict[str, Any],
+    path: str,
+    context: _PatchContext,
+) -> tuple[Any, str]:
+    tokens = _decode_json_pointer(path, context)
+    if not tokens:
+        context.fail(f"request_body_patch[{context.index}] cannot patch the document root")
+    current: Any = document
+    for token in tokens[:-1]:
+        current = _json_pointer_child(current, token, context)
+    return current, tokens[-1]
+
+
+def _json_pointer_child(
+    container: Any,
+    token: str,
+    context: _PatchContext,
+) -> Any:
+    if isinstance(container, dict):
+        container_dict = cast(dict[str, Any], container)
+        if token in container_dict:
+            return container_dict[token]
+    elif isinstance(container, list):
+        container_list = cast(list[Any], container)
+        token_index = _json_pointer_array_index(
+            token,
+            max_index=len(container_list) - 1,
+            allow_end=False,
+            context=context,
+        )
+        return container_list[token_index]
+    context.fail(f"request_body_patch[{context.index}] points to a missing path")
+
+
+def _json_pointer_add(
+    document: dict[str, Any],
+    path: str,
+    value: Any,
+    context: _PatchContext,
+) -> None:
+    parent, token = _json_pointer_parent(document, path, context)
+    next_value = copy.deepcopy(value)
+    if isinstance(parent, dict):
+        cast(dict[str, Any], parent)[token] = next_value
+        return
+    if isinstance(parent, list):
+        parent_list = cast(list[Any], parent)
+        if token == "-":
+            parent_list.append(next_value)
+            return
+        token_index = _json_pointer_array_index(
+            token,
+            max_index=len(parent_list),
+            allow_end=True,
+            context=context,
+        )
+        parent_list.insert(token_index, next_value)
+        return
+    context.fail(f"request_body_patch[{context.index}] cannot add to this path")
+
+
+def _json_pointer_replace(
+    document: dict[str, Any],
+    path: str,
+    value: Any,
+    context: _PatchContext,
+) -> None:
+    parent, token = _json_pointer_parent(document, path, context)
+    next_value = copy.deepcopy(value)
+    if isinstance(parent, dict):
+        parent_dict = cast(dict[str, Any], parent)
+        if token in parent_dict:
+            parent_dict[token] = next_value
+            return
+    elif isinstance(parent, list):
+        parent_list = cast(list[Any], parent)
+        token_index = _json_pointer_array_index(
+            token,
+            max_index=len(parent_list) - 1,
+            allow_end=False,
+            context=context,
+        )
+        parent_list[token_index] = next_value
+        return
+    context.fail(f"request_body_patch[{context.index}] cannot replace a missing path")
+
+
+def _json_pointer_remove(
+    document: dict[str, Any],
+    path: str,
+    context: _PatchContext,
+) -> None:
+    parent, token = _json_pointer_parent(document, path, context)
+    if isinstance(parent, dict):
+        parent_dict = cast(dict[str, Any], parent)
+        if token in parent_dict:
+            del parent_dict[token]
+            return
+    elif isinstance(parent, list):
+        parent_list = cast(list[Any], parent)
+        token_index = _json_pointer_array_index(
+            token,
+            max_index=len(parent_list) - 1,
+            allow_end=False,
+            context=context,
+        )
+        del parent_list[token_index]
+        return
+    context.fail(f"request_body_patch[{context.index}] cannot remove a missing path")
+
+
+def _json_pointer_array_index(
+    token: str,
+    *,
+    max_index: int,
+    allow_end: bool,
+    context: _PatchContext,
+) -> int:
+    if token == "-":
+        if allow_end:
+            return max_index
+        context.fail(f"request_body_patch[{context.index}] cannot use '-' here")
+    try:
+        token_index = int(token)
+    except ValueError:
+        context.fail(
+            f"request_body_patch[{context.index}] has an invalid array index"
+        )
+    if str(token_index) != token or token_index < 0 or token_index > max_index:
+        context.fail(
+            f"request_body_patch[{context.index}] array index is out of range"
+        )
+    return token_index
+
+
+def _raise_patch_error(message: str, *, model: str, provider: str) -> NoReturn:
+    raise BadRequestError(
+        message,
+        model=model,
+        llm_provider=provider,
+        body={"error": {"message": message, "type": "invalid_request_error"}},
+        status_code=HTTP_BAD_REQUEST,
+    )
+
 
 def _parse_sse_data(data: str) -> dict[str, Any] | str:
     if data == "[DONE]":

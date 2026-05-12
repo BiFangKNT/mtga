@@ -22,6 +22,7 @@ export type ModelRoutingTarget = {
   middle_route?: string;
   model_discovery_strategy?: string | null;
   prompt_cache_enabled?: boolean;
+  request_body_patch?: Record<string, unknown>[];
 };
 
 export type FailoverPoolMember = {

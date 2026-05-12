@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any, cast
 
 from .common import (
+    _apply_request_body_patch,
     _as_str,
     _base_url,
     _chat_chunk,
@@ -25,6 +26,7 @@ from .common import (
 def _openai_responses_completion(kwargs: dict[str, Any]) -> dict[str, Any] | Iterator[Any]:
     model = _strip_model_prefix(_as_str(kwargs.get("model")), "responses")
     body = _build_openai_responses_body(kwargs, model=model)
+    body = _apply_request_body_patch(body, kwargs, model=model, provider="openai")
     url = _join_url(_base_url(kwargs), "responses")
     headers = _headers(
         api_key=_as_str(kwargs.get("api_key")),

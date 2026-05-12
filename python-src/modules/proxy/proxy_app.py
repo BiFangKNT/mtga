@@ -1116,6 +1116,27 @@ class ProxyApp:
                     and upstream_route.mlitellm_base_url != upstream_route.base_url
                 ):
                     log(f"MLiteLLM 内部基路径: {upstream_route.mlitellm_base_url}")
+                if upstream_route.request_body_patch:
+                    trace_event(
+                        "request_body_patch",
+                        data={
+                            "operation_count": len(upstream_route.request_body_patch),
+                            "operations": [
+                                {
+                                    "op": operation.get("op"),
+                                    "path": operation.get("path"),
+                                    "from": operation.get("from"),
+                                    "value": operation.get("value"),
+                                }
+                                for operation in upstream_route.request_body_patch
+                            ],
+                            "target_id": target_id,
+                        },
+                    )
+                    log(
+                        "MLiteLLM 请求体补丁: "
+                        f"{len(upstream_route.request_body_patch)} 条"
+                    )
 
                 trace_event("upstream_request", "准备转发到上游")
                 upstream_response = transport.adapter.create_chat_completion(

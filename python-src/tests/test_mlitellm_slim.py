@@ -68,6 +68,86 @@ class MLiteLLMSlimTests(unittest.TestCase):
             },
         )
 
+    def test_openai_chat_completion_applies_request_body_patch_last(self) -> None:
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+            json={"id": "chatcmpl_123", "choices": []},
+        )
+
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            mlitellm.completion(
+                model="gpt-5",
+                messages=[{"role": "user", "content": "hello"}],
+                base_url="https://example.com/v1",
+                extra_body={"vendor_flag": False},
+                request_body_patch=[
+                    {"op": "replace", "path": "/vendor_flag", "value": True},
+                    {
+                        "op": "add",
+                        "path": "/thinking",
+                        "value": {"type": "enabled", "budget_tokens": 1024},
+                    },
+                    {"op": "remove", "path": "/messages/0/content"},
+                ],
+            )
+
+        self.assertEqual(
+            request_mock.call_args.kwargs["json"],
+            {
+                "model": "gpt-5",
+                "messages": [{"role": "user"}],
+                "vendor_flag": True,
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+            },
+        )
+
+    def test_request_body_patch_rejects_stream_mutation(self) -> None:
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.com/v1/chat/completions"),
+            json={"id": "chatcmpl_123", "choices": []},
+        )
+
+        with (
+            patch("modules.mlitellm.httpx.request", return_value=response),
+            self.assertRaises(BadRequestError) as raised,
+        ):
+            mlitellm.completion(
+                model="gpt-5",
+                messages=[{"role": "user", "content": "hello"}],
+                base_url="https://example.com/v1",
+                stream=False,
+                request_body_patch=[
+                    {"op": "replace", "path": "/stream", "value": True},
+                ],
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("cannot patch stream", raised.exception.message)
+
+    def test_responses_request_body_patch_runs_after_responses_mapping(self) -> None:
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.com/v1/responses"),
+            json={"id": "resp_123", "status": "completed", "output": []},
+        )
+
+        with patch("modules.mlitellm.httpx.request", return_value=response) as request_mock:
+            mlitellm.completion(
+                model="responses/gpt-5",
+                messages=[{"role": "user", "content": "hello"}],
+                base_url="https://example.com/v1",
+                request_body_patch=[
+                    {"op": "add", "path": "/text", "value": {"verbosity": "high"}},
+                    {"op": "replace", "path": "/input/0/content", "value": "patched"},
+                ],
+            )
+
+        request_body = request_mock.call_args.kwargs["json"]
+        self.assertEqual(request_body["text"], {"verbosity": "high"})
+        self.assertEqual(request_body["input"][0]["content"], "patched")
+
     def test_openai_chat_completion_preserves_ssl_context_verify(self) -> None:
         ssl_context = ssl.create_default_context()
         response = httpx.Response(

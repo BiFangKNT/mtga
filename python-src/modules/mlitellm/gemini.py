@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import Any, cast
 
 from .common import (
+    _apply_request_body_patch,
     _as_str,
     _base_url,
     _chat_chunk,
@@ -33,6 +34,7 @@ _GEMINI_UNSUPPORTED_SCHEMA_KEYS: frozenset[str] = frozenset(
 def _gemini_completion(kwargs: dict[str, Any]) -> dict[str, Any] | Iterator[Any]:
     model = _strip_model_prefix(_as_str(kwargs.get("model")), "gemini")
     body = _build_gemini_body(kwargs)
+    body = _apply_request_body_patch(body, kwargs, model=model, provider="gemini")
     headers = _headers(
         api_key=_as_str(kwargs.get("api_key")),
         auth_header="Authorization",

@@ -211,6 +211,103 @@ class ProxyAppGeminiTests(unittest.TestCase):
         self.assertEqual(trace["target_id"], "gemini-main")
         self.assertEqual(trace["target_display_name"], "Gemini Main")
 
+    def test_model_routing_records_request_body_patch_summary(self) -> None:
+        clear_proxy_traces(include_active=True)
+        temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-patch-")
+        self.addCleanup(shutil.rmtree, temp_dir, ignore_errors=True)
+        resource_manager = DummyResourceManager(
+            user_data_dir=temp_dir,
+            program_resource_dir=temp_dir,
+        )
+        routing_config = build_model_routing_config(
+            {
+                "schema_version": 2,
+                "mtga_auth_key": "",
+                "targets": [
+                    {
+                        "id": "openai-main",
+                        "provider": OPENAI_CHAT_COMPLETION_PROVIDER,
+                        "api_base": "https://openai.example.com",
+                        "upstream_model": "gpt-5",
+                        "api_key": "upstream-key",
+                        "request_body_patch": [
+                            {
+                                "op": "add",
+                                "path": "/thinking",
+                                "value": {"type": "enabled"},
+                            },
+                            {
+                                "op": "copy",
+                                "from": "/metadata/user_id",
+                                "path": "/user",
+                            }
+                        ],
+                    }
+                ],
+                "published_models": [
+                    {
+                        "name": "public-gpt",
+                        "enabled": True,
+                        "primary_target_id": "openai-main",
+                    }
+                ],
+            }
+        )
+        app_layer = ProxyApp(
+            {"model_routing": routing_config},
+            log_func=lambda _message: None,
+            resource_manager=resource_manager,  # type: ignore[arg-type]
+        )
+        self.addCleanup(app_layer.close)
+
+        transport = app_layer.transport
+        with patch.object(
+            transport.adapter,
+            "create_chat_completion",
+            return_value={
+                "id": "chatcmpl_123",
+                "object": "chat.completion",
+                "created": 123,
+                "model": "gpt-5",
+                "choices": [{"index": 0, "message": {"content": "ok"}}],
+            },
+        ):
+            response = app_layer.app.test_client().post(
+                "/v1/chat/completions",
+                json={
+                    "model": "public-gpt",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        trace = get_proxy_trace(list_proxy_traces()[0]["trace_id"])
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        patch_events = [
+            event for event in trace["events"] if event["kind"] == "request_body_patch"
+        ]
+        self.assertEqual(len(patch_events), 1)
+        self.assertEqual(patch_events[0]["data"]["operation_count"], 2)
+        self.assertEqual(
+            patch_events[0]["data"]["operations"],
+            [
+                {
+                    "op": "add",
+                    "path": "/thinking",
+                    "from": None,
+                    "value": {"type": "enabled"},
+                },
+                {
+                    "op": "copy",
+                    "path": "/user",
+                    "from": "/metadata/user_id",
+                    "value": None,
+                },
+            ],
+        )
+
     def test_model_routing_failover_uses_backup_after_429(self) -> None:
         clear_proxy_traces(include_active=True)
         temp_dir = _make_test_temp_dir("mtga-proxy-app-routing-429-failover-")

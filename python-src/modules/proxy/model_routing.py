@@ -30,6 +30,7 @@ class ModelRoutingTarget:
     middle_route: str
     model_discovery_strategy: str | None
     prompt_cache_enabled: bool
+    request_body_patch: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,18 @@ def _coerce_trigger_statuses(value: Any) -> tuple[int, ...]:
     return tuple(statuses) or DEFAULT_FAILOVER_TRIGGER_STATUSES
 
 
+def _coerce_request_body_patch(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    patch: list[dict[str, Any]] = []
+    for operation_obj in cast(list[Any], value):
+        if not isinstance(operation_obj, dict):
+            continue
+        operation = cast(dict[str, Any], operation_obj)
+        patch.append(copy.deepcopy(operation))
+    return patch
+
+
 def _unique_identifier(
     requested: str,
     used: set[str],
@@ -216,6 +229,9 @@ def _normalize_target(raw_target: Any, *, index: int, used_ids: set[str]) -> dic
         "model_discovery_strategy": model_discovery_strategy,
         "prompt_cache_enabled": normalize_prompt_cache_enabled(
             target.get("prompt_cache_enabled")
+        ),
+        "request_body_patch": _coerce_request_body_patch(
+            target.get("request_body_patch")
         ),
     }
 
@@ -424,6 +440,9 @@ def build_model_routing_config(raw_config: Any) -> ModelRoutingConfig:
                 else None
             ),
             prompt_cache_enabled=bool(target.get("prompt_cache_enabled")),
+            request_body_patch=tuple(
+                _coerce_request_body_patch(target.get("request_body_patch"))
+            ),
         )
         for target in normalized["targets"]
     )
@@ -477,6 +496,10 @@ def serialize_model_routing_config(config: ModelRoutingConfig | dict[str, Any]) 
                 "upstream_model": target.upstream_model,
                 "model_discovery_strategy": target.model_discovery_strategy,
                 "prompt_cache_enabled": target.prompt_cache_enabled,
+                "request_body_patch": [
+                    copy.deepcopy(operation)
+                    for operation in target.request_body_patch
+                ],
             }
             for target in config.targets
         ],
