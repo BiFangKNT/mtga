@@ -56,10 +56,10 @@ const handleEscape = () => {
 <template>
   <dialog class="modal" :class="{ 'modal-open': props.open }" @keydown.esc.prevent="handleEscape">
     <div
-      class="modal-box mtga-card p-0 overflow-hidden border-slate-200/60 shadow-2xl transition-all duration-200"
+      class="modal-box mtga-card max-h-[calc(100dvh-2rem)] overflow-hidden border-slate-200/60 p-0 shadow-2xl transition-all duration-200"
       :class="[props.maxWidth, props.open ? 'scale-100 opacity-100' : 'scale-95 opacity-0']"
     >
-      <div class="mtga-card-body p-0 flex flex-col">
+      <div class="mtga-card-body flex max-h-[calc(100dvh-2rem)] flex-col p-0">
         <!-- 头部插槽：统一由基础组件提供底部分割线 -->
         <div v-if="$slots.header" class="px-6 py-5 border-b border-slate-100/50">
           <slot name="header"></slot>
