@@ -1891,7 +1891,14 @@ watch(
       <div class="px-6 py-6">
         <div v-if="editorKind === 'target'" class="space-y-4">
           <div class="grid gap-4 md:grid-cols-2">
-            <MtgaInput v-model="targetForm.id" label="Target ID" required placeholder="target-1" />
+            <MtgaInput
+              v-model="targetForm.id"
+              label="Target ID"
+              required
+              readonly
+              input-class="cursor-default text-slate-500"
+              placeholder="target-1"
+            />
             <MtgaInput
               v-model="targetForm.display_name"
               label="显示名称"
