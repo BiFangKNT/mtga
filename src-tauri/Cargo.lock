@@ -1885,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "mtga-tauri"
-version = "2.6.0-beta.3"
+version = "2.6.0-beta.4"
 dependencies = [
  "log",
  "pyo3",
