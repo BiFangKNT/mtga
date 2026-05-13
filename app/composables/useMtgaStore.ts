@@ -49,6 +49,7 @@ const DEFAULT_RUNTIME_OPTIONS: RuntimeOptions = {
 
 const DEFAULT_PROXY_MODE: ProxyMode = "trae_official_base_url";
 const DEFAULT_TRAE_PATH = "";
+const DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE = false;
 const WINDOWS_TRAE_DIALOG_PATH = "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe";
 const MACOS_TRAE_DIALOG_PATH = "/Applications/Trae.app";
 
@@ -546,6 +547,14 @@ export const useMtgaStore = () => {
   const savedProxyMode = useState<ProxyMode>("mtga-saved-proxy-mode", () => DEFAULT_PROXY_MODE);
   const traePath = useState<string>("mtga-trae-path", () => DEFAULT_TRAE_PATH);
   const savedTraePath = useState<string>("mtga-saved-trae-path", () => DEFAULT_TRAE_PATH);
+  const minimizeToTrayOnClose = useState<boolean>(
+    "mtga-minimize-to-tray-on-close",
+    () => DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+  );
+  const savedMinimizeToTrayOnClose = useState<boolean>(
+    "mtga-saved-minimize-to-tray-on-close",
+    () => DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+  );
   const runtimeOptions = useState<RuntimeOptions>("mtga-runtime-options", () => ({
     ...DEFAULT_RUNTIME_OPTIONS,
   }));
@@ -886,6 +895,11 @@ export const useMtgaStore = () => {
     savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
     savedTraePath.value = traePath.value;
+    minimizeToTrayOnClose.value =
+      typeof result.minimize_to_tray_on_close === "boolean"
+        ? result.minimize_to_tray_on_close
+        : DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE;
+    savedMinimizeToTrayOnClose.value = minimizeToTrayOnClose.value;
     if (Array.isArray(result.warnings)) {
       result.warnings.forEach((warning) => {
         const text = coerceText(warning).trim();
@@ -907,11 +921,24 @@ export const useMtgaStore = () => {
       prompt_cache_bucket_id: coerceText(promptCacheBucketId.value),
       proxy_mode: proxyMode.value,
       trae_path: coerceText(traePath.value).trim(),
+      minimize_to_tray_on_close: minimizeToTrayOnClose.value,
     };
     const ok = await api.saveConfig(payload);
     if (ok) {
       savedProxyMode.value = payload.proxy_mode;
       savedTraePath.value = payload.trae_path;
+      savedMinimizeToTrayOnClose.value = payload.minimize_to_tray_on_close === true;
+    }
+    return Boolean(ok);
+  };
+
+  const saveAppSettings = async () => {
+    const payload = {
+      minimize_to_tray_on_close: minimizeToTrayOnClose.value,
+    };
+    const ok = await api.saveAppSettings(payload);
+    if (ok) {
+      savedMinimizeToTrayOnClose.value = payload.minimize_to_tray_on_close;
     }
     return Boolean(ok);
   };
@@ -1442,6 +1469,8 @@ export const useMtgaStore = () => {
     proxyRuntimeActiveMode,
     proxyRuntimeLoopbackPort,
     traePath,
+    minimizeToTrayOnClose,
+    savedMinimizeToTrayOnClose,
     runtimeOptions,
     logs,
     systemPrompts,
@@ -1466,6 +1495,7 @@ export const useMtgaStore = () => {
     startProxyStatusListener,
     loadConfig,
     saveConfig,
+    saveAppSettings,
     fetchProxyRuntimeStatus,
     init,
     runGenerateCertificates,

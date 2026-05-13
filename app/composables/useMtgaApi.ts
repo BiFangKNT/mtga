@@ -50,6 +50,8 @@ export const useMtgaApi = () => {
   };
   const loadConfig = () => safeInvoke<ConfigPayload>("load_config");
   const saveConfig = (payload: ConfigPayload) => safeInvoke<boolean>("save_config", payload, false);
+  const saveAppSettings = (payload: { minimize_to_tray_on_close?: boolean }) =>
+    safeInvoke<boolean>("save_app_settings", payload, false);
   const getAppInfo = () => safeInvoke<AppInfo>("get_app_info");
   const getStartupStatus = () => safeInvoke<InvokeResult>("startup_status");
   const hostsModify = (payload: {
@@ -223,6 +225,7 @@ export const useMtgaApi = () => {
   return {
     loadConfig,
     saveConfig,
+    saveAppSettings,
     getAppInfo,
     getStartupStatus,
     hostsModify,

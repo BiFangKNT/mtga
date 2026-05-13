@@ -52,6 +52,7 @@ export type ConfigPayload = {
   prompt_cache_bucket_id?: string;
   proxy_mode: ProxyMode;
   trae_path: string;
+  minimize_to_tray_on_close?: boolean;
   warnings?: string[];
   config_groups?: ConfigGroup[];
   current_config_index?: number;

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import httpx
+import yaml
 
 from modules.proxy.model_routing import (
     build_model_routing_config,
@@ -12,6 +15,7 @@ from modules.proxy.model_routing import (
 )
 from modules.services.config_service import (
     LEGACY_GROUP_MAPPED_MODEL_ID_WARNING,
+    ConfigStore,
     _collect_config_warnings,
     _normalize_config_group,
 )
@@ -116,6 +120,40 @@ class ConfigGroupNormalizationTests(unittest.TestCase):
         )
 
         self.assertEqual(warnings, [])
+
+
+class AppSettingsConfigTests(unittest.TestCase):
+    def test_minimize_to_tray_on_close_round_trips_without_rewriting_routing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "mtga_config.yaml"
+            config_file.write_text(
+                yaml.safe_dump(
+                    {
+                        "schema_version": 2,
+                        "targets": [
+                            {
+                                "id": "main",
+                                "provider": "openai_chat_completion",
+                                "api_base": "https://api.example.com",
+                                "upstream_model": "gpt-5",
+                                "api_key": "key",
+                            }
+                        ],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            store = ConfigStore(str(config_file))
+
+            self.assertFalse(store.load_minimize_to_tray_on_close())
+            self.assertTrue(store.save_app_settings(minimize_to_tray_on_close=True))
+            self.assertTrue(store.load_minimize_to_tray_on_close())
+
+            saved = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+            self.assertEqual(saved["targets"][0]["id"], "main")
+            self.assertTrue(saved["minimize_to_tray_on_close"])
 
 
 class ModelRoutingConfigTests(unittest.TestCase):

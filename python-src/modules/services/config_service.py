@@ -21,6 +21,7 @@ DEFAULT_PROVIDER = OPENAI_CHAT_COMPLETION_PROVIDER
 OFFICIAL_BASE_URL_PROXY_MODE = "trae_official_base_url"
 DEFAULT_PROXY_MODE = OFFICIAL_BASE_URL_PROXY_MODE
 NATIVE_PROXY_MODE = "trae_native"
+DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE = False
 SUPPORTED_PROXY_MODES = frozenset(
     {
         DEFAULT_PROXY_MODE,
@@ -57,6 +58,20 @@ def _normalize_proxy_mode(value: Any) -> str:
         if normalized in SUPPORTED_PROXY_MODES:
             return normalized
     return DEFAULT_PROXY_MODE
+
+
+def _normalize_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "on", "yes"}:
+            return True
+        if normalized in {"false", "0", "off", "no"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
 
 
 def _normalize_config_group(raw_group: Any) -> dict[str, Any] | None:
@@ -170,6 +185,20 @@ class ConfigStore:
             pass
         return DEFAULT_PROXY_MODE, ""
 
+    def load_minimize_to_tray_on_close(self) -> bool:
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                    if config:
+                        return _normalize_bool(
+                            config.get("minimize_to_tray_on_close"),
+                            default=DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+                        )
+        except Exception:
+            pass
+        return DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE
+
     def load_model_routing_config(self) -> dict[str, Any]:
         try:
             if os.path.exists(self.config_file):
@@ -193,6 +222,7 @@ class ConfigStore:
         *,
         proxy_mode: str | None = None,
         trae_path: str | None = None,
+        minimize_to_tray_on_close: bool | None = None,
     ) -> bool:
         try:
             config_data: dict[str, Any] = {}
@@ -212,6 +242,11 @@ class ConfigStore:
                 config_data["proxy_mode"] = _normalize_proxy_mode(proxy_mode)
             if trae_path is not None:
                 config_data["trae_path"] = str(trae_path or "").strip()
+            if minimize_to_tray_on_close is not None:
+                config_data["minimize_to_tray_on_close"] = _normalize_bool(
+                    minimize_to_tray_on_close,
+                    default=DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+                )
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
 
@@ -236,6 +271,7 @@ class ConfigStore:
         mtga_auth_key: str | None = None,
         proxy_mode: str | None = None,
         trae_path: str | None = None,
+        minimize_to_tray_on_close: bool | None = None,
     ) -> bool:
         try:
             config_data: dict[str, Any] = {}
@@ -260,6 +296,39 @@ class ConfigStore:
                 config_data["proxy_mode"] = _normalize_proxy_mode(proxy_mode)
             if trae_path is not None:
                 config_data["trae_path"] = str(trae_path or "").strip()
+            if minimize_to_tray_on_close is not None:
+                config_data["minimize_to_tray_on_close"] = _normalize_bool(
+                    minimize_to_tray_on_close,
+                    default=DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+                )
+
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    config_data,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    indent=2,
+                    sort_keys=False,
+                )
+            return True
+        except Exception:
+            return False
+
+    def save_app_settings(self, *, minimize_to_tray_on_close: bool | None = None) -> bool:
+        try:
+            config_data: dict[str, Any] = {}
+            if os.path.exists(self.config_file):
+                with open(self.config_file, encoding="utf-8") as f:
+                    config_data = yaml.safe_load(f) or {}
+
+            if minimize_to_tray_on_close is not None:
+                config_data["minimize_to_tray_on_close"] = _normalize_bool(
+                    minimize_to_tray_on_close,
+                    default=DEFAULT_MINIMIZE_TO_TRAY_ON_CLOSE,
+                )
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
 

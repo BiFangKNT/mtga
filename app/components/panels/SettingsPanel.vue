@@ -25,6 +25,7 @@ const proxyModeSwitchConfirmOpen = ref(false);
 const currentProxyModeForConfirm = ref<ProxyMode | null>(null);
 const themeDialogOpen = ref(false);
 const proxySettingsSaving = ref(false);
+const appSettingsSaving = ref(false);
 const traePathBrowsing = ref(false);
 
 const themeConfig = reactive<ThemeConfig>({ ...DEFAULT_THEME_CONFIG });
@@ -57,6 +58,12 @@ const proxyRuntimeKnown = computed(() => store.proxyRuntimeKnown.value);
 const proxyRuntimeRunning = computed(() => store.proxyRuntimeRunning.value);
 const proxyRuntimeActiveMode = computed(() => store.proxyRuntimeActiveMode.value);
 const proxyRuntimeLoopbackPort = computed(() => store.proxyRuntimeLoopbackPort.value);
+const minimizeToTrayOnClose = computed({
+  get: () => store.minimizeToTrayOnClose.value,
+  set: (value: boolean) => {
+    store.minimizeToTrayOnClose.value = value;
+  },
+});
 
 const traePathMissing = computed(() => traeNativeEnabled.value && !traePath.value.trim());
 const PREFERRED_TRAE_OFFICIAL_BASE_URL = "http://127.0.0.1:18083/v1";
@@ -335,6 +342,25 @@ const handleThemeSave = (value: ThemeConfig) => {
   }
   store.appendLog(`主题配置已应用，但本地保存失败：${saveResult.error}`);
 };
+
+const handleMinimizeToTrayOnCloseChange = async () => {
+  if (appSettingsSaving.value) {
+    return;
+  }
+  const previousValue = store.savedMinimizeToTrayOnClose.value;
+  appSettingsSaving.value = true;
+  try {
+    const ok = await store.saveAppSettings();
+    if (!ok) {
+      minimizeToTrayOnClose.value = previousValue;
+      store.appendLog("保存关闭行为设置失败");
+      return;
+    }
+    store.appendLog("关闭行为设置已保存");
+  } finally {
+    appSettingsSaving.value = false;
+  }
+};
 </script>
 
 <template>
@@ -527,6 +553,22 @@ const handleThemeSave = (value: ThemeConfig) => {
         <span class="text-xs font-normal text-slate-500">自定义颜色、字体与背景</span>
       </span>
     </button>
+
+    <label
+      class="mtga-btn-outline flex h-auto cursor-pointer items-center justify-between gap-3 px-4 py-2 text-sm transition-all active:scale-[0.98]"
+    >
+      <span class="flex min-w-0 flex-col gap-0.5 text-left">
+        <span class="font-semibold text-slate-800">关闭时最小化到托盘</span>
+        <span class="text-xs font-normal text-slate-500">关闭主窗口后继续在后台运行</span>
+      </span>
+      <input
+        v-model="minimizeToTrayOnClose"
+        type="checkbox"
+        class="toggle toggle-primary toggle-sm shrink-0"
+        :disabled="appSettingsSaving"
+        @change="handleMinimizeToTrayOnCloseChange"
+      />
+    </label>
   </div>
 
   <ConfirmDialog

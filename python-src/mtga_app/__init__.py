@@ -204,6 +204,11 @@ class SaveConfigPayload(BaseModel):
     mapped_model_id: str | None = None
     proxy_mode: str | None = None
     trae_path: str | None = None
+    minimize_to_tray_on_close: bool | None = None
+
+
+class SaveAppSettingsPayload(BaseModel):
+    minimize_to_tray_on_close: bool | None = None
 
 
 class ResolvePathPayload(BaseModel):
@@ -223,6 +228,11 @@ def _get_config_store() -> ConfigStore:
     return config_store_cls(resource_manager.get_user_config_file())
 
 
+def should_minimize_to_tray_on_close() -> bool:
+    config_store = _get_config_store()
+    return bool(config_store.load_minimize_to_tray_on_close())
+
+
 @command_registry.command()
 async def greet(body: GreetPayload) -> str:
     return f"Hello, {body.name}! from Python {sys.version.split()[0]}"
@@ -233,11 +243,13 @@ async def load_config() -> dict[str, Any]:
     config_store = _get_config_store()
     routing_config = config_store.load_model_routing_config()
     proxy_mode, trae_path = config_store.load_proxy_settings()
+    minimize_to_tray_on_close = config_store.load_minimize_to_tray_on_close()
     warnings = config_store.load_config_warnings()
     return {
         **routing_config,
         "proxy_mode": proxy_mode,
         "trae_path": trae_path,
+        "minimize_to_tray_on_close": minimize_to_tray_on_close,
         "warnings": warnings,
     }
 
@@ -248,10 +260,22 @@ async def save_config(body: SaveConfigPayload) -> bool:
     payload = body.model_dump(exclude_none=True)
     proxy_mode = payload.pop("proxy_mode", None)
     trae_path = payload.pop("trae_path", None)
+    minimize_to_tray_on_close = payload.pop("minimize_to_tray_on_close", None)
     return config_store.save_model_routing_config(
         payload,
         proxy_mode=proxy_mode if isinstance(proxy_mode, str) else None,
         trae_path=trae_path if isinstance(trae_path, str) else None,
+        minimize_to_tray_on_close=(
+            minimize_to_tray_on_close if isinstance(minimize_to_tray_on_close, bool) else None
+        ),
+    )
+
+
+@command_registry.command()
+async def save_app_settings(body: SaveAppSettingsPayload) -> bool:
+    config_store = _get_config_store()
+    return config_store.save_app_settings(
+        minimize_to_tray_on_close=body.minimize_to_tray_on_close
     )
 
 

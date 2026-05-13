@@ -10,9 +10,18 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, Listener, Manager, RunEvent, Url, WindowEvent, ipc::Channel,
+    AppHandle, Emitter, Listener, Manager, RunEvent, Url, WindowEvent,
+    ipc::Channel,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::PageLoadEvent,
 };
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const SPLASH_WINDOW_LABEL: &str = "splash";
+const TRAY_ID: &str = "mtga-main-tray";
+const TRAY_SHOW_MENU_ID: &str = "mtga-tray-show";
+const TRAY_QUIT_MENU_ID: &str = "mtga-tray-quit";
 
 fn resolve_python_home() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("PYTHONHOME") {
@@ -82,14 +91,14 @@ fn try_show_main(app_handle: &AppHandle) {
     {
         return;
     }
-    let Some(main) = app_handle.get_webview_window("main") else {
+    let Some(main) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
         log::warn!(target: "boot", "label=main_window_missing");
         return;
     };
     if MAIN_WINDOW_SHOWN.swap(true, Ordering::SeqCst) {
         return;
     }
-    if let Some(splash) = app_handle.get_webview_window("splash") {
+    if let Some(splash) = app_handle.get_webview_window(SPLASH_WINDOW_LABEL) {
         if let Ok(pos) = splash.outer_position() {
             let _ = main.set_position(pos);
         }
@@ -113,7 +122,7 @@ fn try_show_main(app_handle: &AppHandle) {
         );
     }
     let _ = main.emit("mtga:backend-ready", ());
-    if let Some(splash) = app_handle.get_webview_window("splash") {
+    if let Some(splash) = app_handle.get_webview_window(SPLASH_WINDOW_LABEL) {
         if let Err(error) = splash.close() {
             log::warn!(
                 target: "boot",
@@ -560,6 +569,49 @@ fn stop_proxy_on_close() {
     .ok();
 }
 
+fn should_minimize_to_tray_on_close() -> bool {
+    Python::with_gil(|py| -> PyResult<bool> {
+        let module = PyModule::import(py, "mtga_app")?;
+        let getter = module.getattr("should_minimize_to_tray_on_close")?;
+        getter.call0()?.extract::<bool>()
+    })
+    .unwrap_or(false)
+}
+
+fn show_main_window(app_handle: &AppHandle) {
+    let Some(main) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
+        log::warn!(target: "tray", "label=main_window_missing");
+        return;
+    };
+    let _ = main.set_skip_taskbar(false);
+    if let Err(error) = main.show() {
+        log::warn!(target: "tray", "label=main_show_failed error={}", error);
+        return;
+    }
+    let _ = main.unminimize();
+    let _ = main.set_focus();
+    let _ = set_tray_visible(app_handle, false);
+}
+
+fn set_tray_visible(app_handle: &AppHandle, visible: bool) -> bool {
+    let Some(tray) = app_handle.tray_by_id(TRAY_ID) else {
+        log::warn!(target: "tray", "label=tray_icon_missing");
+        return false;
+    };
+    if let Err(error) = tray.set_visible(visible) {
+        log::warn!(target: "tray", "label=tray_visibility_failed error={}", error);
+        return false;
+    }
+    true
+}
+
+fn request_shutdown(app_handle: AppHandle, shutdown_started: &AtomicBool) {
+    if shutdown_started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    spawn_shutdown(app_handle);
+}
+
 fn spawn_shutdown(app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         stop_proxy_on_close();
@@ -584,6 +636,47 @@ fn inject_runtime_tag(window: &tauri::WebviewWindow) {
     }
 }
 
+fn setup_tray(app: &mut tauri::App, shutdown_started: Arc<AtomicBool>) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, TRAY_SHOW_MENU_ID, "显示主窗口", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_QUIT_MENU_ID, "退出 MTGA", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
+        .menu(&menu)
+        .tooltip("MTGA")
+        .show_menu_on_left_click(false);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+    let tray = tray_builder.build(app)?;
+    tray.set_visible(false)?;
+
+    app.handle()
+        .on_tray_icon_event(|app_handle, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(app_handle),
+            _ => {}
+        });
+
+    app.handle().on_menu_event(move |app_handle, event| {
+        let id: &str = event.id().as_ref();
+        if id == TRAY_SHOW_MENU_ID {
+            show_main_window(app_handle);
+        } else if id == TRAY_QUIT_MENU_ID {
+            request_shutdown(app_handle.clone(), &shutdown_started);
+        }
+    });
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if !cfg!(debug_assertions) && std::env::var("MTGA_RUNTIME").is_err() {
@@ -596,6 +689,7 @@ pub fn run() {
     let shutdown_started = Arc::new(AtomicBool::new(false));
 
     let backend_init_started = Arc::new(AtomicBool::new(false));
+    let setup_shutdown_started = Arc::clone(&shutdown_started);
 
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -636,14 +730,15 @@ pub fn run() {
                             .build(),
                     )?;
                 }
-                if let Some(window) = app.get_webview_window("main") {
+                setup_tray(app, Arc::clone(&setup_shutdown_started))?;
+                if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                     inject_runtime_tag(&window);
                     let listener_handle = app.handle().clone();
                     window.listen("mtga:frontend-ready", move |_event| {
                         mark_frontend_ready(&listener_handle);
                     });
                 }
-                if let Some(splash) = app.get_webview_window("splash") {
+                if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
                     let listener_handle = app.handle().clone();
                     splash.listen("mtga:overlay-ready", move |_event| {
                         start_backend_init(
@@ -670,15 +765,30 @@ pub fn run() {
             let shutdown_started = Arc::clone(&shutdown_started);
             move |window, event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
-                    if window.label() == "splash" && MAIN_WINDOW_SHOWN.load(Ordering::SeqCst) {
+                    if window.label() == SPLASH_WINDOW_LABEL
+                        && MAIN_WINDOW_SHOWN.load(Ordering::SeqCst)
+                    {
                         return;
                     }
-                    if shutdown_started.swap(true, Ordering::SeqCst) {
+                    if window.label() == MAIN_WINDOW_LABEL
+                        && MAIN_WINDOW_SHOWN.load(Ordering::SeqCst)
+                        && should_minimize_to_tray_on_close()
+                    {
+                        api.prevent_close();
+                        if !set_tray_visible(window.app_handle(), true) {
+                            let app_handle = window.app_handle().clone();
+                            request_shutdown(app_handle, &shutdown_started);
+                            return;
+                        }
+                        if let Err(error) = window.hide() {
+                            log::warn!(target: "tray", "label=main_hide_failed error={}", error);
+                        }
+                        let _ = window.set_skip_taskbar(true);
                         return;
                     }
                     api.prevent_close();
                     let app_handle = window.app_handle().clone();
-                    spawn_shutdown(app_handle);
+                    request_shutdown(app_handle, &shutdown_started);
                 }
             }
         })
