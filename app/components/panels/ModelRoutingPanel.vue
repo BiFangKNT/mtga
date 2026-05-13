@@ -1483,8 +1483,8 @@ watch(
             <button
               v-for="target in targets"
               :key="target.id"
-              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-              :class="selectedTargetId === target.id ? 'bg-amber-100/70' : ''"
+              class="w-full cursor-pointer px-4 py-3 text-left"
+              :class="selectedTargetId === target.id ? 'bg-amber-100/70' : 'hover:bg-amber-50/70'"
               @click="selectedTargetId = target.id"
             >
               <div class="flex items-start justify-between gap-3">
@@ -1627,8 +1627,10 @@ watch(
             <button
               v-for="model in publishedModels"
               :key="model.name"
-              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-              :class="selectedPublishedName === model.name ? 'bg-amber-100/70' : ''"
+              class="w-full cursor-pointer px-4 py-3 text-left"
+              :class="
+                selectedPublishedName === model.name ? 'bg-amber-100/70' : 'hover:bg-amber-50/70'
+              "
               @click="selectedPublishedName = model.name"
             >
               <div class="flex items-start justify-between gap-3">
@@ -1779,8 +1781,8 @@ watch(
             <button
               v-for="pool in failoverPools"
               :key="pool.id"
-              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-              :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : ''"
+              class="w-full cursor-pointer px-4 py-3 text-left"
+              :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : 'hover:bg-amber-50/70'"
               @click="selectedPoolId = pool.id"
             >
               <div class="flex items-start justify-between gap-3">
