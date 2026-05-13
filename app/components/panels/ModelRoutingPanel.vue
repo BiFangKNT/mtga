@@ -347,6 +347,8 @@ const resetTargetDiscovery = () => {
 };
 const hasTargetReference = (targetId: string) =>
   publishedModels.value.some((model) => model.primary_target_id === targetId);
+const hasPoolReference = (poolId: string) =>
+  publishedModels.value.some((model) => model.failover_pool_id === poolId);
 const deleteConfirmOpen = ref(false);
 const pendingDeleteKind = ref<"target" | "published" | "pool" | null>(null);
 const pendingDeleteLabel = computed(() => {
@@ -377,7 +379,7 @@ const pendingDeleteDescription = computed(() => {
   if (pendingDeleteKind.value === "published") {
     return "删除后该模型名称不会再暴露给下游 /models。";
   }
-  return "删除后引用该故障池的发布模型会自动改为不启用故障转移。";
+  return "已被发布模型引用的故障池不能删除。";
 });
 const openDeleteConfirm = (kind: "target" | "published" | "pool") => {
   if (kind === "target") {
@@ -393,8 +395,15 @@ const openDeleteConfirm = (kind: "target" | "published" | "pool") => {
   if (kind === "published" && !selectedPublishedModel.value) {
     return;
   }
-  if (kind === "pool" && !selectedPool.value) {
-    return;
+  if (kind === "pool") {
+    const pool = selectedPool.value;
+    if (!pool) {
+      return;
+    }
+    if (hasPoolReference(pool.id)) {
+      store.appendLog("删除故障池失败：仍有发布模型引用该故障池");
+      return;
+    }
   }
   pendingDeleteKind.value = kind;
   deleteConfirmOpen.value = true;
@@ -747,21 +756,18 @@ const deleteSelectedPool = async () => {
   if (!pool || saving.value) {
     return false;
   }
+  if (hasPoolReference(pool.id)) {
+    store.appendLog("删除故障池失败：仍有发布模型引用该故障池");
+    return false;
+  }
   const previousPools = [...failoverPools.value];
-  const previousPublishedModels = publishedModels.value.map((model) => ({ ...model }));
   const previousSelectedPoolId = selectedPoolId.value;
-  publishedModels.value.forEach((model) => {
-    if (model.failover_pool_id === pool.id) {
-      model.failover_pool_id = null;
-    }
-  });
   failoverPools.value = failoverPools.value.filter((item) => item.id !== pool.id);
   selectedPoolId.value = failoverPools.value[0]?.id || "";
   if (await persistConfig(`已删除故障池: ${pool.id}`)) {
     return true;
   }
   failoverPools.value = previousPools;
-  publishedModels.value = previousPublishedModels;
   selectedPoolId.value = previousSelectedPoolId;
   return false;
 };
