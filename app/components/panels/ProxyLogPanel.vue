@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
                         </div>
                         <div
                           v-if="routingEventMeta(event).detail"
-                          class="mt-0.5 break-words font-mono text-[11px] text-slate-500"
+                          class="mt-0.5 wrap-break-word font-mono text-[11px] text-slate-500"
                         >
                           {{ routingEventMeta(event).detail }}
                         </div>
@@ -546,14 +546,14 @@ onBeforeUnmount(() => {
                   <section class="min-w-0">
                     <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Request</h4>
                     <pre
-                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 [overflow-wrap:anywhere] custom-scrollbar"
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 wrap-anywhere custom-scrollbar"
                       >{{ formatBody(selectedTrace.request_body) || "-" }}</pre
                     >
                   </section>
                   <section class="min-w-0">
                     <h4 class="mb-2 text-xs font-bold uppercase text-slate-400">Response</h4>
                     <pre
-                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 [overflow-wrap:anywhere] custom-scrollbar"
+                      class="max-h-[360px] w-full max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200/70 bg-white/70 p-3 text-xs text-slate-700 shadow-inner shadow-slate-200/40 wrap-anywhere custom-scrollbar"
                       >{{ formatBody(selectedTrace.response_body) || "-" }}</pre
                     >
                   </section>
@@ -569,12 +569,12 @@ onBeforeUnmount(() => {
                           <span class="font-bold text-slate-700">{{ event.kind }}</span>
                           <span class="font-mono text-slate-400">{{ formatTime(event.at) }}</span>
                         </div>
-                        <div v-if="event.message" class="mt-1 break-words text-slate-600">
+                        <div v-if="event.message" class="mt-1 wrap-break-word text-slate-600">
                           {{ event.message }}
                         </div>
                         <pre
                           v-if="event.data"
-                          class="mt-2 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded bg-slate-100 p-2 text-[11px] text-slate-700 [overflow-wrap:anywhere] custom-scrollbar"
+                          class="mt-2 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap rounded bg-slate-100 p-2 text-[11px] text-slate-700 wrap-anywhere custom-scrollbar"
                           >{{ stringifyValue(event.data) }}</pre
                         >
                       </div>
