@@ -1034,7 +1034,7 @@ watch(
             v-if="routePreviewFailoverLabel"
             class="rounded-lg border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-xs font-semibold text-slate-600"
           >
-            故障转移: {{ routePreviewFailoverLabel }}
+            已启用的故障转移池: {{ routePreviewFailoverLabel }}
           </span>
           <span
             v-for="warning in routeWarnings"
