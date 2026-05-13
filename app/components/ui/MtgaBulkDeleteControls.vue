@@ -12,6 +12,7 @@ const props = withDefaults(
     deleteText?: string;
     exitText?: string;
     batchDeleteText?: string;
+    buttonWidthClass?: string;
   }>(),
   {
     variant: "button",
@@ -25,6 +26,7 @@ const props = withDefaults(
     deleteText: "删除",
     exitText: "退出删除",
     batchDeleteText: "批量删除",
+    buttonWidthClass: "",
   },
 );
 
@@ -40,6 +42,7 @@ const toggleDisabled = computed(() => props.busy || (!props.active && !hasItems.
 const buttonClass = computed(() => [
   "btn btn-outline border-rose-200 text-rose-600 hover:border-rose-300 hover:bg-rose-50",
   props.size === "xs" ? "btn-xs rounded-lg" : "btn-sm rounded-xl",
+  props.buttonWidthClass,
 ]);
 const selectedLabel = computed(() => `已选择 ${props.selectedCount} ${props.itemLabel}`);
 

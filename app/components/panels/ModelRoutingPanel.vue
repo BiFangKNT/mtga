@@ -1320,45 +1320,52 @@ watch(
           <div class="flex shrink-0 flex-wrap justify-end gap-2">
             <template v-if="activeSection === 'targets'">
               <button
-                class="btn btn-xs btn-primary rounded-lg"
+                class="btn btn-xs btn-primary min-w-12 rounded-lg"
                 :disabled="targetDeleteMode"
                 @click="openTargetEditor('add')"
               >
                 新增
               </button>
               <button
-                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                class="btn btn-xs min-w-12 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :disabled="targetDeleteMode || !selectedTarget"
                 @click="openTargetEditor('edit')"
               >
                 编辑
               </button>
               <button
-                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
-                :class="targetTesting ? 'loading' : ''"
+                class="btn btn-xs min-w-12 rounded-lg border border-slate-200 bg-white text-slate-700 transition-[background-color,border-color,color,width] hover:border-amber-300 hover:bg-amber-50"
+                :class="targetTesting ? 'w-19' : 'w-12'"
+                :aria-busy="targetTesting"
                 :disabled="targetDeleteMode || !selectedTarget || targetTesting"
                 @click="testSelectedTarget"
               >
-                测活
+                <span
+                  v-if="targetTesting"
+                  class="h-3 w-3 animate-spin rounded-full border-2 border-amber-500/25 border-t-amber-600"
+                  aria-hidden="true"
+                ></span>
+                <span>{{ targetTesting ? "测活中" : "测活" }}</span>
               </button>
               <MtgaBulkDeleteControls
                 v-model:active="targetDeleteMode"
                 :busy="saving"
                 size="xs"
                 :total-count="targets.length"
+                button-width-class="min-w-12"
                 @update:active="clearDeleteSelection('targets')"
               />
             </template>
             <template v-else-if="activeSection === 'published'">
               <button
-                class="btn btn-xs btn-primary rounded-lg"
+                class="btn btn-xs btn-primary min-w-12 rounded-lg"
                 :disabled="publishedDeleteMode || !targets.length"
                 @click="openPublishedEditor('add')"
               >
                 新增
               </button>
               <button
-                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                class="btn btn-xs min-w-12 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :disabled="publishedDeleteMode || !selectedPublishedModel"
                 @click="openPublishedEditor('edit')"
               >
@@ -1369,19 +1376,20 @@ watch(
                 :busy="saving"
                 size="xs"
                 :total-count="publishedModels.length"
+                button-width-class="min-w-12"
                 @update:active="clearDeleteSelection('published')"
               />
             </template>
             <template v-else>
               <button
-                class="btn btn-xs btn-primary rounded-lg"
+                class="btn btn-xs btn-primary min-w-12 rounded-lg"
                 :disabled="poolDeleteMode || !targets.length"
                 @click="openPoolEditor('add')"
               >
                 新增
               </button>
               <button
-                class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
+                class="btn btn-xs min-w-12 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :disabled="poolDeleteMode || !selectedPool"
                 @click="openPoolEditor('edit')"
               >
@@ -1392,6 +1400,7 @@ watch(
                 :busy="saving"
                 size="xs"
                 :total-count="failoverPools.length"
+                button-width-class="min-w-12"
                 @update:active="clearDeleteSelection('failover')"
               />
             </template>
