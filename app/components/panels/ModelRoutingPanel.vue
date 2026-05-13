@@ -32,6 +32,12 @@ type RouteView = "overview" | RouteSectionId;
 const selectedTargetId = ref("");
 const selectedPublishedName = ref("");
 const selectedPoolId = ref("");
+const targetDeleteMode = ref(false);
+const publishedDeleteMode = ref(false);
+const poolDeleteMode = ref(false);
+const selectedTargetIds = ref<string[]>([]);
+const selectedPublishedNames = ref<string[]>([]);
+const selectedPoolIds = ref<string[]>([]);
 const editorOpen = ref(false);
 const settingsOpen = ref(false);
 const editorKind = ref<"target" | "published" | "pool">("target");
@@ -86,6 +92,27 @@ const selectedPublishedModel = computed(() =>
 const selectedPool = computed(() =>
   failoverPools.value.find((pool) => pool.id === selectedPoolId.value),
 );
+const selectedTargetIdSet = computed(() => new Set(selectedTargetIds.value));
+const selectedPublishedNameSet = computed(() => new Set(selectedPublishedNames.value));
+const selectedPoolIdSet = computed(() => new Set(selectedPoolIds.value));
+const allTargetsSelected = computed(() => {
+  if (!targets.value.length) {
+    return false;
+  }
+  return targets.value.every((target) => selectedTargetIdSet.value.has(target.id));
+});
+const allPublishedSelected = computed(() => {
+  if (!publishedModels.value.length) {
+    return false;
+  }
+  return publishedModels.value.every((model) => selectedPublishedNameSet.value.has(model.name));
+});
+const allPoolsSelected = computed(() => {
+  if (!failoverPools.value.length) {
+    return false;
+  }
+  return failoverPools.value.every((pool) => selectedPoolIdSet.value.has(pool.id));
+});
 
 const targetOptions = computed(() =>
   targets.value.map((target) => ({
@@ -345,13 +372,71 @@ const resetTargetDiscovery = () => {
   targetDiscoveryStrategy.value = "";
   targetDiscoveryScope.value = "";
 };
+const clearDeleteSelection = (kind: RouteSectionId) => {
+  if (kind === "targets") {
+    selectedTargetIds.value = [];
+  } else if (kind === "published") {
+    selectedPublishedNames.value = [];
+  } else {
+    selectedPoolIds.value = [];
+  }
+};
+const setSectionDeleteMode = (kind: RouteSectionId, active: boolean) => {
+  if (kind === "targets") {
+    targetDeleteMode.value = active;
+  } else if (kind === "published") {
+    publishedDeleteMode.value = active;
+  } else {
+    poolDeleteMode.value = active;
+  }
+  clearDeleteSelection(kind);
+};
+const setItemSelected = (values: { value: string[] }, value: string, checked: boolean) => {
+  const current = new Set(values.value);
+  if (checked) {
+    current.add(value);
+  } else {
+    current.delete(value);
+  }
+  values.value = Array.from(current);
+};
+const setTargetsSelected = (checked: boolean) => {
+  selectedTargetIds.value = checked ? targets.value.map((target) => target.id) : [];
+};
+const setPublishedSelected = (checked: boolean) => {
+  selectedPublishedNames.value = checked ? publishedModels.value.map((model) => model.name) : [];
+};
+const setPoolsSelected = (checked: boolean) => {
+  selectedPoolIds.value = checked ? failoverPools.value.map((pool) => pool.id) : [];
+};
+const toggleTargetSelection = (targetId: string, checked: boolean) => {
+  setItemSelected(selectedTargetIds, targetId, checked);
+};
+const togglePublishedSelection = (modelName: string, checked: boolean) => {
+  setItemSelected(selectedPublishedNames, modelName, checked);
+};
+const togglePoolSelection = (poolId: string, checked: boolean) => {
+  setItemSelected(selectedPoolIds, poolId, checked);
+};
 const hasTargetReference = (targetId: string) =>
   publishedModels.value.some((model) => model.primary_target_id === targetId);
 const hasPoolReference = (poolId: string) =>
   publishedModels.value.some((model) => model.failover_pool_id === poolId);
 const deleteConfirmOpen = ref(false);
 const pendingDeleteKind = ref<"target" | "published" | "pool" | null>(null);
+const pendingDeleteIds = ref<string[]>([]);
 const pendingDeleteLabel = computed(() => {
+  if (pendingDeleteIds.value.length > 1) {
+    return `${pendingDeleteIds.value.length} 项`;
+  }
+  if (pendingDeleteIds.value.length === 1) {
+    const pendingId = pendingDeleteIds.value[0];
+    if (pendingDeleteKind.value === "target") {
+      const target = targets.value.find((item) => item.id === pendingId);
+      return target?.display_name || pendingId;
+    }
+    return pendingId;
+  }
   if (pendingDeleteKind.value === "target" && selectedTarget.value) {
     return selectedTarget.value.display_name || selectedTarget.value.id;
   }
@@ -365,45 +450,70 @@ const pendingDeleteLabel = computed(() => {
 });
 const pendingDeleteTitle = computed(() => {
   if (pendingDeleteKind.value === "target") {
-    return "删除目标";
+    return pendingDeleteIds.value.length > 1 ? "批量删除目标" : "删除目标";
   }
   if (pendingDeleteKind.value === "published") {
-    return "删除发布模型";
+    return pendingDeleteIds.value.length > 1 ? "批量删除发布模型" : "删除发布模型";
   }
-  return "删除故障池";
+  return pendingDeleteIds.value.length > 1 ? "批量删除故障池" : "删除故障池";
 });
 const pendingDeleteDescription = computed(() => {
   if (pendingDeleteKind.value === "target") {
+    if (pendingDeleteIds.value.length > 1) {
+      return "目标删除后会从故障池成员中移除。已被发布模型引用的目标不能删除。";
+    }
     return "目标删除后会从故障池成员中移除。已被发布模型引用的目标不能删除。";
   }
   if (pendingDeleteKind.value === "published") {
+    if (pendingDeleteIds.value.length > 1) {
+      return "删除后这些模型名称不会再暴露给下游 /models。";
+    }
     return "删除后该模型名称不会再暴露给下游 /models。";
   }
   return "已被发布模型引用的故障池不能删除。";
 });
-const openDeleteConfirm = (kind: "target" | "published" | "pool") => {
+const openDeleteConfirm = (kind: "target" | "published" | "pool", ids?: string[]) => {
+  const pendingIds = Array.from(new Set((ids || []).map((id) => id.trim()).filter(Boolean)));
   if (kind === "target") {
-    const target = selectedTarget.value;
-    if (!target) {
+    const targetIds = pendingIds.length
+      ? pendingIds
+      : selectedTarget.value
+        ? [selectedTarget.value.id]
+        : [];
+    if (!targetIds.length) {
       return;
     }
-    if (hasTargetReference(target.id)) {
+    if (targetIds.some((targetId) => hasTargetReference(targetId))) {
       store.appendLog("删除目标失败：仍有发布模型引用该目标");
       return;
     }
+    pendingDeleteIds.value = targetIds;
   }
-  if (kind === "published" && !selectedPublishedModel.value) {
-    return;
-  }
-  if (kind === "pool") {
-    const pool = selectedPool.value;
-    if (!pool) {
+  if (kind === "published") {
+    const modelNames = pendingIds.length
+      ? pendingIds
+      : selectedPublishedModel.value
+        ? [selectedPublishedModel.value.name]
+        : [];
+    if (!modelNames.length) {
       return;
     }
-    if (hasPoolReference(pool.id)) {
+    pendingDeleteIds.value = modelNames;
+  }
+  if (kind === "pool") {
+    const poolIds = pendingIds.length
+      ? pendingIds
+      : selectedPool.value
+        ? [selectedPool.value.id]
+        : [];
+    if (!poolIds.length) {
+      return;
+    }
+    if (poolIds.some((poolId) => hasPoolReference(poolId))) {
       store.appendLog("删除故障池失败：仍有发布模型引用该故障池");
       return;
     }
+    pendingDeleteIds.value = poolIds;
   }
   pendingDeleteKind.value = kind;
   deleteConfirmOpen.value = true;
@@ -411,6 +521,7 @@ const openDeleteConfirm = (kind: "target" | "published" | "pool") => {
 const closeDeleteConfirm = () => {
   deleteConfirmOpen.value = false;
   pendingDeleteKind.value = null;
+  pendingDeleteIds.value = [];
 };
 const openSettings = () => {
   settingsForm.mtga_auth_key = store.mtgaAuthKey.value;
@@ -705,13 +816,18 @@ const handleEditorSave = () => {
   }
 };
 
-const deleteSelectedTarget = async () => {
-  const target = selectedTarget.value;
-  if (!target || saving.value) {
+const deleteTargetsByIds = async (targetIds: string[]) => {
+  const normalizedIds = Array.from(new Set(targetIds.filter(Boolean)));
+  if (!normalizedIds.length || saving.value) {
     return false;
   }
-  if (hasTargetReference(target.id)) {
+  if (normalizedIds.some((targetId) => hasTargetReference(targetId))) {
     store.appendLog("删除目标失败：仍有发布模型引用该目标");
+    return false;
+  }
+  const deletingSet = new Set(normalizedIds);
+  const deletingTargets = targets.value.filter((target) => deletingSet.has(target.id));
+  if (!deletingTargets.length) {
     return false;
   }
   const previousTargets = [...targets.value];
@@ -720,12 +836,22 @@ const deleteSelectedTarget = async () => {
     members: pool.members.map((member) => ({ ...member })),
   }));
   const previousSelectedTargetId = selectedTargetId.value;
-  targets.value = targets.value.filter((item) => item.id !== target.id);
+  targets.value = targets.value.filter((item) => !deletingSet.has(item.id));
   failoverPools.value.forEach((pool) => {
-    pool.members = pool.members.filter((member) => member.target_id !== target.id);
+    pool.members = pool.members.filter((member) => !deletingSet.has(member.target_id));
   });
   selectedTargetId.value = targets.value[0]?.id || "";
-  if (await persistConfig(`已删除目标: ${target.display_name || target.id}`)) {
+  const successMessage =
+    deletingTargets.length === 1
+      ? `已删除目标: ${deletingTargets[0]?.display_name || deletingTargets[0]?.id || ""}`
+      : `已删除目标: ${deletingTargets.length} 项`;
+  if (await persistConfig(successMessage)) {
+    selectedTargetIds.value = selectedTargetIds.value.filter(
+      (targetId) => !deletingSet.has(targetId),
+    );
+    if (!targets.value.length) {
+      setSectionDeleteMode("targets", false);
+    }
     return true;
   }
   targets.value = previousTargets;
@@ -734,16 +860,31 @@ const deleteSelectedTarget = async () => {
   return false;
 };
 
-const deleteSelectedPublished = async () => {
-  const model = selectedPublishedModel.value;
-  if (!model || saving.value) {
+const deletePublishedByNames = async (modelNames: string[]) => {
+  const normalizedNames = Array.from(new Set(modelNames.filter(Boolean)));
+  if (!normalizedNames.length || saving.value) {
+    return false;
+  }
+  const deletingSet = new Set(normalizedNames);
+  const deletingModels = publishedModels.value.filter((model) => deletingSet.has(model.name));
+  if (!deletingModels.length) {
     return false;
   }
   const previousPublishedModels = [...publishedModels.value];
   const previousSelectedPublishedName = selectedPublishedName.value;
-  publishedModels.value = publishedModels.value.filter((item) => item.name !== model.name);
+  publishedModels.value = publishedModels.value.filter((item) => !deletingSet.has(item.name));
   selectedPublishedName.value = publishedModels.value[0]?.name || "";
-  if (await persistConfig(`已删除发布模型: ${model.name}`)) {
+  const successMessage =
+    deletingModels.length === 1
+      ? `已删除发布模型: ${deletingModels[0]?.name || ""}`
+      : `已删除发布模型: ${deletingModels.length} 项`;
+  if (await persistConfig(successMessage)) {
+    selectedPublishedNames.value = selectedPublishedNames.value.filter(
+      (modelName) => !deletingSet.has(modelName),
+    );
+    if (!publishedModels.value.length) {
+      setSectionDeleteMode("published", false);
+    }
     return true;
   }
   publishedModels.value = previousPublishedModels;
@@ -751,20 +892,33 @@ const deleteSelectedPublished = async () => {
   return false;
 };
 
-const deleteSelectedPool = async () => {
-  const pool = selectedPool.value;
-  if (!pool || saving.value) {
+const deletePoolsByIds = async (poolIds: string[]) => {
+  const normalizedIds = Array.from(new Set(poolIds.filter(Boolean)));
+  if (!normalizedIds.length || saving.value) {
     return false;
   }
-  if (hasPoolReference(pool.id)) {
+  if (normalizedIds.some((poolId) => hasPoolReference(poolId))) {
     store.appendLog("删除故障池失败：仍有发布模型引用该故障池");
+    return false;
+  }
+  const deletingSet = new Set(normalizedIds);
+  const deletingPools = failoverPools.value.filter((pool) => deletingSet.has(pool.id));
+  if (!deletingPools.length) {
     return false;
   }
   const previousPools = [...failoverPools.value];
   const previousSelectedPoolId = selectedPoolId.value;
-  failoverPools.value = failoverPools.value.filter((item) => item.id !== pool.id);
+  failoverPools.value = failoverPools.value.filter((item) => !deletingSet.has(item.id));
   selectedPoolId.value = failoverPools.value[0]?.id || "";
-  if (await persistConfig(`已删除故障池: ${pool.id}`)) {
+  const successMessage =
+    deletingPools.length === 1
+      ? `已删除故障池: ${deletingPools[0]?.id || ""}`
+      : `已删除故障池: ${deletingPools.length} 项`;
+  if (await persistConfig(successMessage)) {
+    selectedPoolIds.value = selectedPoolIds.value.filter((poolId) => !deletingSet.has(poolId));
+    if (!failoverPools.value.length) {
+      setSectionDeleteMode("failover", false);
+    }
     return true;
   }
   failoverPools.value = previousPools;
@@ -777,12 +931,13 @@ const confirmDelete = async () => {
   if (!kind || saving.value) {
     return;
   }
+  const ids = pendingDeleteIds.value;
   const ok =
     kind === "target"
-      ? await deleteSelectedTarget()
+      ? await deleteTargetsByIds(ids)
       : kind === "published"
-        ? await deleteSelectedPublished()
-        : await deleteSelectedPool();
+        ? await deletePublishedByNames(ids)
+        : await deletePoolsByIds(ids);
   if (ok) {
     closeDeleteConfirm();
   }
@@ -854,6 +1009,11 @@ const togglePoolMember = (targetId: string, checked: boolean) => {
 watch(
   targets,
   (nextTargets) => {
+    const validIds = new Set(nextTargets.map((target) => target.id));
+    selectedTargetIds.value = selectedTargetIds.value.filter((targetId) => validIds.has(targetId));
+    if (!nextTargets.length && targetDeleteMode.value) {
+      setSectionDeleteMode("targets", false);
+    }
     if (
       !selectedTargetId.value ||
       !nextTargets.some((target) => target.id === selectedTargetId.value)
@@ -867,6 +1027,13 @@ watch(
 watch(
   publishedModels,
   (nextModels) => {
+    const validNames = new Set(nextModels.map((model) => model.name));
+    selectedPublishedNames.value = selectedPublishedNames.value.filter((modelName) =>
+      validNames.has(modelName),
+    );
+    if (!nextModels.length && publishedDeleteMode.value) {
+      setSectionDeleteMode("published", false);
+    }
     if (
       !selectedPublishedName.value ||
       !nextModels.some((model) => model.name === selectedPublishedName.value)
@@ -880,6 +1047,11 @@ watch(
 watch(
   failoverPools,
   (nextPools) => {
+    const validIds = new Set(nextPools.map((pool) => pool.id));
+    selectedPoolIds.value = selectedPoolIds.value.filter((poolId) => validIds.has(poolId));
+    if (!nextPools.length && poolDeleteMode.value) {
+      setSectionDeleteMode("failover", false);
+    }
     if (!selectedPoolId.value || !nextPools.some((pool) => pool.id === selectedPoolId.value)) {
       selectedPoolId.value = nextPools[0]?.id || "";
     }
@@ -1147,12 +1319,16 @@ watch(
           </div>
           <div class="flex shrink-0 flex-wrap justify-end gap-2">
             <template v-if="activeSection === 'targets'">
-              <button class="btn btn-xs btn-primary rounded-lg" @click="openTargetEditor('add')">
+              <button
+                class="btn btn-xs btn-primary rounded-lg"
+                :disabled="targetDeleteMode"
+                @click="openTargetEditor('add')"
+              >
                 新增
               </button>
               <button
                 class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
-                :disabled="!selectedTarget"
+                :disabled="targetDeleteMode || !selectedTarget"
                 @click="openTargetEditor('edit')"
               >
                 编辑
@@ -1160,64 +1336,64 @@ watch(
               <button
                 class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
                 :class="targetTesting ? 'loading' : ''"
-                :disabled="!selectedTarget || targetTesting"
+                :disabled="targetDeleteMode || !selectedTarget || targetTesting"
                 @click="testSelectedTarget"
               >
                 测活
               </button>
-              <button
-                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
-                :disabled="!selectedTarget || saving"
-                @click="openDeleteConfirm('target')"
-              >
-                删除
-              </button>
+              <MtgaBulkDeleteControls
+                v-model:active="targetDeleteMode"
+                :busy="saving"
+                size="xs"
+                :total-count="targets.length"
+                @update:active="clearDeleteSelection('targets')"
+              />
             </template>
             <template v-else-if="activeSection === 'published'">
               <button
                 class="btn btn-xs btn-primary rounded-lg"
-                :disabled="!targets.length"
+                :disabled="publishedDeleteMode || !targets.length"
                 @click="openPublishedEditor('add')"
               >
                 新增
               </button>
               <button
                 class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
-                :disabled="!selectedPublishedModel"
+                :disabled="publishedDeleteMode || !selectedPublishedModel"
                 @click="openPublishedEditor('edit')"
               >
                 编辑
               </button>
-              <button
-                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
-                :disabled="!selectedPublishedModel || saving"
-                @click="openDeleteConfirm('published')"
-              >
-                删除
-              </button>
+              <MtgaBulkDeleteControls
+                v-model:active="publishedDeleteMode"
+                :busy="saving"
+                size="xs"
+                :total-count="publishedModels.length"
+                @update:active="clearDeleteSelection('published')"
+              />
             </template>
             <template v-else>
               <button
                 class="btn btn-xs btn-primary rounded-lg"
-                :disabled="!targets.length"
+                :disabled="poolDeleteMode || !targets.length"
                 @click="openPoolEditor('add')"
               >
                 新增
               </button>
               <button
                 class="btn btn-xs rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-300 hover:bg-amber-50"
-                :disabled="!selectedPool"
+                :disabled="poolDeleteMode || !selectedPool"
                 @click="openPoolEditor('edit')"
               >
                 编辑
               </button>
-              <button
-                class="btn btn-xs rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
-                :disabled="!selectedPool || saving"
-                @click="openDeleteConfirm('pool')"
-              >
-                删除
-              </button>
+              <MtgaBulkDeleteControls
+                v-model:active="poolDeleteMode"
+                :busy="saving"
+                size="xs"
+                :total-count="failoverPools.length"
+                @update:active="clearDeleteSelection('failover')"
+              />
             </template>
           </div>
         </div>
@@ -1225,31 +1401,102 @@ watch(
 
       <div class="min-h-0 flex-1 overflow-auto custom-scrollbar">
         <div v-if="activeSection === 'targets'" class="divide-y divide-slate-200/70">
-          <button
-            v-for="target in targets"
-            :key="target.id"
-            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-            :class="selectedTargetId === target.id ? 'bg-amber-100/70' : ''"
-            @click="selectedTargetId = target.id"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="truncate text-sm font-bold text-slate-900">
-                  {{ target.display_name || target.id }}
+          <MtgaBulkDeleteControls
+            variant="selection"
+            :active="targetDeleteMode"
+            :all-selected="allTargetsSelected"
+            :busy="saving"
+            item-label="个目标"
+            :selected-count="selectedTargetIds.length"
+            :total-count="targets.length"
+            @delete-selected="openDeleteConfirm('target', selectedTargetIds)"
+            @select-all-change="setTargetsSelected"
+          />
+          <template v-if="targetDeleteMode">
+            <label
+              v-for="target in targets"
+              :key="target.id"
+              class="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/70"
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs mt-1 rounded border-slate-300 [--chkbg:var(--color-amber-500)] [--chkfg:white]"
+                :checked="selectedTargetIdSet.has(target.id)"
+                :disabled="saving"
+                @change="
+                  toggleTargetSelection(target.id, ($event.target as HTMLInputElement).checked)
+                "
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-bold text-slate-900">
+                      {{ target.display_name || target.id }}
+                    </div>
+                    <div class="mt-1 truncate font-mono text-xs text-slate-500">
+                      {{ target.id }}
+                    </div>
+                  </div>
+                  <span
+                    class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                  >
+                    {{ getProviderLabel(target.provider) }}
+                  </span>
                 </div>
-                <div class="mt-1 truncate font-mono text-xs text-slate-500">{{ target.id }}</div>
+                <div class="mt-2 grid gap-1 text-xs text-slate-500">
+                  <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
+                  <div class="truncate font-mono">{{ target.api_base }}</div>
+                </div>
               </div>
-              <span
-                class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs btn-circle h-7 min-h-7 w-7 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                :disabled="saving"
+                @click.stop.prevent="openDeleteConfirm('target', [target.id])"
               >
-                {{ getProviderLabel(target.provider) }}
-              </span>
-            </div>
-            <div class="mt-2 grid gap-1 text-xs text-slate-500">
-              <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
-              <div class="truncate font-mono">{{ target.api_base }}</div>
-            </div>
-          </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </label>
+          </template>
+          <template v-else>
+            <button
+              v-for="target in targets"
+              :key="target.id"
+              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+              :class="selectedTargetId === target.id ? 'bg-amber-100/70' : ''"
+              @click="selectedTargetId = target.id"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-bold text-slate-900">
+                    {{ target.display_name || target.id }}
+                  </div>
+                  <div class="mt-1 truncate font-mono text-xs text-slate-500">{{ target.id }}</div>
+                </div>
+                <span
+                  class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                >
+                  {{ getProviderLabel(target.provider) }}
+                </span>
+              </div>
+              <div class="mt-2 grid gap-1 text-xs text-slate-500">
+                <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
+                <div class="truncate font-mono">{{ target.api_base }}</div>
+              </div>
+            </button>
+          </template>
           <div
             v-if="!targets.length"
             class="flex flex-col items-center justify-center px-4 py-12 text-center"
@@ -1294,37 +1541,112 @@ watch(
         </div>
 
         <div v-else-if="activeSection === 'published'" class="divide-y divide-slate-200/70">
-          <button
-            v-for="model in publishedModels"
-            :key="model.name"
-            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-            :class="selectedPublishedName === model.name ? 'bg-amber-100/70' : ''"
-            @click="selectedPublishedName = model.name"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="truncate font-mono text-sm font-bold text-slate-900">
-                  {{ model.name }}
+          <MtgaBulkDeleteControls
+            variant="selection"
+            :active="publishedDeleteMode"
+            :all-selected="allPublishedSelected"
+            :busy="saving"
+            item-label="个模型"
+            :selected-count="selectedPublishedNames.length"
+            :total-count="publishedModels.length"
+            @delete-selected="openDeleteConfirm('published', selectedPublishedNames)"
+            @select-all-change="setPublishedSelected"
+          />
+          <template v-if="publishedDeleteMode">
+            <label
+              v-for="model in publishedModels"
+              :key="model.name"
+              class="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/70"
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs mt-1 rounded border-slate-300 [--chkbg:var(--color-amber-500)] [--chkfg:white]"
+                :checked="selectedPublishedNameSet.has(model.name)"
+                :disabled="saving"
+                @change="
+                  togglePublishedSelection(model.name, ($event.target as HTMLInputElement).checked)
+                "
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="truncate font-mono text-sm font-bold text-slate-900">
+                      {{ model.name }}
+                    </div>
+                    <div class="mt-1 truncate text-xs text-slate-500">
+                      主目标: {{ getTargetLabel(model.primary_target_id) }}
+                    </div>
+                  </div>
+                  <span
+                    class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold"
+                    :class="
+                      model.enabled
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-slate-200 bg-slate-100 text-slate-500'
+                    "
+                  >
+                    {{ model.enabled ? "启用" : "停用" }}
+                  </span>
                 </div>
-                <div class="mt-1 truncate text-xs text-slate-500">
-                  主目标: {{ getTargetLabel(model.primary_target_id) }}
+                <div class="mt-2 truncate font-mono text-xs text-slate-500">
+                  故障转移: {{ model.failover_pool_id || "-" }}
                 </div>
               </div>
-              <span
-                class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold"
-                :class="
-                  model.enabled
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-slate-200 bg-slate-100 text-slate-500'
-                "
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs btn-circle h-7 min-h-7 w-7 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                :disabled="saving"
+                @click.stop.prevent="openDeleteConfirm('published', [model.name])"
               >
-                {{ model.enabled ? "启用" : "停用" }}
-              </span>
-            </div>
-            <div class="mt-2 truncate font-mono text-xs text-slate-500">
-              故障转移: {{ model.failover_pool_id || "-" }}
-            </div>
-          </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </label>
+          </template>
+          <template v-else>
+            <button
+              v-for="model in publishedModels"
+              :key="model.name"
+              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+              :class="selectedPublishedName === model.name ? 'bg-amber-100/70' : ''"
+              @click="selectedPublishedName = model.name"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate font-mono text-sm font-bold text-slate-900">
+                    {{ model.name }}
+                  </div>
+                  <div class="mt-1 truncate text-xs text-slate-500">
+                    主目标: {{ getTargetLabel(model.primary_target_id) }}
+                  </div>
+                </div>
+                <span
+                  class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold"
+                  :class="
+                    model.enabled
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-slate-100 text-slate-500'
+                  "
+                >
+                  {{ model.enabled ? "启用" : "停用" }}
+                </span>
+              </div>
+              <div class="mt-2 truncate font-mono text-xs text-slate-500">
+                故障转移: {{ model.failover_pool_id || "-" }}
+              </div>
+            </button>
+          </template>
           <div
             v-if="!publishedModels.length"
             class="flex flex-col items-center justify-center px-4 py-12 text-center"
@@ -1375,33 +1697,106 @@ watch(
         </div>
 
         <div v-else class="divide-y divide-slate-200/70">
-          <button
-            v-for="pool in failoverPools"
-            :key="pool.id"
-            class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
-            :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : ''"
-            @click="selectedPoolId = pool.id"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="truncate font-mono text-sm font-bold text-slate-900">
-                  {{ pool.id }}
+          <MtgaBulkDeleteControls
+            variant="selection"
+            :active="poolDeleteMode"
+            :all-selected="allPoolsSelected"
+            :busy="saving"
+            item-label="个故障池"
+            :selected-count="selectedPoolIds.length"
+            :total-count="failoverPools.length"
+            @delete-selected="openDeleteConfirm('pool', selectedPoolIds)"
+            @select-all-change="setPoolsSelected"
+          />
+          <template v-if="poolDeleteMode">
+            <label
+              v-for="pool in failoverPools"
+              :key="pool.id"
+              class="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/70"
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs mt-1 rounded border-slate-300 [--chkbg:var(--color-amber-500)] [--chkfg:white]"
+                :checked="selectedPoolIdSet.has(pool.id)"
+                :disabled="saving"
+                @change="togglePoolSelection(pool.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="truncate font-mono text-sm font-bold text-slate-900">
+                      {{ pool.id }}
+                    </div>
+                    <div class="mt-1 truncate text-xs text-slate-500">
+                      成员: {{ pool.members.length }}
+                    </div>
+                  </div>
+                  <span
+                    class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600"
+                  >
+                    {{ pool.cooldown_seconds }}s
+                  </span>
                 </div>
-                <div class="mt-1 truncate text-xs text-slate-500">
-                  成员: {{ pool.members.length }}
+                <div class="mt-2 truncate text-xs text-slate-500">
+                  状态码 {{ pool.trigger_statuses.join(", ") }} ·
+                  {{
+                    pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-"
+                  }}
                 </div>
               </div>
-              <span
-                class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600"
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs btn-circle h-7 min-h-7 w-7 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                :disabled="saving"
+                @click.stop.prevent="openDeleteConfirm('pool', [pool.id])"
               >
-                {{ pool.cooldown_seconds }}s
-              </span>
-            </div>
-            <div class="mt-2 truncate text-xs text-slate-500">
-              状态码 {{ pool.trigger_statuses.join(", ") }} ·
-              {{ pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-" }}
-            </div>
-          </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </label>
+          </template>
+          <template v-else>
+            <button
+              v-for="pool in failoverPools"
+              :key="pool.id"
+              class="w-full cursor-pointer px-4 py-3 text-left hover:bg-amber-50/70"
+              :class="selectedPoolId === pool.id ? 'bg-amber-100/70' : ''"
+              @click="selectedPoolId = pool.id"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="truncate font-mono text-sm font-bold text-slate-900">
+                    {{ pool.id }}
+                  </div>
+                  <div class="mt-1 truncate text-xs text-slate-500">
+                    成员: {{ pool.members.length }}
+                  </div>
+                </div>
+                <span
+                  class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-600"
+                >
+                  {{ pool.cooldown_seconds }}s
+                </span>
+              </div>
+              <div class="mt-2 truncate text-xs text-slate-500">
+                状态码 {{ pool.trigger_statuses.join(", ") }} ·
+                {{
+                  pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-"
+                }}
+              </div>
+            </button>
+          </template>
           <div
             v-if="!failoverPools.length"
             class="flex flex-col items-center justify-center px-4 py-12 text-center"

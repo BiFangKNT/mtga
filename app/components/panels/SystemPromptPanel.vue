@@ -21,7 +21,6 @@ const sortedItems = computed(() => {
 });
 const selectedHashSet = computed(() => new Set(selectedHashes.value));
 const busy = computed(() => loading.value || deleting.value);
-const hasSelection = computed(() => selectedHashes.value.length > 0);
 const allSelected = computed(() => {
   if (!sortedItems.value.length) {
     return false;
@@ -68,20 +67,6 @@ const clearSelection = () => {
   selectedHashes.value = [];
 };
 
-const exitDeleteMode = () => {
-  deleteMode.value = false;
-  clearSelection();
-};
-
-const toggleDeleteMode = () => {
-  if (deleteMode.value) {
-    exitDeleteMode();
-    return;
-  }
-  deleteMode.value = true;
-  clearSelection();
-};
-
 const handleRowClick = (item: SystemPromptItem) => {
   if (deleteMode.value || busy.value) {
     return;
@@ -107,12 +92,8 @@ const handleItemSelectionChange = (hashValue: string, event: Event) => {
   setHashSelected(hashValue, target.checked);
 };
 
-const handleSelectAllChange = (event: Event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
-  }
-  if (target.checked) {
+const setAllSelected = (checked: boolean) => {
+  if (checked) {
     selectedHashes.value = sortedItems.value.map((item) => item.hash);
     return;
   }
@@ -201,7 +182,8 @@ watch(
     const validHashes = new Set(items.map((item) => item.hash));
     selectedHashes.value = selectedHashes.value.filter((hash) => validHashes.has(hash));
     if (!items.length && deleteMode.value) {
-      exitDeleteMode();
+      deleteMode.value = false;
+      clearSelection();
     }
   },
   { deep: true },
@@ -219,13 +201,12 @@ onMounted(() => {
       <p class="mtga-card-subtitle">收录系统提示词哈希记录并支持增量编辑</p>
     </div>
     <div class="flex items-center gap-2">
-      <button
-        class="btn btn-sm btn-outline rounded-xl border-rose-200 text-rose-600 hover:border-rose-300 hover:bg-rose-50"
-        :disabled="busy || (!deleteMode && sortedItems.length === 0)"
-        @click="toggleDeleteMode"
-      >
-        {{ deleteMode ? "退出删除" : "删除" }}
-      </button>
+      <MtgaBulkDeleteControls
+        v-model:active="deleteMode"
+        :busy="busy"
+        :total-count="sortedItems.length"
+        @update:active="clearSelection"
+      />
       <button
         class="btn btn-sm btn-outline rounded-xl border-slate-200 hover:border-amber-500 hover:bg-amber-50/50 hover:text-amber-600"
         :class="loading ? 'loading' : ''"
@@ -239,30 +220,17 @@ onMounted(() => {
 
   <div class="mt-4 space-y-2">
     <!-- 删除模式：全选栏 -->
-    <div
-      v-if="deleteMode && sortedItems.length > 0"
-      class="flex items-center gap-3 px-4 py-2 bg-slate-50/80 rounded-xl border border-slate-200/60 sticky top-0 z-10"
-    >
-      <div class="flex items-center">
-        <input
-          type="checkbox"
-          class="checkbox checkbox-xs rounded border-slate-300 [--chkbg:var(--color-amber-500)] [--chkfg:white]"
-          :checked="allSelected"
-          :disabled="busy"
-          @change="handleSelectAllChange"
-        />
-      </div>
-      <span class="text-xs text-slate-500 font-medium flex-1"
-        >已选择 {{ selectedHashes.length }} 条记录</span
-      >
-      <button
-        class="btn btn-ghost btn-xs h-7 min-h-7 rounded-lg text-rose-600 hover:bg-rose-50 px-2 font-medium"
-        :disabled="busy || !hasSelection"
-        @click="handleDeleteSelected"
-      >
-        批量删除
-      </button>
-    </div>
+    <MtgaBulkDeleteControls
+      variant="selection"
+      :active="deleteMode"
+      :all-selected="allSelected"
+      :busy="busy"
+      item-label="条记录"
+      :selected-count="selectedHashes.length"
+      :total-count="sortedItems.length"
+      @delete-selected="handleDeleteSelected"
+      @select-all-change="setAllSelected"
+    />
 
     <!-- 列表内容 -->
     <template v-if="deleteMode">
