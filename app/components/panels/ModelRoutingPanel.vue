@@ -623,6 +623,10 @@ const persistConfig = async (successMessage: string) => {
     const ok = await store.saveConfig();
     if (ok) {
       store.appendLog(successMessage);
+      const applied = await store.runProxyApplyCurrentConfig();
+      if (!applied) {
+        store.appendLog("配置已保存，但运行中代理仍可能使用旧模型路由");
+      }
       return true;
     }
     store.appendLog("保存模型路由失败");
