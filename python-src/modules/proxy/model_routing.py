@@ -14,9 +14,10 @@ from modules.proxy.proxy_config import (
     normalize_provider,
 )
 
-MODEL_ROUTING_SCHEMA_VERSION = 2
+MODEL_ROUTING_SCHEMA_VERSION = 3
 DEFAULT_FAILOVER_TRIGGER_STATUSES = (429,)
 DEFAULT_FAILOVER_COOLDOWN_SECONDS = 10
+TARGET_MODEL_KEY_SEPARATOR = "\0"
 
 
 @dataclass(frozen=True)
@@ -25,17 +26,22 @@ class ModelRoutingTarget:
     display_name: str
     provider: str
     api_base: str
-    upstream_model: str
+    upstream_models: tuple[str, ...]
     api_key: str
     middle_route: str
     model_discovery_strategy: str | None
     prompt_cache_enabled: bool
     request_body_patch: tuple[dict[str, Any], ...]
 
+    @property
+    def upstream_model(self) -> str:
+        return self.upstream_models[0] if self.upstream_models else ""
+
 
 @dataclass(frozen=True)
 class FailoverPoolMember:
     target_id: str
+    upstream_model: str
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,7 @@ class PublishedModel:
     name: str
     enabled: bool
     primary_target_id: str
+    primary_upstream_model: str
     failover_pool_id: str | None
 
 
@@ -77,6 +84,7 @@ class ModelRoutingConfig:
 class ResolvedRoute:
     published_model: PublishedModel
     primary_target: ModelRoutingTarget
+    primary_upstream_model: str
     failover_pool: FailoverPool | None
 
 
@@ -90,8 +98,13 @@ class RouteResolutionError:
 @dataclass(frozen=True)
 class TargetAttempt:
     target: ModelRoutingTarget
+    upstream_model: str
     index: int
     source: str
+
+    @property
+    def cooldown_key(self) -> str:
+        return make_target_model_key(self.target.id, self.upstream_model)
 
 
 class TargetCooldowns:
@@ -178,6 +191,74 @@ def _coerce_request_body_patch(value: Any) -> list[dict[str, Any]]:
     return patch
 
 
+def _coerce_text_list(value: Any) -> list[str]:
+    values: list[str] = []
+    raw_values = cast(list[Any], value) if isinstance(value, list) else [value]
+    for item in raw_values:
+        text = _coerce_text(item)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def make_target_model_key(target_id: str, upstream_model: str) -> str:
+    return f"{target_id}{TARGET_MODEL_KEY_SEPARATOR}{upstream_model}"
+
+
+def _target_model_exists(
+    targets: dict[str, dict[str, Any]],
+    target_id: str,
+    upstream_model: str,
+) -> bool:
+    target = targets.get(target_id)
+    if target is None:
+        return False
+    return upstream_model in set(cast(list[str], target["upstream_models"]))
+
+
+def _normalize_failover_members_for_targets(
+    members: list[dict[str, str]],
+    targets_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    normalized_members: list[dict[str, str]] = []
+    seen_member_keys: set[str] = set()
+    for member in members:
+        target = targets_by_id.get(member["target_id"])
+        if target is None:
+            continue
+        upstream_model = member.get("upstream_model") or target["upstream_model"]
+        if not _target_model_exists(targets_by_id, member["target_id"], upstream_model):
+            continue
+        member_key = make_target_model_key(member["target_id"], upstream_model)
+        if member_key in seen_member_keys:
+            continue
+        seen_member_keys.add(member_key)
+        normalized_members.append(
+            {
+                "target_id": member["target_id"],
+                "upstream_model": upstream_model,
+            }
+        )
+    return normalized_members
+
+
+def _normalize_published_model_target(
+    model: dict[str, Any],
+    targets_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    primary_target_id = model["primary_target_id"]
+    primary_target = targets_by_id.get(primary_target_id)
+    if primary_target is None:
+        return False
+    if not model["primary_upstream_model"]:
+        model["primary_upstream_model"] = primary_target["upstream_model"]
+    return _target_model_exists(
+        targets_by_id,
+        primary_target_id,
+        model["primary_upstream_model"],
+    )
+
+
 def _unique_identifier(
     requested: str,
     used: set[str],
@@ -207,7 +288,9 @@ def _normalize_target(raw_target: Any, *, index: int, used_ids: set[str]) -> dic
     )
     provider = normalize_provider(_coerce_text(target.get("provider")) or None)
     api_base = _coerce_text(target.get("api_base") or target.get("api_url"))
-    upstream_model = _coerce_text(target.get("upstream_model") or target.get("model_id"))
+    upstream_models = _coerce_text_list(target.get("upstream_models"))
+    if not upstream_models:
+        upstream_models = _coerce_text_list(target.get("upstream_model") or target.get("model_id"))
     api_key = _coerce_text(target.get("api_key"))
     middle_route = normalize_middle_route(
         _coerce_text(target.get("middle_route")),
@@ -216,14 +299,15 @@ def _normalize_target(raw_target: Any, *, index: int, used_ids: set[str]) -> dic
     model_discovery_strategy = normalize_model_discovery_strategy(
         _coerce_text(target.get("model_discovery_strategy")) or None
     )
-    if not api_base or not upstream_model:
+    if not api_base or not upstream_models:
         return None
     return {
         "id": target_id,
         "display_name": _coerce_text(target.get("display_name") or target.get("name")),
         "provider": provider,
         "api_base": api_base.rstrip("/"),
-        "upstream_model": upstream_model,
+        "upstream_models": upstream_models,
+        "upstream_model": upstream_models[0],
         "api_key": api_key,
         "middle_route": middle_route,
         "model_discovery_strategy": model_discovery_strategy,
@@ -253,17 +337,21 @@ def _normalize_failover_pool(
     )
     members_obj = pool.get("members")
     members: list[dict[str, str]] = []
-    seen_member_ids: set[str] = set()
+    seen_member_keys: set[str] = set()
     if isinstance(members_obj, list):
         for member_obj in cast(list[Any], members_obj):
             if isinstance(member_obj, dict):
-                member_id = _coerce_text(cast(dict[str, Any], member_obj).get("target_id"))
+                member = cast(dict[str, Any], member_obj)
+                member_id = _coerce_text(member.get("target_id"))
+                upstream_model = _coerce_text(member.get("upstream_model"))
             else:
                 member_id = _coerce_text(member_obj)
-            if not member_id or member_id in seen_member_ids:
+                upstream_model = ""
+            member_key = make_target_model_key(member_id, upstream_model)
+            if not member_id or member_key in seen_member_keys:
                 continue
-            seen_member_ids.add(member_id)
-            members.append({"target_id": member_id})
+            seen_member_keys.add(member_key)
+            members.append({"target_id": member_id, "upstream_model": upstream_model})
     return {
         "id": pool_id,
         "trigger_statuses": list(_coerce_trigger_statuses(pool.get("trigger_statuses"))),
@@ -292,6 +380,7 @@ def _normalize_published_model(
         "name": name,
         "enabled": _coerce_bool(model.get("enabled"), default=True),
         "primary_target_id": _coerce_text(model.get("primary_target_id")),
+        "primary_upstream_model": _coerce_text(model.get("primary_upstream_model")),
         "failover_pool_id": failover_pool_id,
     }
 
@@ -300,7 +389,10 @@ def normalize_model_routing_config(raw_config: Any) -> dict[str, Any]:
     if not isinstance(raw_config, dict):
         raw_config = {}
     config = cast(dict[str, Any], raw_config)
-    if int(config.get("schema_version") or 0) == MODEL_ROUTING_SCHEMA_VERSION:
+    if any(
+        isinstance(config.get(key), list)
+        for key in ("targets", "published_models", "failover_pools")
+    ):
         normalized = _normalize_v2_config(config)
         if not normalized["targets"] and isinstance(config.get("config_groups"), list):
             return migrate_legacy_config_to_model_routing(config)
@@ -318,7 +410,7 @@ def _normalize_v2_config(config: dict[str, Any]) -> dict[str, Any]:
             if normalized is not None:
                 targets.append(normalized)
 
-    target_ids = {target["id"] for target in targets}
+    targets_by_id = {target["id"]: target for target in targets}
 
     used_pool_ids: set[str] = set()
     failover_pools: list[dict[str, Any]] = []
@@ -332,11 +424,10 @@ def _normalize_v2_config(config: dict[str, Any]) -> dict[str, Any]:
             )
             if normalized_pool is None:
                 continue
-            normalized_pool["members"] = [
-                member
-                for member in normalized_pool["members"]
-                if member["target_id"] in target_ids
-            ]
+            normalized_pool["members"] = _normalize_failover_members_for_targets(
+                normalized_pool["members"],
+                targets_by_id,
+            )
             failover_pools.append(normalized_pool)
 
     pool_ids = {pool["id"] for pool in failover_pools}
@@ -352,7 +443,7 @@ def _normalize_v2_config(config: dict[str, Any]) -> dict[str, Any]:
             )
             if normalized_model is None:
                 continue
-            if normalized_model["primary_target_id"] not in target_ids:
+            if not _normalize_published_model_target(normalized_model, targets_by_id):
                 continue
             failover_pool_id = normalized_model.get("failover_pool_id")
             if failover_pool_id and failover_pool_id not in pool_ids:
@@ -409,6 +500,14 @@ def migrate_legacy_config_to_model_routing(config: dict[str, Any]) -> dict[str, 
                 "name": mapped_model_id,
                 "enabled": True,
                 "primary_target_id": selected_target_id,
+                "primary_upstream_model": next(
+                    (
+                        str(target["upstream_model"])
+                        for target in targets
+                        if target["id"] == selected_target_id
+                    ),
+                    "",
+                ),
                 "failover_pool_id": None,
             }
         )
@@ -431,7 +530,7 @@ def build_model_routing_config(raw_config: Any) -> ModelRoutingConfig:
             display_name=str(target.get("display_name") or ""),
             provider=str(target["provider"]),
             api_base=str(target["api_base"]),
-            upstream_model=str(target["upstream_model"]),
+            upstream_models=tuple(str(model) for model in target["upstream_models"]),
             api_key=str(target.get("api_key") or ""),
             middle_route=str(target["middle_route"]),
             model_discovery_strategy=(
@@ -452,7 +551,10 @@ def build_model_routing_config(raw_config: Any) -> ModelRoutingConfig:
             trigger_statuses=tuple(int(status) for status in pool["trigger_statuses"]),
             cooldown_seconds=int(pool["cooldown_seconds"]),
             members=tuple(
-                FailoverPoolMember(target_id=str(member["target_id"]))
+                FailoverPoolMember(
+                    target_id=str(member["target_id"]),
+                    upstream_model=str(member["upstream_model"]),
+                )
                 for member in pool["members"]
             ),
         )
@@ -463,6 +565,7 @@ def build_model_routing_config(raw_config: Any) -> ModelRoutingConfig:
             name=str(model["name"]),
             enabled=bool(model["enabled"]),
             primary_target_id=str(model["primary_target_id"]),
+            primary_upstream_model=str(model["primary_upstream_model"]),
             failover_pool_id=(
                 str(model["failover_pool_id"]) if model.get("failover_pool_id") else None
             ),
@@ -493,6 +596,7 @@ def serialize_model_routing_config(config: ModelRoutingConfig | dict[str, Any]) 
                 "api_base": target.api_base,
                 "api_key": target.api_key,
                 "middle_route": target.middle_route,
+                "upstream_models": list(target.upstream_models),
                 "upstream_model": target.upstream_model,
                 "model_discovery_strategy": target.model_discovery_strategy,
                 "prompt_cache_enabled": target.prompt_cache_enabled,
@@ -508,7 +612,13 @@ def serialize_model_routing_config(config: ModelRoutingConfig | dict[str, Any]) 
                 "id": pool.id,
                 "trigger_statuses": list(pool.trigger_statuses),
                 "cooldown_seconds": pool.cooldown_seconds,
-                "members": [{"target_id": member.target_id} for member in pool.members],
+                "members": [
+                    {
+                        "target_id": member.target_id,
+                        "upstream_model": member.upstream_model,
+                    }
+                    for member in pool.members
+                ],
             }
             for pool in config.failover_pools
         ],
@@ -517,6 +627,7 @@ def serialize_model_routing_config(config: ModelRoutingConfig | dict[str, Any]) 
                 "name": model.name,
                 "enabled": model.enabled,
                 "primary_target_id": model.primary_target_id,
+                "primary_upstream_model": model.primary_upstream_model,
                 "failover_pool_id": model.failover_pool_id,
             }
             for model in config.published_models
@@ -555,6 +666,12 @@ def resolve_published_model(
             code="route_config_invalid",
             message=f"Published model has invalid primary target: {model_name}",
         )
+    if published_model.primary_upstream_model not in primary_target.upstream_models:
+        return RouteResolutionError(
+            status_code=500,
+            code="route_config_invalid",
+            message=f"Published model has invalid primary target model: {model_name}",
+        )
 
     failover_pool: FailoverPool | None = None
     if published_model.failover_pool_id:
@@ -568,6 +685,7 @@ def resolve_published_model(
     return ResolvedRoute(
         published_model=published_model,
         primary_target=primary_target,
+        primary_upstream_model=published_model.primary_upstream_model,
         failover_pool=failover_pool,
     )
 
@@ -579,10 +697,16 @@ def build_target_attempts(
     cooldowns: TargetCooldowns,
 ) -> tuple[TargetAttempt, ...]:
     attempts: list[TargetAttempt] = []
-    if not cooldowns.is_cooling(resolved_route.primary_target.id):
+    if not cooldowns.is_cooling(
+        make_target_model_key(
+            resolved_route.primary_target.id,
+            resolved_route.primary_upstream_model,
+        )
+    ):
         attempts.append(
             TargetAttempt(
                 target=resolved_route.primary_target,
+                upstream_model=resolved_route.primary_upstream_model,
                 index=1,
                 source="primary",
             )
@@ -591,22 +715,28 @@ def build_target_attempts(
         return tuple(attempts)
 
     targets = routing_config.target_by_id()
-    seen_target_ids = {attempt.target.id for attempt in attempts}
+    seen_target_model_keys = {attempt.cooldown_key for attempt in attempts}
     next_index = len(attempts) + 1
     for member in resolved_route.failover_pool.members:
         target = targets.get(member.target_id)
-        if target is None or target.id in seen_target_ids:
+        if target is None:
             continue
-        if cooldowns.is_cooling(target.id):
+        if member.upstream_model not in target.upstream_models:
+            continue
+        target_model_key = make_target_model_key(target.id, member.upstream_model)
+        if target_model_key in seen_target_model_keys:
+            continue
+        if cooldowns.is_cooling(target_model_key):
             continue
         attempts.append(
             TargetAttempt(
                 target=target,
+                upstream_model=member.upstream_model,
                 index=next_index,
                 source="failover",
             )
         )
-        seen_target_ids.add(target.id)
+        seen_target_model_keys.add(target_model_key)
         next_index += 1
     return tuple(attempts)
 
@@ -663,6 +793,7 @@ __all__ = [
     "build_openai_error_body",
     "build_target_attempts",
     "is_retryable_transport_error",
+    "make_target_model_key",
     "migrate_legacy_config_to_model_routing",
     "normalize_model_routing_config",
     "resolve_published_model",

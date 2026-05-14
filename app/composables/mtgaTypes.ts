@@ -6,6 +6,7 @@ export type ModelRoutingTarget = {
   display_name: string;
   provider: ProviderId;
   api_base: string;
+  upstream_models: string[];
   upstream_model: string;
   api_key: string;
   middle_route?: string;
@@ -16,6 +17,7 @@ export type ModelRoutingTarget = {
 
 export type FailoverPoolMember = {
   target_id: string;
+  upstream_model: string;
 };
 
 export type FailoverPool = {
@@ -29,11 +31,12 @@ export type PublishedModel = {
   name: string;
   enabled: boolean;
   primary_target_id: string;
+  primary_upstream_model: string;
   failover_pool_id?: string | null;
 };
 
 export type ConfigPayload = {
-  schema_version: 2;
+  schema_version: 3;
   mtga_auth_key: string;
   targets: ModelRoutingTarget[];
   failover_pools: FailoverPool[];

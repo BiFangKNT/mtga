@@ -243,6 +243,18 @@ const normalizeProvider = (value: unknown): ModelRoutingTarget["provider"] => {
   return "openai_chat_completion";
 };
 
+const normalizeTextList = (value: unknown) => {
+  const rawItems = Array.isArray(value) ? value : [value];
+  const unique = new Set<string>();
+  rawItems.forEach((item) => {
+    const text = coerceText(item).trim();
+    if (text) {
+      unique.add(text);
+    }
+  });
+  return Array.from(unique);
+};
+
 const normalizeTargetId = (value: unknown, index: number, used: Set<string>) => {
   const base = coerceText(value).trim() || `target-${index + 1}`;
   let candidate = base;
@@ -266,8 +278,11 @@ const normalizeTargets = (value: unknown): ModelRoutingTarget[] => {
       const apiBase = coerceText(item.api_base ?? item.api_url)
         .trim()
         .replace(/\/+$/, "");
-      const upstreamModel = coerceText(item.upstream_model ?? item.model_id).trim();
-      if (!apiBase || !upstreamModel) {
+      let upstreamModels = normalizeTextList(item.upstream_models);
+      if (!upstreamModels.length) {
+        upstreamModels = normalizeTextList(item.upstream_model ?? item.model_id);
+      }
+      if (!apiBase || !upstreamModels.length) {
         return null;
       }
       const target: ModelRoutingTarget = {
@@ -275,7 +290,8 @@ const normalizeTargets = (value: unknown): ModelRoutingTarget[] => {
         display_name: coerceText(item.display_name ?? item.name).trim(),
         provider: normalizeProvider(item.provider),
         api_base: apiBase,
-        upstream_model: upstreamModel,
+        upstream_models: upstreamModels,
+        upstream_model: upstreamModels[0] || "",
         api_key: coerceText(item.api_key).trim(),
         middle_route: coerceText(item.middle_route).trim(),
         prompt_cache_enabled: item.prompt_cache_enabled === true,
@@ -297,7 +313,7 @@ const normalizeFailoverPools = (value: unknown, targets: ModelRoutingTarget[]): 
   if (!Array.isArray(value)) {
     return [];
   }
-  const targetIds = new Set(targets.map((target) => target.id));
+  const targetById = new Map(targets.map((target) => [target.id, target]));
   const usedPoolIds = new Set<string>();
   return value.filter(isRecord).map((item, index) => {
     const idBase = coerceText(item.id).trim() || `failover-pool-${index + 1}`;
@@ -316,16 +332,30 @@ const normalizeFailoverPools = (value: unknown, targets: ModelRoutingTarget[]): 
     const memberItems = Array.isArray(item.members) ? item.members : [];
     const seenMembers = new Set<string>();
     const members = memberItems
-      .map((member) => (isRecord(member) ? coerceText(member.target_id) : coerceText(member)))
-      .map((targetId) => targetId.trim())
-      .filter((targetId) => {
-        if (!targetId || !targetIds.has(targetId) || seenMembers.has(targetId)) {
+      .map((member) => {
+        const targetId = isRecord(member)
+          ? coerceText(member.target_id).trim()
+          : coerceText(member).trim();
+        const target = targetById.get(targetId);
+        const upstreamModel = isRecord(member)
+          ? coerceText(member.upstream_model).trim() || target?.upstream_model || ""
+          : target?.upstream_model || "";
+        return { target_id: targetId, upstream_model: upstreamModel };
+      })
+      .filter((member) => {
+        const target = targetById.get(member.target_id);
+        const memberKey = `${member.target_id}\u0000${member.upstream_model}`;
+        if (
+          !target ||
+          !member.upstream_model ||
+          !target.upstream_models.includes(member.upstream_model) ||
+          seenMembers.has(memberKey)
+        ) {
           return false;
         }
-        seenMembers.add(targetId);
+        seenMembers.add(memberKey);
         return true;
-      })
-      .map((target_id) => ({ target_id }));
+      });
     const cooldownSeconds = Number(item.cooldown_seconds);
     return {
       id,
@@ -345,7 +375,7 @@ const normalizePublishedModels = (
   if (!Array.isArray(value)) {
     return [];
   }
-  const targetIds = new Set(targets.map((target) => target.id));
+  const targetById = new Map(targets.map((target) => [target.id, target]));
   const poolIds = new Set(pools.map((pool) => pool.id));
   const usedNames = new Set<string>();
   return value
@@ -353,7 +383,16 @@ const normalizePublishedModels = (
     .map((item): PublishedModel | null => {
       const name = coerceText(item.name).trim();
       const primaryTargetId = coerceText(item.primary_target_id).trim();
-      if (!name || usedNames.has(name) || !targetIds.has(primaryTargetId)) {
+      const primaryTarget = targetById.get(primaryTargetId);
+      const primaryUpstreamModel =
+        coerceText(item.primary_upstream_model).trim() || primaryTarget?.upstream_model || "";
+      if (
+        !name ||
+        usedNames.has(name) ||
+        !primaryTarget ||
+        !primaryUpstreamModel ||
+        !primaryTarget.upstream_models.includes(primaryUpstreamModel)
+      ) {
         return null;
       }
       usedNames.add(name);
@@ -362,6 +401,7 @@ const normalizePublishedModels = (
         name,
         enabled: item.enabled !== false,
         primary_target_id: primaryTargetId,
+        primary_upstream_model: primaryUpstreamModel,
         failover_pool_id: failoverPoolId && poolIds.has(failoverPoolId) ? failoverPoolId : null,
       };
     })
@@ -866,6 +906,7 @@ export const useMtgaStore = () => {
               name: mappedModelName,
               enabled: true,
               primary_target_id: effectiveTargets[0]?.id || "",
+              primary_upstream_model: effectiveTargets[0]?.upstream_model || "",
               failover_pool_id: null,
             },
           ];
@@ -897,7 +938,7 @@ export const useMtgaStore = () => {
 
   const saveConfig = async () => {
     const payload: ConfigPayload = {
-      schema_version: 2,
+      schema_version: 3,
       mtga_auth_key: coerceText(mtgaAuthKey.value),
       targets: routingTargets.value,
       failover_pools: failoverPools.value,

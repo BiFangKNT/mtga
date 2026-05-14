@@ -49,6 +49,7 @@ const targetTesting = ref(false);
 const modelLoading = ref(false);
 const activeView = ref<RouteView>("overview");
 const availableModels = ref<string[]>([]);
+const selectedUpstreamModels = ref<string[]>([]);
 const targetDiscoveryStrategy = ref("");
 const targetDiscoveryScope = ref("");
 const requestBodyPatchOpen = ref(false);
@@ -68,7 +69,7 @@ const targetForm = reactive({
 const publishedForm = reactive({
   name: "",
   enabled: true,
-  primary_target_id: "",
+  primary_route_key: "",
   failover_pool_id: "",
 });
 
@@ -76,7 +77,7 @@ const poolForm = reactive({
   id: "",
   trigger_statuses: "429",
   cooldown_seconds: 10,
-  member_ids: [] as string[],
+  member_keys: [] as string[],
 });
 const settingsForm = reactive({
   mtga_auth_key: "",
@@ -114,11 +115,21 @@ const allPoolsSelected = computed(() => {
   return failoverPools.value.every((pool) => selectedPoolIdSet.value.has(pool.id));
 });
 
-const targetOptions = computed(() =>
-  targets.value.map((target) => ({
-    label: `${target.display_name || target.id} · ${target.upstream_model}`,
-    value: target.id,
-  })),
+const makeTargetModelKey = (targetId: string, upstreamModel: string) =>
+  `${targetId}\u0000${upstreamModel}`;
+const parseTargetModelKey = (key: string) => {
+  const [targetId = "", upstreamModel = ""] = key.split("\u0000");
+  return { targetId, upstreamModel };
+};
+const getTargetModels = (target: ModelRoutingTarget) =>
+  target.upstream_models?.length ? target.upstream_models : [target.upstream_model].filter(Boolean);
+const targetModelOptions = computed(() =>
+  targets.value.flatMap((target) =>
+    getTargetModels(target).map((model) => ({
+      label: `${target.display_name || target.id} · ${model}`,
+      value: makeTargetModelKey(target.id, model),
+    })),
+  ),
 );
 const poolOptions = computed(() => [
   { label: "不启用故障转移", value: "" },
@@ -167,6 +178,14 @@ const getTargetLabel = (targetId: string) => {
   const target = targets.value.find((item) => item.id === targetId);
   return target ? target.display_name || target.id : targetId || "-";
 };
+const getTargetModelLabel = (targetId: string, upstreamModel: string) => {
+  const targetLabel = getTargetLabel(targetId);
+  return upstreamModel ? `${targetLabel} · ${upstreamModel}` : targetLabel;
+};
+const getPublishedPrimaryLabel = (model: PublishedModel) =>
+  getTargetModelLabel(model.primary_target_id, model.primary_upstream_model);
+const getPoolMemberLabel = (member: FailoverPool["members"][number]) =>
+  getTargetModelLabel(member.target_id, member.upstream_model);
 const isProviderId = (value: string | undefined): value is ProviderId =>
   value === "openai_chat_completion" ||
   value === "openai_response" ||
@@ -198,7 +217,9 @@ const routePreviewSubtitle = computed(() => {
   if (enabledPublishedModels.value.length === 1) {
     const model = enabledPublishedModels.value[0];
     const target = targets.value.find((item) => item.id === model?.primary_target_id);
-    return target ? `${getTargetLabel(target.id)} · ${target.upstream_model}` : "主目标未找到";
+    return target
+      ? getTargetModelLabel(target.id, model?.primary_upstream_model || target.upstream_model)
+      : "主目标未找到";
   }
   const targetCount = new Set(
     enabledPublishedModels.value.map((model) => model.primary_target_id).filter(Boolean),
@@ -366,6 +387,37 @@ const buildDiscoveryScope = () =>
     targetForm.api_key.trim(),
     normalizeMiddleRoute(targetForm.middle_route, targetForm.provider),
   ]);
+const splitUpstreamModels = (value: string) =>
+  Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((model) => model.trim())
+        .filter(Boolean),
+    ),
+  );
+const getTargetFormUpstreamModels = () =>
+  Array.from(
+    new Set([...selectedUpstreamModels.value, ...splitUpstreamModels(targetForm.upstream_model)]),
+  );
+const getTargetDiscoveryModelId = () =>
+  selectedUpstreamModels.value[0] || targetForm.upstream_model.trim();
+const clearUpstreamModelDraft = () => {
+  targetForm.upstream_model = "";
+};
+const toggleUpstreamModelSelection = (model: string) => {
+  const current = new Set(selectedUpstreamModels.value);
+  if (current.has(model)) {
+    current.delete(model);
+  } else {
+    current.add(model);
+  }
+  selectedUpstreamModels.value = Array.from(current);
+  clearUpstreamModelDraft();
+};
+const removeSelectedUpstreamModel = (model: string) => {
+  selectedUpstreamModels.value = selectedUpstreamModels.value.filter((item) => item !== model);
+};
 const resetTargetDiscovery = () => {
   availableModels.value = [];
   modelLoading.value = false;
@@ -422,6 +474,51 @@ const hasTargetReference = (targetId: string) =>
   publishedModels.value.some((model) => model.primary_target_id === targetId);
 const hasPoolReference = (poolId: string) =>
   publishedModels.value.some((model) => model.failover_pool_id === poolId);
+const getRemovedTargetModelReferenceError = (oldId: string, nextTarget: ModelRoutingTarget) => {
+  const validModels = new Set(nextTarget.upstream_models);
+  const referencesByModel = new Map<string, Set<string>>();
+  const addReference = (upstreamModel: string, source: string) => {
+    if (!upstreamModel || validModels.has(upstreamModel)) {
+      return;
+    }
+    const sources = referencesByModel.get(upstreamModel) || new Set<string>();
+    sources.add(source);
+    referencesByModel.set(upstreamModel, sources);
+  };
+  publishedModels.value.forEach((model) => {
+    if (model.primary_target_id !== oldId && model.primary_target_id !== nextTarget.id) {
+      return;
+    }
+    addReference(model.primary_upstream_model, `发布模型 ${model.name}`);
+  });
+  failoverPools.value.forEach((pool) => {
+    pool.members.forEach((member) => {
+      if (member.target_id !== oldId && member.target_id !== nextTarget.id) {
+        return;
+      }
+      addReference(member.upstream_model, `故障池 ${pool.id}`);
+    });
+  });
+  const references = Array.from(referencesByModel.entries());
+  if (!references.length) {
+    return "";
+  }
+  const details = references
+    .slice(0, 3)
+    .map(([upstreamModel, sources]) => {
+      const visibleSources = Array.from(sources).slice(0, 3);
+      const suffix = sources.size > 3 ? `等 ${sources.size} 处` : "";
+      return `${upstreamModel}（${visibleSources.join("、")}${suffix}）`;
+    })
+    .join("；");
+  const suffix = references.length > 3 ? ` 等 ${references.length} 个模型` : "";
+  return `无法保存：上游模型 ${details}${suffix} 仍被引用，请先修改发布模型或故障池成员后再删除。`;
+};
+const isValidTargetModelKey = (key: string) => {
+  const { targetId, upstreamModel } = parseTargetModelKey(key);
+  const target = targets.value.find((item) => item.id === targetId);
+  return Boolean(target && upstreamModel && getTargetModels(target).includes(upstreamModel));
+};
 const deleteConfirmOpen = ref(false);
 const pendingDeleteKind = ref<"target" | "published" | "pool" | null>(null);
 const pendingDeleteIds = ref<string[]>([]);
@@ -549,7 +646,8 @@ const openTargetEditor = (mode: "add" | "edit") => {
     targetForm.display_name = target.display_name;
     targetForm.provider = target.provider;
     targetForm.api_base = target.api_base;
-    targetForm.upstream_model = target.upstream_model;
+    selectedUpstreamModels.value = getTargetModels(target);
+    targetForm.upstream_model = "";
     targetForm.api_key = target.api_key;
     targetForm.middle_route = target.middle_route || "";
     targetForm.prompt_cache_enabled = target.prompt_cache_enabled === true;
@@ -563,6 +661,7 @@ const openTargetEditor = (mode: "add" | "edit") => {
     targetForm.provider = "openai_chat_completion";
     targetForm.api_base = "";
     targetForm.upstream_model = "";
+    selectedUpstreamModels.value = [];
     targetForm.api_key = "";
     targetForm.middle_route = "";
     targetForm.prompt_cache_enabled = false;
@@ -580,12 +679,20 @@ const openPublishedEditor = (mode: "add" | "edit") => {
     const model = selectedPublishedModel.value;
     publishedForm.name = model.name;
     publishedForm.enabled = model.enabled;
-    publishedForm.primary_target_id = model.primary_target_id;
+    publishedForm.primary_route_key = makeTargetModelKey(
+      model.primary_target_id,
+      model.primary_upstream_model,
+    );
     publishedForm.failover_pool_id = model.failover_pool_id || "";
   } else {
     publishedForm.name = "";
     publishedForm.enabled = true;
-    publishedForm.primary_target_id = selectedTargetId.value || targets.value[0]?.id || "";
+    const defaultTarget =
+      targets.value.find((target) => target.id === selectedTargetId.value) || targets.value[0];
+    const defaultModel = defaultTarget ? getTargetModels(defaultTarget)[0] || "" : "";
+    publishedForm.primary_route_key = defaultTarget
+      ? makeTargetModelKey(defaultTarget.id, defaultModel)
+      : "";
     publishedForm.failover_pool_id = "";
   }
   editorOpen.value = true;
@@ -600,7 +707,9 @@ const openPoolEditor = (mode: "add" | "edit") => {
     poolForm.id = pool.id;
     poolForm.trigger_statuses = pool.trigger_statuses.join(", ");
     poolForm.cooldown_seconds = pool.cooldown_seconds;
-    poolForm.member_ids = pool.members.map((member) => member.target_id);
+    poolForm.member_keys = pool.members.map((member) =>
+      makeTargetModelKey(member.target_id, member.upstream_model),
+    );
   } else {
     poolForm.id = makeIdentifier(
       "failover-pool",
@@ -608,7 +717,10 @@ const openPoolEditor = (mode: "add" | "edit") => {
     );
     poolForm.trigger_statuses = "429";
     poolForm.cooldown_seconds = 10;
-    poolForm.member_ids = selectedTargetId.value ? [selectedTargetId.value] : [];
+    const defaultTarget = targets.value.find((target) => target.id === selectedTargetId.value);
+    const defaultModel = defaultTarget ? getTargetModels(defaultTarget)[0] || "" : "";
+    poolForm.member_keys =
+      defaultTarget && defaultModel ? [makeTargetModelKey(defaultTarget.id, defaultModel)] : [];
   }
   editorOpen.value = true;
 };
@@ -651,8 +763,8 @@ const saveSettings = async () => {
 const saveTarget = async () => {
   const targetId = targetForm.id.trim();
   const apiBase = normalizeApiBase(targetForm.api_base);
-  const upstreamModel = targetForm.upstream_model.trim();
-  if (!targetId || !apiBase || !upstreamModel) {
+  const upstreamModels = getTargetFormUpstreamModels();
+  if (!targetId || !apiBase || !upstreamModels.length) {
     formError.value = "目标ID、API Base 和上游模型都是必填项";
     return;
   }
@@ -675,7 +787,8 @@ const saveTarget = async () => {
     display_name: targetForm.display_name.trim(),
     provider: targetForm.provider,
     api_base: apiBase,
-    upstream_model: upstreamModel,
+    upstream_models: upstreamModels,
+    upstream_model: upstreamModels[0] || "",
     api_key: targetForm.api_key.trim(),
     middle_route: normalizeMiddleRoute(targetForm.middle_route, targetForm.provider),
     prompt_cache_enabled: targetForm.prompt_cache_enabled,
@@ -686,27 +799,36 @@ const saveTarget = async () => {
   if (targetDiscoveryStrategy.value && targetDiscoveryScope.value === buildDiscoveryScope()) {
     target.model_discovery_strategy = targetDiscoveryStrategy.value;
   }
+  const renameTargetReferences = (oldId: string, nextId: string) => {
+    if (oldId === nextId) {
+      return;
+    }
+    publishedModels.value.forEach((model) => {
+      if (model.primary_target_id === oldId) {
+        model.primary_target_id = nextId;
+      }
+    });
+    failoverPools.value.forEach((pool) => {
+      pool.members.forEach((member) => {
+        if (member.target_id === oldId) {
+          member.target_id = nextId;
+        }
+      });
+    });
+  };
   if (editorMode.value === "add") {
     targets.value.push(target);
   } else {
     const oldId = selectedTargetId.value;
+    const referenceError = getRemovedTargetModelReferenceError(oldId, target);
+    if (referenceError) {
+      formError.value = referenceError;
+      return;
+    }
     const index = targets.value.findIndex((item) => item.id === oldId);
     if (index >= 0) {
       targets.value[index] = target;
-      if (oldId !== target.id) {
-        publishedModels.value.forEach((model) => {
-          if (model.primary_target_id === oldId) {
-            model.primary_target_id = target.id;
-          }
-        });
-        failoverPools.value.forEach((pool) => {
-          pool.members.forEach((member) => {
-            if (member.target_id === oldId) {
-              member.target_id = target.id;
-            }
-          });
-        });
-      }
+      renameTargetReferences(oldId, target.id);
     }
   }
   selectedTargetId.value = target.id;
@@ -717,7 +839,8 @@ const saveTarget = async () => {
 
 const savePublishedModel = async () => {
   const name = publishedForm.name.trim();
-  if (!name || !publishedForm.primary_target_id) {
+  const primaryRoute = parseTargetModelKey(publishedForm.primary_route_key);
+  if (!name || !isValidTargetModelKey(publishedForm.primary_route_key)) {
     formError.value = "发布模型名称和主目标都是必填项";
     return;
   }
@@ -734,7 +857,8 @@ const savePublishedModel = async () => {
   const model: PublishedModel = {
     name,
     enabled: publishedForm.enabled,
-    primary_target_id: publishedForm.primary_target_id,
+    primary_target_id: primaryRoute.targetId,
+    primary_upstream_model: primaryRoute.upstreamModel,
     failover_pool_id: publishedForm.failover_pool_id || null,
   };
   if (editorMode.value === "add") {
@@ -783,7 +907,10 @@ const savePool = async () => {
     id: poolId,
     trigger_statuses: statuses,
     cooldown_seconds: Math.max(1, Number(poolForm.cooldown_seconds) || 10),
-    members: poolForm.member_ids.map((target_id) => ({ target_id })),
+    members: poolForm.member_keys.filter(isValidTargetModelKey).map((key) => {
+      const { targetId, upstreamModel } = parseTargetModelKey(key);
+      return { target_id: targetId, upstream_model: upstreamModel };
+    }),
   };
   if (editorMode.value === "add") {
     failoverPools.value.push(pool);
@@ -988,7 +1115,7 @@ const fetchTargetModels = async () => {
     provider: targetForm.provider,
     api_url: apiBase,
     api_key: targetForm.api_key.trim(),
-    model_id: targetForm.upstream_model.trim(),
+    model_id: getTargetDiscoveryModelId(),
     middle_route: normalizeMiddleRoute(targetForm.middle_route, targetForm.provider),
   };
   const result = await store.fetchTargetModels(requestPayload);
@@ -1000,14 +1127,14 @@ const fetchTargetModels = async () => {
   modelLoading.value = false;
 };
 
-const togglePoolMember = (targetId: string, checked: boolean) => {
-  const current = new Set(poolForm.member_ids);
+const togglePoolMember = (targetModelKey: string, checked: boolean) => {
+  const current = new Set(poolForm.member_keys);
   if (checked) {
-    current.add(targetId);
+    current.add(targetModelKey);
   } else {
-    current.delete(targetId);
+    current.delete(targetModelKey);
   }
-  poolForm.member_ids = Array.from(current);
+  poolForm.member_keys = Array.from(current);
 };
 
 watch(
@@ -1061,6 +1188,20 @@ watch(
     }
   },
   { immediate: true, deep: true },
+);
+
+watch(
+  () => targetForm.upstream_model,
+  (value) => {
+    const parsedModels = splitUpstreamModels(value);
+    if (parsedModels.length < 2) {
+      return;
+    }
+    selectedUpstreamModels.value = Array.from(
+      new Set([...selectedUpstreamModels.value, ...parsedModels]),
+    );
+    clearUpstreamModelDraft();
+  },
 );
 
 watch(
@@ -1457,7 +1598,9 @@ watch(
                   </span>
                 </div>
                 <div class="mt-2 grid gap-1 text-xs text-slate-500">
-                  <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
+                  <div class="truncate font-mono text-slate-700">
+                    {{ getTargetModels(target).join(", ") }}
+                  </div>
                   <div class="truncate font-mono">{{ target.api_base }}</div>
                 </div>
               </div>
@@ -1505,7 +1648,9 @@ watch(
                 </span>
               </div>
               <div class="mt-2 grid gap-1 text-xs text-slate-500">
-                <div class="truncate font-mono text-slate-700">{{ target.upstream_model }}</div>
+                <div class="truncate font-mono text-slate-700">
+                  {{ getTargetModels(target).join(", ") }}
+                </div>
                 <div class="truncate font-mono">{{ target.api_base }}</div>
               </div>
             </button>
@@ -1587,7 +1732,7 @@ watch(
                       {{ model.name }}
                     </div>
                     <div class="mt-1 truncate text-xs text-slate-500">
-                      主目标: {{ getTargetLabel(model.primary_target_id) }}
+                      主目标: {{ getPublishedPrimaryLabel(model) }}
                     </div>
                   </div>
                   <span
@@ -1643,7 +1788,7 @@ watch(
                     {{ model.name }}
                   </div>
                   <div class="mt-1 truncate text-xs text-slate-500">
-                    主目标: {{ getTargetLabel(model.primary_target_id) }}
+                    主目标: {{ getPublishedPrimaryLabel(model) }}
                   </div>
                 </div>
                 <span
@@ -1754,9 +1899,7 @@ watch(
                 </div>
                 <div class="mt-2 truncate text-xs text-slate-500">
                   状态码 {{ pool.trigger_statuses.join(", ") }} ·
-                  {{
-                    pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-"
-                  }}
+                  {{ pool.members.map((member) => getPoolMemberLabel(member)).join(", ") || "-" }}
                 </div>
               </div>
               <button
@@ -1806,9 +1949,7 @@ watch(
               </div>
               <div class="mt-2 truncate text-xs text-slate-500">
                 状态码 {{ pool.trigger_statuses.join(", ") }} ·
-                {{
-                  pool.members.map((member) => getTargetLabel(member.target_id)).join(", ") || "-"
-                }}
+                {{ pool.members.map((member) => getPoolMemberLabel(member)).join(", ") || "-" }}
               </div>
             </button>
           </template>
@@ -1923,16 +2064,32 @@ watch(
               required
               placeholder="https://api.openai.com"
             />
-            <MtgaInput
-              v-model="targetForm.upstream_model"
-              label="上游模型"
-              required
-              show-dropdown
-              :options="availableModels"
-              :loading="modelLoading"
-              placeholder="gpt-5"
-              @dropdown="fetchTargetModels"
-            />
+            <div class="space-y-1">
+              <MtgaInput
+                v-model="targetForm.upstream_model"
+                label="上游模型"
+                required
+                show-dropdown
+                multi-select
+                :options="availableModels"
+                :selected-options="selectedUpstreamModels"
+                :loading="modelLoading"
+                placeholder="gpt-5"
+                @dropdown="fetchTargetModels"
+                @select="toggleUpstreamModelSelection"
+              />
+              <div v-if="selectedUpstreamModels.length" class="flex flex-wrap gap-1">
+                <button
+                  v-for="model in selectedUpstreamModels"
+                  :key="model"
+                  type="button"
+                  class="cursor-pointer rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700"
+                  @click="removeSelectedUpstreamModel(model)"
+                >
+                  {{ model }}
+                </button>
+              </div>
+            </div>
             <MtgaInput
               v-model="targetForm.api_key"
               label="API Key"
@@ -1970,10 +2127,10 @@ watch(
             placeholder="gpt-5"
           />
           <MtgaSelect
-            v-model="publishedForm.primary_target_id"
+            v-model="publishedForm.primary_route_key"
             label="主目标"
             required
-            :options="targetOptions"
+            :options="targetModelOptions"
             class="w-full"
           />
           <MtgaSelect
@@ -2020,17 +2177,22 @@ watch(
             <div class="mb-2 text-sm font-medium text-slate-600">成员目标</div>
             <div class="grid gap-2 sm:grid-cols-2">
               <label
-                v-for="target in targets"
-                :key="target.id"
+                v-for="option in targetModelOptions"
+                :key="option.value"
                 class="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white/50 px-3 py-2 text-sm transition-colors hover:border-amber-200 hover:bg-amber-50/50"
               >
                 <input
                   type="checkbox"
                   class="checkbox checkbox-primary checkbox-sm rounded"
-                  :checked="poolForm.member_ids.includes(target.id)"
-                  @change="togglePoolMember(target.id, ($event.target as HTMLInputElement).checked)"
+                  :checked="poolForm.member_keys.includes(String(option.value))"
+                  @change="
+                    togglePoolMember(
+                      String(option.value),
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
                 />
-                <span class="min-w-0 flex-1 truncate">{{ target.display_name || target.id }}</span>
+                <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
               </label>
             </div>
           </div>

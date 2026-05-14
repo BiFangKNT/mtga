@@ -28,6 +28,10 @@ interface Props {
   showDropdown?: boolean;
   /** 下拉选项 */
   options?: string[];
+  /** 下拉选项是否按多选模式处理 */
+  multiSelect?: boolean;
+  /** 多选模式下的已选中选项 */
+  selectedOptions?: string[];
   /** 是否可清空 */
   clearable?: boolean;
   /** 错误信息，存在时 color 强制为 error */
@@ -48,6 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
   icon: "",
   trailingIcon: "",
   options: () => [],
+  multiSelect: false,
+  selectedOptions: () => [],
   error: "",
   inputClass: "",
 });
@@ -129,6 +135,14 @@ const hasActionArea = computed(() => {
   return props.loading || props.showDropdown || slots.trailing || props.trailingIcon;
 });
 
+const selectedOptionSet = computed(() => new Set(props.selectedOptions));
+const isOptionSelected = (option: string) => {
+  if (props.multiSelect) {
+    return selectedOptionSet.value.has(option);
+  }
+  return props.modelValue === option;
+};
+
 // 计算后缀区宽度以动态调整输入框内边距
 const suffixPaddingClass = computed(() => {
   let actionCount = 0;
@@ -174,6 +188,12 @@ const toggleDropdown = (e: Event) => {
 };
 
 const handleSelect = (val: string) => {
+  if (props.multiSelect) {
+    emit("select", val);
+    isFiltering.value = false;
+    dropdownOpen.value = true;
+    return;
+  }
   emit("update:modelValue", val);
   emit("select", val);
   dropdownOpen.value = false;
@@ -374,6 +394,7 @@ const handleClear = (e: MouseEvent) => {
           v-if="showDropdown && dropdownOpen && isPositioned"
           :style="dropdownStyle"
           class="bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-300 origin-top"
+          @click.stop
         >
           <!-- Loading 遮罩层 (居中动画 + 毛玻璃) -->
           <div
@@ -401,12 +422,12 @@ const handleClear = (e: MouseEvent) => {
               <button
                 type="button"
                 class="flex items-center gap-2 py-2 px-3 rounded-lg hover:bg-primary/5 hover:text-primary transition-all duration-200 text-sm w-full"
-                :class="{ 'bg-primary/10 text-primary font-medium': modelValue === opt }"
+                :class="{ 'bg-primary/10 text-primary font-medium': isOptionSelected(opt) }"
                 @click="handleSelect(opt)"
               >
                 <span class="truncate flex-1 text-left">{{ opt }}</span>
                 <svg
-                  v-if="modelValue === opt"
+                  v-if="isOptionSelected(opt)"
                   xmlns="http://www.w3.org/2000/svg"
                   class="h-4 w-4"
                   fill="none"

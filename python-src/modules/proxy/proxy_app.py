@@ -410,10 +410,11 @@ class ProxyApp:
     def _get_mapped_model_id(self) -> str:
         return self.custom_model_id
 
-    def _build_target_proxy_config(
+    def _build_target_proxy_config(  # noqa: PLR0913
         self,
         *,
         target: ModelRoutingTarget,
+        upstream_model: str,
         routing_config: ModelRoutingConfig,
         stream_mode: str | None,
         debug_mode: bool,
@@ -421,6 +422,7 @@ class ProxyApp:
     ) -> ProxyConfig:
         return build_proxy_config_from_target(
             target,
+            upstream_model=upstream_model,
             mtga_auth_key=routing_config.mtga_auth_key,
             prompt_cache_bucket_id=routing_config.prompt_cache_bucket_id,
             stream_mode=stream_mode,
@@ -970,11 +972,12 @@ class ProxyApp:
                 release_transport()
                 return self._route_error_response(route_resolution)
             resolved_route = route_resolution
-            target_model_id = resolved_route.primary_target.upstream_model
+            target_model_id = resolved_route.primary_upstream_model
             log(
                 "模型路由命中: "
                 f"published_model={resolved_route.published_model.name} "
-                f"target_id={resolved_route.primary_target.id}"
+                f"target_id={resolved_route.primary_target.id} "
+                f"upstream_model={resolved_route.primary_upstream_model}"
             )
             request_data["model"] = target_model_id
         elif "model" in request_data:
@@ -1064,12 +1067,13 @@ class ProxyApp:
                 ):
                     effective_proxy_config = self._build_target_proxy_config(
                         target=attempt.target,
+                        upstream_model=attempt.upstream_model,
                         routing_config=routing_config,
                         stream_mode=stream_mode if isinstance(stream_mode, str) else None,
                         debug_mode=debug_mode,
                         disable_ssl_strict_mode=disable_ssl_strict_mode,
                     )
-                    request_data["model"] = attempt.target.upstream_model
+                    request_data["model"] = attempt.upstream_model
                     target_id = attempt.target.id
                     target_display_name = attempt.target.display_name
                     trace_event(
@@ -1079,7 +1083,7 @@ class ProxyApp:
                             "source": attempt.source,
                             "target_id": attempt.target.id,
                             "target_display_name": attempt.target.display_name,
-                            "upstream_model": attempt.target.upstream_model,
+                            "upstream_model": attempt.upstream_model,
                         },
                     )
                 if effective_proxy_config is None:
@@ -1167,13 +1171,14 @@ class ProxyApp:
                         ):
                             cooldown_seconds = resolved_route.failover_pool.cooldown_seconds
                             self._target_cooldowns.mark_cooling(
-                                attempt.target.id,
+                                attempt.cooldown_key,
                                 cooldown_seconds,
                             )
                             trace_event(
                                 "target_cooldown",
                                 data={
                                     "target_id": attempt.target.id,
+                                    "upstream_model": attempt.upstream_model,
                                     "status_code": error_info.status_code,
                                     "cooldown_seconds": cooldown_seconds,
                                 },
@@ -1184,6 +1189,7 @@ class ProxyApp:
                                 "transport_failover",
                                 data={
                                     "target_id": attempt.target.id,
+                                    "upstream_model": attempt.upstream_model,
                                     "error": str(attempt_exc),
                                 },
                             )
@@ -1191,7 +1197,8 @@ class ProxyApp:
                         has_next_attempt = attempt.index < len(attempts)
                         if should_failover and has_next_attempt:
                             log(
-                                f"目标 {attempt.target.id} 失败，尝试故障转移到下一个目标"
+                                f"目标 {attempt.target.id} / {attempt.upstream_model} "
+                                "失败，尝试故障转移到下一个目标"
                             )
                             continue
                         raise

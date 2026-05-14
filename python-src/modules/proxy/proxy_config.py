@@ -283,6 +283,7 @@ def build_proxy_config(
 def build_proxy_config_from_target(  # noqa: PLR0913
     target: ModelRoutingTarget,
     *,
+    upstream_model: str | None = None,
     mtga_auth_key: str,
     prompt_cache_bucket_id: str = "",
     stream_mode: str | None = None,
@@ -297,7 +298,7 @@ def build_proxy_config_from_target(  # noqa: PLR0913
             provider=target.provider,
         ),
         custom_model_id="",
-        target_model_id=target.upstream_model,
+        target_model_id=upstream_model or target.upstream_model,
         stream_mode=stream_mode,
         debug_mode=debug_mode,
         disable_ssl_strict_mode=disable_ssl_strict_mode,
