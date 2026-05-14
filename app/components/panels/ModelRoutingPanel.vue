@@ -968,7 +968,7 @@ const testSelectedTarget = async () => {
   }
   targetTesting.value = true;
   try {
-    await store.runConfigGroupTest(-1, target.id);
+    await store.runTargetTest(target.id);
   } finally {
     targetTesting.value = false;
   }
@@ -991,7 +991,7 @@ const fetchTargetModels = async () => {
     model_id: targetForm.upstream_model.trim(),
     middle_route: normalizeMiddleRoute(targetForm.middle_route, targetForm.provider),
   };
-  const result = await store.fetchConfigGroupModels(requestPayload);
+  const result = await store.fetchTargetModels(requestPayload);
   if (result) {
     availableModels.value = result.models;
     targetDiscoveryStrategy.value = result.strategyId || "";

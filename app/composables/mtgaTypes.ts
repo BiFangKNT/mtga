@@ -1,17 +1,6 @@
 export type ProviderId = "openai_chat_completion" | "openai_response" | "anthropic" | "gemini";
 export type ProxyMode = "reverse_hosts" | "trae_native" | "trae_official_base_url";
 
-export type ConfigGroup = {
-  name?: string;
-  provider?: ProviderId;
-  api_url: string;
-  model_id: string;
-  api_key: string;
-  middle_route?: string;
-  model_discovery_strategy?: string;
-  prompt_cache_enabled?: boolean;
-};
-
 export type ModelRoutingTarget = {
   id: string;
   display_name: string;
@@ -54,12 +43,12 @@ export type ConfigPayload = {
   trae_path: string;
   minimize_to_tray_on_close?: boolean;
   warnings?: string[];
-  config_groups?: ConfigGroup[];
+  config_groups?: unknown[];
   current_config_index?: number;
   mapped_model_id?: string;
 };
 
-export type ConfigGroupModelsResult = {
+export type TargetModelsResult = {
   models: string[];
   strategyId: string | null;
 };

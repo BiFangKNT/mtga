@@ -91,18 +91,15 @@ export const useMtgaApi = () => {
     proxy_mode?: string | null;
     trae_path?: string | null;
   }) => safeInvoke<InvokeResult>("proxy_start_all", payload);
-  const configGroupTest = (payload: {
-    index: number;
-    target_id?: string;
-    mode?: "chat" | "models";
-  }) => safeInvoke<InvokeResult>("config_group_test", payload);
-  const configGroupModels = (payload: {
+  const modelRoutingTargetTest = (payload: { target_id: string; mode?: "chat" | "models" }) =>
+    safeInvoke<InvokeResult>("model_routing_target_test", payload);
+  const modelRoutingTargetModels = (payload: {
     provider?: string;
     api_url: string;
     api_key?: string;
     middle_route?: string;
     model_id?: string;
-  }) => safeInvoke<InvokeResult>("config_group_models", payload);
+  }) => safeInvoke<InvokeResult>("model_routing_target_models", payload);
   const userDataOpenDir = () => safeInvoke<InvokeResult>("user_data_open_dir");
   const userDataBackup = () => safeInvoke<InvokeResult>("user_data_backup");
   const userDataRestoreLatest = () => safeInvoke<InvokeResult>("user_data_restore_latest");
@@ -239,8 +236,8 @@ export const useMtgaApi = () => {
     proxyStop,
     proxyCheckNetwork,
     proxyStartAll,
-    configGroupTest,
-    configGroupModels,
+    modelRoutingTargetTest,
+    modelRoutingTargetModels,
     userDataOpenDir,
     userDataBackup,
     userDataRestoreLatest,

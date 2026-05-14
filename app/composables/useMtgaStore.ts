@@ -3,8 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { isBundledRuntime, isTauriRuntime } from "./runtime";
 import type {
   AppInfo,
-  ConfigGroup,
-  ConfigGroupModelsResult,
   ConfigPayload,
   FailoverPool,
   InvokeResult,
@@ -19,6 +17,7 @@ import type {
   ProxyTrace,
   ProxyTraceSummary,
   SystemPromptItem,
+  TargetModelsResult,
 } from "./mtgaTypes";
 
 type RuntimeOptions = {
@@ -535,9 +534,6 @@ const normalizeProxyTraceDetail = (value: unknown): ProxyTrace | null => {
 export const useMtgaStore = () => {
   const api = useMtgaApi();
 
-  const configGroups = useState<ConfigGroup[]>("mtga-config-groups", () => []);
-  const currentConfigIndex = useState<number>("mtga-current-config-index", () => 0);
-  const mappedModelId = useState<string>("mtga-mapped-model-id", () => "");
   const mtgaAuthKey = useState<string>("mtga-auth-key", () => "");
   const routingTargets = useState<ModelRoutingTarget[]>("mtga-routing-targets", () => []);
   const failoverPools = useState<FailoverPool[]>("mtga-failover-pools", () => []);
@@ -879,18 +875,6 @@ export const useMtgaStore = () => {
     publishedModels.value = effectivePublishedModels;
     promptCacheBucketId.value = coerceText(result.prompt_cache_bucket_id).trim();
     mtgaAuthKey.value = coerceText(result.mtga_auth_key);
-    configGroups.value = effectiveTargets.map((target) => ({
-      name: target.display_name,
-      provider: target.provider,
-      api_url: target.api_base,
-      model_id: target.upstream_model,
-      api_key: target.api_key,
-      middle_route: target.middle_route,
-      model_discovery_strategy: target.model_discovery_strategy || undefined,
-      prompt_cache_enabled: target.prompt_cache_enabled,
-    }));
-    currentConfigIndex.value = 0;
-    mappedModelId.value = effectivePublishedModels[0]?.name || mappedModelName;
     proxyMode.value = isProxyMode(result.proxy_mode) ? result.proxy_mode : DEFAULT_PROXY_MODE;
     savedProxyMode.value = proxyMode.value;
     traePath.value = coerceText(result.trae_path).trim();
@@ -1185,19 +1169,19 @@ export const useMtgaStore = () => {
     return ok;
   };
 
-  const runConfigGroupTest = async (index: number, targetId = "") => {
-    const result = await api.configGroupTest({ index, target_id: targetId });
-    return applyInvokeResult(result, targetId ? "目标测活" : "配置组测活");
+  const runTargetTest = async (targetId: string) => {
+    const result = await api.modelRoutingTargetTest({ target_id: targetId });
+    return applyInvokeResult(result, "目标测活");
   };
 
-  const fetchConfigGroupModels = async (payload: {
+  const fetchTargetModels = async (payload: {
     provider?: string;
     api_url: string;
     api_key?: string;
     middle_route?: string;
     model_id?: string;
-  }): Promise<ConfigGroupModelsResult | null> => {
-    const result = await api.configGroupModels(payload);
+  }): Promise<TargetModelsResult | null> => {
+    const result = await api.modelRoutingTargetModels(payload);
     const ok = applyInvokeResult(result, "获取模型列表");
     if (!ok || !result) {
       return null;
@@ -1454,9 +1438,6 @@ export const useMtgaStore = () => {
   };
 
   return {
-    configGroups,
-    currentConfigIndex,
-    mappedModelId,
     mtgaAuthKey,
     routingTargets,
     failoverPools,
@@ -1508,8 +1489,8 @@ export const useMtgaStore = () => {
     runProxyStop,
     runProxyCheckNetwork,
     runProxyStartAll,
-    runConfigGroupTest,
-    fetchConfigGroupModels,
+    runTargetTest,
+    fetchTargetModels,
     runUserDataOpenDir,
     runUserDataBackup,
     runUserDataRestoreLatest,
