@@ -1192,13 +1192,13 @@ export const useMtgaStore = () => {
   };
 
   const runProxyStartAll = async () => {
-    if (isBundledRuntime()) {
+    if (isTauriRuntime()) {
       const ok = await api.startProxyStepChannel(handleProxyStep, {
         reset: true,
         startFromLatest: true,
       });
       if (!ok) {
-        appendLog("⚠️ proxy-step channel 启动失败，自动导航不可用");
+        appendLog("⚠️ proxy-step channel 启动失败，回退事件监听自动导航");
       }
     }
     const result = await api.proxyStartAll(buildProxyPayload());

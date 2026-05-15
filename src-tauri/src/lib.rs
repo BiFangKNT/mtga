@@ -429,13 +429,15 @@ fn pull_proxy_status(
 #[tauri::command]
 fn proxy_step_channel(channel: Channel<String>, start_from_latest: Option<bool>) {
     let start_from_latest = start_from_latest.unwrap_or(false);
+    let initial_after_id = if start_from_latest {
+        pull_proxy_steps(None, 0, 1)
+            .ok()
+            .and_then(|(_, next_id)| next_id)
+    } else {
+        None
+    };
     std::thread::spawn(move || {
-        let mut after_id: Option<i64> = None;
-        if start_from_latest {
-            if let Ok((_, next_id)) = pull_proxy_steps(None, 0, 1) {
-                after_id = next_id;
-            }
-        }
+        let mut after_id: Option<i64> = initial_after_id;
         loop {
             let result = pull_proxy_steps(after_id, 1000, 200);
 
