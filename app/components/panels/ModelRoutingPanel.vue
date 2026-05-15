@@ -26,6 +26,8 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: "Anthropic",
   gemini: "Gemini",
 };
+const MODEL_PREVIEW_CHIP_CLASS =
+  "max-w-full wrap-anywhere rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600";
 type RouteSectionId = "targets" | "published" | "failover";
 type RouteView = "overview" | RouteSectionId;
 
@@ -1598,8 +1600,17 @@ watch(
                   </span>
                 </div>
                 <div class="mt-2 grid gap-1 text-xs text-slate-500">
-                  <div class="truncate font-mono text-slate-700">
-                    {{ getTargetModels(target).join(", ") }}
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="model in getTargetModels(target)"
+                      :key="model"
+                      :class="MODEL_PREVIEW_CHIP_CLASS"
+                    >
+                      {{ model }}
+                    </span>
+                    <span v-if="!getTargetModels(target).length" :class="MODEL_PREVIEW_CHIP_CLASS">
+                      -
+                    </span>
                   </div>
                   <div class="truncate font-mono">{{ target.api_base }}</div>
                 </div>
@@ -1648,8 +1659,17 @@ watch(
                 </span>
               </div>
               <div class="mt-2 grid gap-1 text-xs text-slate-500">
-                <div class="truncate font-mono text-slate-700">
-                  {{ getTargetModels(target).join(", ") }}
+                <div class="flex flex-wrap gap-1">
+                  <span
+                    v-for="model in getTargetModels(target)"
+                    :key="model"
+                    :class="MODEL_PREVIEW_CHIP_CLASS"
+                  >
+                    {{ model }}
+                  </span>
+                  <span v-if="!getTargetModels(target).length" :class="MODEL_PREVIEW_CHIP_CLASS">
+                    -
+                  </span>
                 </div>
                 <div class="truncate font-mono">{{ target.api_base }}</div>
               </div>
@@ -1787,8 +1807,11 @@ watch(
                   <div class="truncate font-mono text-sm font-bold text-slate-900">
                     {{ model.name }}
                   </div>
-                  <div class="mt-1 truncate text-xs text-slate-500">
-                    主目标: {{ getPublishedPrimaryLabel(model) }}
+                  <div class="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                    <span>主目标:</span>
+                    <span :class="MODEL_PREVIEW_CHIP_CLASS">
+                      {{ getPublishedPrimaryLabel(model) }}
+                    </span>
                   </div>
                 </div>
                 <span
@@ -1802,8 +1825,11 @@ watch(
                   {{ model.enabled ? "启用" : "停用" }}
                 </span>
               </div>
-              <div class="mt-2 truncate font-mono text-xs text-slate-500">
-                故障转移: {{ model.failover_pool_id || "-" }}
+              <div class="mt-2 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                <span>故障转移:</span>
+                <span :class="MODEL_PREVIEW_CHIP_CLASS">
+                  {{ model.failover_pool_id || "-" }}
+                </span>
               </div>
             </button>
           </template>
@@ -1897,9 +1923,18 @@ watch(
                     {{ pool.cooldown_seconds }}s
                   </span>
                 </div>
-                <div class="mt-2 truncate text-xs text-slate-500">
-                  状态码 {{ pool.trigger_statuses.join(", ") }} ·
-                  {{ pool.members.map((member) => getPoolMemberLabel(member)).join(", ") || "-" }}
+                <div class="mt-2 grid gap-1 text-xs text-slate-500">
+                  <div>状态码 {{ pool.trigger_statuses.join(", ") }}</div>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="member in pool.members"
+                      :key="makeTargetModelKey(member.target_id, member.upstream_model)"
+                      :class="MODEL_PREVIEW_CHIP_CLASS"
+                    >
+                      {{ getPoolMemberLabel(member) }}
+                    </span>
+                    <span v-if="!pool.members.length" :class="MODEL_PREVIEW_CHIP_CLASS"> - </span>
+                  </div>
                 </div>
               </div>
               <button
@@ -1947,9 +1982,18 @@ watch(
                   {{ pool.cooldown_seconds }}s
                 </span>
               </div>
-              <div class="mt-2 truncate text-xs text-slate-500">
-                状态码 {{ pool.trigger_statuses.join(", ") }} ·
-                {{ pool.members.map((member) => getPoolMemberLabel(member)).join(", ") || "-" }}
+              <div class="mt-2 grid gap-1 text-xs text-slate-500">
+                <div>状态码 {{ pool.trigger_statuses.join(", ") }}</div>
+                <div class="flex flex-wrap gap-1">
+                  <span
+                    v-for="member in pool.members"
+                    :key="makeTargetModelKey(member.target_id, member.upstream_model)"
+                    :class="MODEL_PREVIEW_CHIP_CLASS"
+                  >
+                    {{ getPoolMemberLabel(member) }}
+                  </span>
+                  <span v-if="!pool.members.length" :class="MODEL_PREVIEW_CHIP_CLASS"> - </span>
+                </div>
               </div>
             </button>
           </template>
