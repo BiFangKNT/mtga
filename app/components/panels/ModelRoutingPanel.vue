@@ -52,6 +52,9 @@ const modelLoading = ref(false);
 const activeView = ref<RouteView>("overview");
 const availableModels = ref<string[]>([]);
 const selectedUpstreamModels = ref<string[]>([]);
+const customUpstreamModelIds = ref<string[]>([]);
+const targetCustomUpstreamModelIds = ref<Record<string, string[]>>({});
+const modelDiscoveryLoaded = ref(false);
 const targetDiscoveryStrategy = ref("");
 const targetDiscoveryScope = ref("");
 const requestBodyPatchOpen = ref(false);
@@ -399,13 +402,85 @@ const splitUpstreamModels = (value: string) =>
     ),
   );
 const getTargetFormUpstreamModels = () =>
-  Array.from(
-    new Set([...selectedUpstreamModels.value, ...splitUpstreamModels(targetForm.upstream_model)]),
-  );
+  Array.from(new Set(selectedUpstreamModels.value.map((model) => model.trim()).filter(Boolean)));
 const getTargetDiscoveryModelId = () =>
   selectedUpstreamModels.value[0] || targetForm.upstream_model.trim();
+const canAddCustomUpstreamModels = computed(() =>
+  splitUpstreamModels(targetForm.upstream_model).some(
+    (model) => !selectedUpstreamModels.value.includes(model),
+  ),
+);
+const availableModelSet = computed(() => new Set(availableModels.value));
+const knownCustomUpstreamModels = computed(() =>
+  Array.from(
+    new Set([
+      ...customUpstreamModelIds.value,
+      ...(modelDiscoveryLoaded.value
+        ? selectedUpstreamModels.value.filter((model) => !availableModelSet.value.has(model))
+        : []),
+    ]),
+  ),
+);
+const customUpstreamModelSet = computed(() => new Set(knownCustomUpstreamModels.value));
+const upstreamModelOptions = computed(() => {
+  const customModels = knownCustomUpstreamModels.value.map((model) => ({
+    value: model,
+    tag: "自定义",
+  }));
+  const selectedOnlyModels = selectedUpstreamModels.value
+    .filter(
+      (model) => !customUpstreamModelSet.value.has(model) && !availableModelSet.value.has(model),
+    )
+    .map((model) => ({
+      value: model,
+    }));
+  const apiModels = availableModels.value.map((model) => ({
+    value: model,
+    disabled: customUpstreamModelSet.value.has(model),
+    disabledReason: "已作为自定义 ID 添加",
+  }));
+  return [...customModels, ...selectedOnlyModels, ...apiModels];
+});
+const getRememberedTargetCustomUpstreamModels = (targetId: string, upstreamModels: string[]) => {
+  const upstreamModelSet = new Set(upstreamModels);
+  return (targetCustomUpstreamModelIds.value[targetId] || []).filter((model) =>
+    upstreamModelSet.has(model),
+  );
+};
+const rememberTargetCustomUpstreamModels = (
+  targetId: string,
+  upstreamModels: string[],
+  previousTargetId = targetId,
+) => {
+  const upstreamModelSet = new Set(upstreamModels);
+  const customModels = knownCustomUpstreamModels.value.filter((model) =>
+    upstreamModelSet.has(model),
+  );
+  const nextCustomModelsByTarget = Object.fromEntries(
+    Object.entries(targetCustomUpstreamModelIds.value).filter(
+      ([id]) => id !== previousTargetId && id !== targetId,
+    ),
+  );
+  if (customModels.length) {
+    nextCustomModelsByTarget[targetId] = customModels;
+  }
+  targetCustomUpstreamModelIds.value = nextCustomModelsByTarget;
+};
 const clearUpstreamModelDraft = () => {
   targetForm.upstream_model = "";
+};
+const addCustomUpstreamModels = (value = targetForm.upstream_model) => {
+  const customModels = splitUpstreamModels(value);
+  if (!customModels.length) {
+    return;
+  }
+  selectedUpstreamModels.value = Array.from(
+    new Set([...selectedUpstreamModels.value, ...customModels]),
+  );
+  customUpstreamModelIds.value = Array.from(
+    new Set([...customModels, ...customUpstreamModelIds.value]),
+  );
+  clearUpstreamModelDraft();
 };
 const toggleUpstreamModelSelection = (model: string) => {
   const current = new Set(selectedUpstreamModels.value);
@@ -422,6 +497,8 @@ const removeSelectedUpstreamModel = (model: string) => {
 };
 const resetTargetDiscovery = () => {
   availableModels.value = [];
+  customUpstreamModelIds.value = [];
+  modelDiscoveryLoaded.value = false;
   modelLoading.value = false;
   targetDiscoveryStrategy.value = "";
   targetDiscoveryScope.value = "";
@@ -649,6 +726,10 @@ const openTargetEditor = (mode: "add" | "edit") => {
     targetForm.provider = target.provider;
     targetForm.api_base = target.api_base;
     selectedUpstreamModels.value = getTargetModels(target);
+    customUpstreamModelIds.value = getRememberedTargetCustomUpstreamModels(
+      target.id,
+      selectedUpstreamModels.value,
+    );
     targetForm.upstream_model = "";
     targetForm.api_key = target.api_key;
     targetForm.middle_route = target.middle_route || "";
@@ -818,6 +899,7 @@ const saveTarget = async () => {
       });
     });
   };
+  const previousTargetId = editorMode.value === "edit" ? selectedTargetId.value : target.id;
   if (editorMode.value === "add") {
     targets.value.push(target);
   } else {
@@ -835,6 +917,7 @@ const saveTarget = async () => {
   }
   selectedTargetId.value = target.id;
   if (await persistConfig(`已保存目标: ${target.display_name || target.id}`)) {
+    rememberTargetCustomUpstreamModels(target.id, upstreamModels, previousTargetId);
     closeEditor();
   }
 };
@@ -1123,6 +1206,7 @@ const fetchTargetModels = async () => {
   const result = await store.fetchTargetModels(requestPayload);
   if (result) {
     availableModels.value = result.models;
+    modelDiscoveryLoaded.value = true;
     targetDiscoveryStrategy.value = result.strategyId || "";
     targetDiscoveryScope.value = buildDiscoveryScope();
   }
@@ -1190,20 +1274,6 @@ watch(
     }
   },
   { immediate: true, deep: true },
-);
-
-watch(
-  () => targetForm.upstream_model,
-  (value) => {
-    const parsedModels = splitUpstreamModels(value);
-    if (parsedModels.length < 2) {
-      return;
-    }
-    selectedUpstreamModels.value = Array.from(
-      new Set([...selectedUpstreamModels.value, ...parsedModels]),
-    );
-    clearUpstreamModelDraft();
-  },
 );
 
 watch(
@@ -2115,10 +2185,15 @@ watch(
                 required
                 show-dropdown
                 multi-select
-                :options="availableModels"
+                show-add-option
+                add-option-hint="点击以添加id"
+                :options="upstreamModelOptions"
                 :selected-options="selectedUpstreamModels"
+                :add-option-value="targetForm.upstream_model.trim()"
+                :add-option-disabled="!canAddCustomUpstreamModels"
                 :loading="modelLoading"
                 placeholder="gpt-5"
+                @add-option="addCustomUpstreamModels"
                 @dropdown="fetchTargetModels"
                 @select="toggleUpstreamModelSelection"
               />

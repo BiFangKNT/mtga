@@ -5,6 +5,22 @@
  * 支持尺寸、颜色状态、加载中、图标、清空及下拉功能
  */
 
+interface MtgaInputOption {
+  value: string;
+  label?: string;
+  tag?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+interface NormalizedMtgaInputOption {
+  value: string;
+  label: string;
+  tag: string;
+  disabled: boolean;
+  disabledReason: string;
+}
+
 interface Props {
   modelValue: string | number;
   label?: string;
@@ -27,7 +43,15 @@ interface Props {
   /** 是否显示下拉按钮 (模拟 Select) */
   showDropdown?: boolean;
   /** 下拉选项 */
-  options?: string[];
+  options?: Array<string | MtgaInputOption>;
+  /** 下拉顶部固定添加区内容 */
+  addOptionValue?: string;
+  /** 下拉顶部固定添加区右侧提示 */
+  addOptionHint?: string;
+  /** 是否显示下拉顶部固定添加区 */
+  showAddOption?: boolean;
+  /** 下拉顶部固定添加区是否禁用 */
+  addOptionDisabled?: boolean;
   /** 下拉选项是否按多选模式处理 */
   multiSelect?: boolean;
   /** 多选模式下的已选中选项 */
@@ -52,6 +76,10 @@ const props = withDefaults(defineProps<Props>(), {
   icon: "",
   trailingIcon: "",
   options: () => [],
+  addOptionValue: "",
+  addOptionHint: "",
+  showAddOption: false,
+  addOptionDisabled: false,
   multiSelect: false,
   selectedOptions: () => [],
   error: "",
@@ -62,6 +90,7 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
   (e: "dropdown"): void;
   (e: "select", value: string): void;
+  (e: "add-option", value: string): void;
   (e: "focus"): void;
   (e: "blur"): void;
 }>();
@@ -135,6 +164,26 @@ const hasActionArea = computed(() => {
   return props.loading || props.showDropdown || slots.trailing || props.trailingIcon;
 });
 
+const normalizedOptions = computed<NormalizedMtgaInputOption[]>(() =>
+  props.options.map((option) => {
+    if (typeof option === "string") {
+      return {
+        value: option,
+        label: option,
+        tag: "",
+        disabled: false,
+        disabledReason: "",
+      };
+    }
+    return {
+      value: option.value,
+      label: option.label || option.value,
+      tag: option.tag || "",
+      disabled: option.disabled === true,
+      disabledReason: option.disabledReason || "",
+    };
+  }),
+);
 const selectedOptionSet = computed(() => new Set(props.selectedOptions));
 const isOptionSelected = (option: string) => {
   if (props.multiSelect) {
@@ -187,16 +236,36 @@ const toggleDropdown = (e: Event) => {
   dropdownOpen.value = !dropdownOpen.value;
 };
 
-const handleSelect = (val: string) => {
+const handleSelect = (option: NormalizedMtgaInputOption) => {
+  if (option.disabled) {
+    return;
+  }
   if (props.multiSelect) {
-    emit("select", val);
+    emit("select", option.value);
     isFiltering.value = false;
     dropdownOpen.value = true;
     return;
   }
-  emit("update:modelValue", val);
-  emit("select", val);
+  emit("update:modelValue", option.value);
+  emit("select", option.value);
   dropdownOpen.value = false;
+};
+
+const handleAddOption = () => {
+  if (props.addOptionDisabled) {
+    return;
+  }
+  emit("add-option", props.addOptionValue);
+  isFiltering.value = false;
+  dropdownOpen.value = true;
+};
+
+const handleAddOptionEnter = (e: KeyboardEvent) => {
+  if (e.isComposing || !props.showAddOption) {
+    return;
+  }
+  e.preventDefault();
+  handleAddOption();
 };
 
 const handleInput = (e: Event) => {
@@ -205,7 +274,7 @@ const handleInput = (e: Event) => {
     emit("update:modelValue", val);
 
     // 如果 Popover 已经打开，且有选项，则在输入时保持打开并允许过滤
-    if (props.showDropdown && props.options.length > 0) {
+    if (props.showDropdown && (normalizedOptions.value.length > 0 || props.showAddOption)) {
       dropdownOpen.value = true;
       isFiltering.value = true; // 标记开始过滤
     }
@@ -214,13 +283,17 @@ const handleInput = (e: Event) => {
 
 // 过滤后的选项
 const filteredOptions = computed(() => {
-  if (!props.options || props.options.length === 0) return [];
+  if (!normalizedOptions.value.length) return [];
   // 如果当前不是过滤模式（即刚打开），显示完整列表
-  if (!isFiltering.value) return props.options;
+  if (!isFiltering.value) return normalizedOptions.value;
 
   const search = String(props.modelValue).toLowerCase().trim();
-  if (!search) return props.options;
-  return props.options.filter((opt) => opt.toLowerCase().includes(search));
+  if (!search) return normalizedOptions.value;
+  return normalizedOptions.value.filter((opt) =>
+    opt.tag || isOptionSelected(opt.value)
+      ? true
+      : `${opt.label} ${opt.value}`.toLowerCase().includes(search),
+  );
 });
 
 const handleClear = (e: MouseEvent) => {
@@ -300,6 +373,7 @@ const handleClear = (e: MouseEvent) => {
           inputClass,
         ]"
         @input="handleInput"
+        @keydown.enter="handleAddOptionEnter"
         @focus="emit('focus')"
         @blur="emit('blur')"
       />
@@ -408,26 +482,61 @@ const handleClear = (e: MouseEvent) => {
           </div>
 
           <div
-            v-if="!filteredOptions || filteredOptions.length === 0"
+            v-if="!showAddOption && (!filteredOptions || filteredOptions.length === 0)"
             class="px-4 py-6 text-center"
           >
             <p class="text-slate-400 text-xs">暂无匹配数据</p>
           </div>
-          <!-- 明确为单列布局 (flex-col) 且占满宽度 (w-full) -->
+
           <ul
             v-else
             class="menu flex-col flex-nowrap p-1 max-h-[240px] overflow-auto custom-scrollbar w-full"
           >
-            <li v-for="opt in filteredOptions" :key="opt">
+            <li v-if="showAddOption" class="sticky top-0 z-1 bg-white pb-1">
               <button
                 type="button"
-                class="flex items-center gap-2 py-2 px-3 rounded-lg hover:bg-primary/5 hover:text-primary transition-all duration-200 text-sm w-full"
-                :class="{ 'bg-primary/10 text-primary font-medium': isOptionSelected(opt) }"
+                class="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_6rem] items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm transition-colors duration-200 hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
+                :disabled="addOptionDisabled"
+                @click="handleAddOption"
+              >
+                <span class="truncate text-left font-mono text-slate-700">
+                  {{ addOptionValue }}
+                </span>
+                <span class="w-24 shrink-0 text-right text-xs text-slate-400">
+                  {{ addOptionHint || "点击以添加id" }}
+                </span>
+              </button>
+            </li>
+
+            <li v-if="filteredOptions.length === 0 && !showAddOption" class="px-4 py-6 text-center">
+              <p class="text-slate-400 text-xs">暂无匹配数据</p>
+            </li>
+
+            <li v-for="opt in filteredOptions" :key="`${opt.value}:${opt.tag || 'api'}`">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200"
+                :class="[
+                  opt.disabled
+                    ? 'cursor-not-allowed text-slate-300'
+                    : 'cursor-pointer hover:bg-primary/5 hover:text-primary',
+                  !opt.disabled && isOptionSelected(opt.value)
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : '',
+                ]"
+                :disabled="opt.disabled"
+                :title="opt.disabledReason || undefined"
                 @click="handleSelect(opt)"
               >
-                <span class="truncate flex-1 text-left">{{ opt }}</span>
+                <span class="truncate flex-1 text-left">{{ opt.label }}</span>
+                <span
+                  v-if="opt.tag"
+                  class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                >
+                  {{ opt.tag }}
+                </span>
                 <svg
-                  v-if="isOptionSelected(opt)"
+                  v-if="!opt.disabled && isOptionSelected(opt.value)"
                   xmlns="http://www.w3.org/2000/svg"
                   class="h-4 w-4"
                   fill="none"
