@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## v2.6.0 - 2026-05-18
+
+### :sparkles: 新功能
+
+- 集成精简版 litellm 以支持多模型 API 调用 ([8be1e45](https://github.com/BiFangKNT/mtga/commit/8be1e452d643d7aa708c2760b7453c9c1bea5085))
+
+- 引入轻量级 LiteLLM 替代实现 ([a0221c7](https://github.com/BiFangKNT/mtga/commit/a0221c741621f28348241b340849b6bdbb817931))
+
+- 引入模型路由功能并重构配置系统 ([1385ae2](https://github.com/BiFangKNT/mtga/commit/1385ae2f1d4cd891599127a3ba76641ef90ded92))
+
+- 新增路由事件追踪与展示 ([1417848](https://github.com/BiFangKNT/mtga/commit/14178486306b42e5984512cdee0743971327244c))
+
+- 实现JSON Patch格式的请求体自定义补丁功能 ([2d363e5](https://github.com/BiFangKNT/mtga/commit/2d363e5e4867fb75346677a401917284141bf3e4))
+
+- 新增可视化JSON Patch编辑器，优化弹窗适配 ([8618522](https://github.com/BiFangKNT/mtga/commit/8618522ecc3cfa72fb512c5216cda898b4a51b74))
+
+- 添加关闭窗口最小化到托盘的功能 ([89cac2e](https://github.com/BiFangKNT/mtga/commit/89cac2e21a1a7d3445c237c3c335192e9b97953d))
+
+- 新增按钮宽度自定义属性并优化按钮样式与加载状态 ([17a33d9](https://github.com/BiFangKNT/mtga/commit/17a33d9b6c93cc429e5f4aedbe0dc16a173a4a93))
+
+- 支持多上游模型并更新配置体系 ([7cdadca](https://github.com/BiFangKNT/mtga/commit/7cdadcae58bf8d3dc5da0bb1ea85053ccce6037b))
+
+- 新增自定义上游模型管理与选择输入组件优化 ([ad9d4c6](https://github.com/BiFangKNT/mtga/commit/ad9d4c646105729cbb81f77a72a33fc3b8e81d08))
+
+### :bug: 修复
+
+- 移除代理层补丁并将空promptFeedback清理逻辑移至上游 ([7179c8f](https://github.com/BiFangKNT/mtga/commit/7179c8f47f4565157c3cde7d20c59204e0ddfb19))
+
+- 添加 NSIS 安装程序钩子以清理旧运行时文件 ([767d80f](https://github.com/BiFangKNT/mtga/commit/767d80f591fac9418a21c8573ea798b77784142f))
+
+- 修复空targets配置时模型路由配置迁移问题 ([22505a2](https://github.com/BiFangKNT/mtga/commit/22505a2857910d2e846325b8abdb476f2f9d246d))
+
+- 添加故障池删除校验并更新提示文案 ([aa738d0](https://github.com/BiFangKNT/mtga/commit/aa738d0be4eeee67f5f81e01c40a54d67382ae6f))
+
+- 为Target ID输入框添加只读属性与适配样式 ([8d52389](https://github.com/BiFangKNT/mtga/commit/8d5238920a6d8bc446a5ad688ef20207b4ec47b2))
+
+- 解决模型路由热切换失效的问题 ([927d0f4](https://github.com/BiFangKNT/mtga/commit/927d0f4c3fc46fe54cf6a6ad598af7fb163055b5))
+
+- 调整运行时判断并优化proxy通道逻辑 ([653fcd5](https://github.com/BiFangKNT/mtga/commit/653fcd5ffdabb352eddbc03c18a737a3b646c39f))
+
+### :art: 界面样式
+
+- 替换为标准Tailwind换行工具类，统一文本排版 ([7273be2](https://github.com/BiFangKNT/mtga/commit/7273be2f517207559150423b94bd8a8d15500e10))
+
+- 整理列表按钮的样式类统一写法 ([f521089](https://github.com/BiFangKNT/mtga/commit/f521089c71197255ccd27e52c3dcae740fa51f98))
+
+- 优化模型展示的UI布局与可读性 ([352fe2e](https://github.com/BiFangKNT/mtga/commit/352fe2ed077514bf7a554230c01c0a0adcf7cb10))
+
 ## v2.5.0 - 2026-04-28
 
 ### :sparkles: 新功能
