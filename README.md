@@ -12,6 +12,13 @@
 </p>
 <br>
 
+<p align="center">
+  <a href="https://github.com/BiFangKNT/mtga/releases/latest"><img src="https://img.shields.io/github/v/release/BiFangKNT/mtga" alt="Latest release"></a>
+  <a href="https://github.com/BiFangKNT/mtga/releases"><img src="https://img.shields.io/github/downloads/BiFangKNT/mtga/total" alt="GitHub downloads"></a>
+  <a href="https://github.com/BiFangKNT/mtga/stargazers"><img src="https://img.shields.io/github/stars/BiFangKNT/mtga" alt="GitHub stars"></a>
+  <a href="https://github.com/BiFangKNT/mtga/blob/main/LICENSE"><img src="https://img.shields.io/github/license/BiFangKNT/mtga" alt="License"></a>
+</p>
+
 ## 简介
 
 MTGA 是一个基于本地代理的 IDE 固定模型服务商解决方案，适用于 Windows 和 macOS。
