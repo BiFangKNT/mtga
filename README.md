@@ -228,10 +228,10 @@ MTGA 是一个基于本地代理的 IDE 固定模型服务商解决方案，适�
 
 ## Star History
 
-<a href="https://www.star-history.com/#BiFangKNT/mtga&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#BiFangKNT/mtga&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=BiFangKNT/mtga&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=BiFangKNT/mtga&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=BiFangKNT/mtga&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=BiFangKNT/mtga&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=BiFangKNT/mtga&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=BiFangKNT/mtga&type=date&legend=top-left" />
  </picture>
 </a>
